@@ -1,8 +1,10 @@
+import { ErebusBrandMark } from "./ErebusBrandMark";
+
 export function SplashScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="flex size-24 items-center justify-center" aria-label="Erebus splash screen">
-        <img alt="Erebus" className="size-16 object-contain" src="/apple-touch-icon.png" />
+        <ErebusBrandMark alt="Erebus" className="size-16" />
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_RESEARCH_EVALUATOR_MODEL,
   DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT,
@@ -14,10 +15,11 @@ import {
   type ResearchEvaluatorReasoningEffort,
 } from "@t3tools/contracts/settings";
 import { EyeIcon, ScaleIcon } from "lucide-react";
+import { useMemo } from "react";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
+import { primaryServerProvidersAtom } from "~/state/server";
 
-import { DraftInput } from "../ui/draft-input";
 import {
   NumberField,
   NumberFieldDecrement,
@@ -81,9 +83,27 @@ function IntegerControl({
 
 export function ResearchSettings() {
   const research = usePrimarySettings((settings) => settings.researchSupervision);
+  const providers = useAtomValue(primaryServerProvidersAtom);
   const updateSettings = useUpdatePrimarySettings();
   const updateResearch = (patch: Partial<typeof research>) =>
     updateSettings({ researchSupervision: patch });
+  const evaluatorModels = useMemo(() => {
+    const models = new Map<string, string>();
+    for (const provider of providers) {
+      if (provider.driver !== "codex") continue;
+      for (const model of provider.models) models.set(model.slug, model.name);
+    }
+    if (!models.has(DEFAULT_RESEARCH_EVALUATOR_MODEL)) {
+      models.set(DEFAULT_RESEARCH_EVALUATOR_MODEL, DEFAULT_RESEARCH_EVALUATOR_MODEL);
+    }
+    if (!models.has(research.evaluatorModel)) {
+      models.set(research.evaluatorModel, research.evaluatorModel);
+    }
+    return [...models].map(([value, label]) => ({ value, label }));
+  }, [providers, research.evaluatorModel]);
+  const evaluatorModelLabel =
+    evaluatorModels.find((model) => model.value === research.evaluatorModel)?.label ??
+    research.evaluatorModel;
 
   return (
     <SettingsPageContainer>
@@ -178,7 +198,7 @@ export function ResearchSettings() {
         />
         <SettingsRow
           {...searchableSetting("research-observer-turn-limit")}
-          description="Cap live Observer corrections within one principal turn."
+          description="Maximum live course corrections the Observer may send during one active principal response. A new user turn resets the limit."
           resetAction={
             research.observerMaxInterventionsPerTurn !==
             DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN ? (
@@ -195,7 +215,7 @@ export function ResearchSettings() {
           }
           control={
             <IntegerControl
-              label="Observer corrections per turn"
+              label="Maximum corrections per active run"
               value={research.observerMaxInterventionsPerTurn}
               min={MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN}
               max={MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN}
@@ -220,15 +240,30 @@ export function ResearchSettings() {
             ) : null
           }
           control={
-            <DraftInput
+            <Select
               value={research.evaluatorModel}
-              aria-label="Research evaluator model"
-              className="w-full sm:w-64"
-              onCommit={(value) => {
-                const evaluatorModel = value.trim();
-                if (evaluatorModel.length > 0) updateResearch({ evaluatorModel });
+              onValueChange={(evaluatorModel) => {
+                if (evaluatorModel) updateResearch({ evaluatorModel });
               }}
-            />
+            >
+              <SelectTrigger className="w-full sm:w-64" aria-label="Observer and Judge model">
+                <SelectValue>{evaluatorModelLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {evaluatorModels.map((model) => (
+                  <SelectItem hideIndicator key={model.value} value={model.value}>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">{model.label}</span>
+                      {model.label !== model.value ? (
+                        <code className="truncate text-[10px] text-muted-foreground">
+                          {model.value}
+                        </code>
+                      ) : null}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
         <SettingsRow

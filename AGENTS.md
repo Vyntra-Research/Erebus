@@ -2,7 +2,7 @@
 
 Erebus is a local, Codex-first research harness based on T3 Code. A Node WebSocket server wraps provider CLIs and serves the web and desktop clients. Its research control plane adds Proteus-backed campaigns, an Observer, and an independent finding Judge.
 
-Erebus `0.1.1` targets Windows desktop and local Codex use. The inherited mobile, relay, hosted-app, and other provider surfaces remain in the tree but are not enabled until Erebus tests and publishes them.
+Erebus `0.1.2` targets Windows desktop and local Codex use. The inherited mobile, relay, hosted-app, and other provider surfaces remain in the tree but are not enabled until Erebus tests and publishes them.
 
 ## Product rules
 

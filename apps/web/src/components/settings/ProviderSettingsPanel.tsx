@@ -26,6 +26,8 @@ import * as Result from "effect/Result";
 import {
   ChevronDownIcon,
   CloudIcon,
+  CopyIcon,
+  ExternalLinkIcon,
   LaptopIcon,
   LoaderIcon,
   MonitorIcon,
@@ -37,6 +39,7 @@ import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
 import { isElectron } from "../../env";
+import { readLocalApi } from "../../localApi";
 import { usePrimarySessionState } from "../../environments/primary";
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
@@ -64,6 +67,14 @@ import {
 } from "../ProviderUpdateLaunchNotification.logic";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import {
   NumberField,
   NumberFieldDecrement,
@@ -147,6 +158,114 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
         <>Checked {lastCheckedRelative.value}</>
       )}
     </span>
+  );
+}
+
+type CodexLoginUiState =
+  | { readonly instanceId: ProviderInstanceId; readonly status: "starting" }
+  | {
+      readonly instanceId: ProviderInstanceId;
+      readonly status: "waiting";
+      readonly userCode: string;
+      readonly verificationUrl: string;
+    }
+  | {
+      readonly instanceId: ProviderInstanceId;
+      readonly status: "failed";
+      readonly message: string;
+    };
+
+function CodexLoginDialog({
+  open,
+  state,
+  onOpenChange,
+  onRetry,
+}: {
+  readonly open: boolean;
+  readonly state: CodexLoginUiState | null;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly onRetry: () => void;
+}) {
+  if (!state) return null;
+
+  const copyCode = async () => {
+    if (state.status !== "waiting") return;
+    await navigator.clipboard.writeText(state.userCode);
+    toastManager.add({ type: "success", title: "Device code copied" });
+  };
+  const openVerification = () => {
+    if (state.status !== "waiting") return;
+    void readLocalApi()?.shell.openExternal(state.verificationUrl);
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen || state.status === "failed") onOpenChange(nextOpen);
+      }}
+    >
+      <DialogPopup
+        className="w-[min(28rem,calc(100vw-2rem))]"
+        showCloseButton={state.status === "failed"}
+      >
+        <DialogHeader>
+          <DialogTitle>Sign in to Codex</DialogTitle>
+          <DialogDescription>
+            Erebus uses Codex device authorization and stores the session only in this provider's
+            isolated profile.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 px-6 pb-6">
+          {state.status === "starting" ? (
+            <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
+              <LoaderIcon className="size-4 animate-spin" />
+              Requesting a device code from Codex…
+            </div>
+          ) : null}
+          {state.status === "waiting" ? (
+            <>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-center">
+                <p className="text-xs text-muted-foreground">Enter this one-time code</p>
+                <code className="mt-2 block select-all text-2xl font-semibold tracking-[0.18em] text-foreground">
+                  {state.userCode}
+                </code>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="outline" onClick={() => void copyCode()}>
+                  <CopyIcon />
+                  Copy code
+                </Button>
+                <Button type="button" onClick={openVerification}>
+                  <ExternalLinkIcon />
+                  Open ChatGPT
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Finish authorization in the browser. This window updates automatically.
+              </p>
+            </>
+          ) : null}
+          {state.status === "failed" ? (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+              {state.message}
+            </div>
+          ) : null}
+        </div>
+
+        {state.status === "failed" ? (
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+            <Button type="button" onClick={onRetry}>
+              Try again
+            </Button>
+          </DialogFooter>
+        ) : null}
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -422,9 +541,17 @@ export function EnvironmentProviderSettings({
   const updateProvider = useAtomCommand(serverEnvironment.updateProvider, {
     reportFailure: false,
   });
+  const loginCodex = useAtomCommand(serverEnvironment.loginCodex, {
+    reportFailure: false,
+  });
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | null>(null);
+  const [codexLoginState, setCodexLoginState] = useState<CodexLoginUiState | null>(null);
+  const [codexLoginDialogOpen, setCodexLoginDialogOpen] = useState(false);
+  const [loggingInInstanceIds, setLoggingInInstanceIds] = useState<ReadonlySet<ProviderInstanceId>>(
+    () => new Set(),
+  );
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const advancedVisible = readOnly || advancedOpen;
   const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
@@ -432,6 +559,8 @@ export function EnvironmentProviderSettings({
   >(() => new Set());
   const refreshingRef = useRef(false);
   const updatingDriversRef = useRef<Set<ProviderDriverKind>>(new Set());
+  const loggingInInstancesRef = useRef<Set<ProviderInstanceId>>(new Set());
+  const openedCodexLoginIdsRef = useRef<Set<string>>(new Set());
 
   const providerUpdateCandidates = useMemo(
     () => collectProviderUpdateCandidates(serverProviders),
@@ -487,6 +616,66 @@ export function EnvironmentProviderSettings({
       }
     })();
   }, [environmentId, refreshServerProviders]);
+
+  const startCodexLogin = useCallback(
+    async (instanceId: ProviderInstanceId) => {
+      if (loggingInInstancesRef.current.has(instanceId)) {
+        setCodexLoginDialogOpen(true);
+        return;
+      }
+
+      loggingInInstancesRef.current.add(instanceId);
+      setLoggingInInstanceIds((previous) => new Set(previous).add(instanceId));
+      setCodexLoginState({ instanceId, status: "starting" });
+      setCodexLoginDialogOpen(true);
+
+      const result = await loginCodex({
+        environmentId,
+        input: { instanceId },
+        onProgress: (event) => {
+          if (event.type !== "deviceCode") return;
+          setCodexLoginState({
+            instanceId,
+            status: "waiting",
+            userCode: event.userCode,
+            verificationUrl: event.verificationUrl,
+          });
+          setCodexLoginDialogOpen(true);
+          if (!openedCodexLoginIdsRef.current.has(event.loginId)) {
+            openedCodexLoginIdsRef.current.add(event.loginId);
+            void readLocalApi()
+              ?.shell.openExternal(event.verificationUrl)
+              .catch((error) => console.warn("Could not open Codex login URL", error));
+          }
+        },
+      });
+
+      loggingInInstancesRef.current.delete(instanceId);
+      setLoggingInInstanceIds((previous) => {
+        const next = new Set(previous);
+        next.delete(instanceId);
+        return next;
+      });
+
+      if (result._tag === "Failure") {
+        if (isAtomCommandInterrupted(result)) return;
+        const error = squashAtomCommandFailure(result);
+        setCodexLoginState({
+          instanceId,
+          status: "failed",
+          message: error instanceof Error ? error.message : "Codex sign-in failed.",
+        });
+        setCodexLoginDialogOpen(true);
+        return;
+      }
+
+      setCodexLoginState(null);
+      setCodexLoginDialogOpen(false);
+      toastManager.add({ type: "success", title: "Signed in to Codex" });
+      await refreshServerProviders({ environmentId, input: { instanceId } });
+    },
+    [environmentId, loginCodex, refreshServerProviders],
+  );
 
   const runProviderUpdate = useCallback(
     async (candidate: ProviderUpdateCandidate) => {
@@ -787,6 +976,12 @@ export function EnvironmentProviderSettings({
             : undefined
         }
         isUpdating={mode === "editor" && showInlineUpdateButton ? isDriverUpdateRunning : undefined}
+        onLogin={
+          mode === "editor" && row.driver === "codex"
+            ? () => void startCodexLogin(row.instanceId)
+            : undefined
+        }
+        isLoggingIn={loggingInInstanceIds.has(row.instanceId)}
       />
     );
   };
@@ -951,6 +1146,15 @@ export function EnvironmentProviderSettings({
           onOpenChange={setIsAddInstanceDialogOpen}
         />
       ) : null}
+      <CodexLoginDialog
+        open={codexLoginDialogOpen}
+        state={codexLoginState}
+        onOpenChange={setCodexLoginDialogOpen}
+        onRetry={() => {
+          const instanceId = codexLoginState?.instanceId;
+          if (instanceId) void startCodexLogin(instanceId);
+        }}
+      />
     </>
   );
 }

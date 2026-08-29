@@ -6,11 +6,12 @@ The principal agent performs the research. Erebus keeps one active campaign per 
 
 ## Current release
 
-Erebus 0.1.1 currently ships as a Windows desktop app with Codex support. Other host and provider bindings are not enabled in this release.
+Erebus 0.1.2 currently ships as a Windows desktop app with Codex support. Other host and provider bindings are not enabled in this release.
 
 It includes:
 
 - an isolated Codex home, separate from the Codex desktop app
+- Codex device login in the provider settings
 - a managed Proteus CLI, MCP server, plugin, and skills
 - persistent contracts, checkpoints, Observer evaluations, finding submissions, and Judge verdicts
 - settings for Observer cadence, confidence, cooldown, per-turn limits, evaluator model, and reasoning effort

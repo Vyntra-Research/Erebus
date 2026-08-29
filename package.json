@@ -14,6 +14,7 @@
     "start:desktop": "vp run --filter @t3tools/desktop start",
     "start:mock-update-server": "node scripts/mock-update-server.ts",
     "screenshots:mobile": "node scripts/mobile-showcase.ts",
+    "brand:icons": "node scripts/export-erebus-icons.ts",
     "build": "vp run --filter './apps/*' --filter './packages/*' --filter './oxlint-plugin-t3code' --filter './scripts' build",
     "build:desktop": "vp run --filter @t3tools/desktop --filter erebus build",
     "build:resource-monitor": "cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml",

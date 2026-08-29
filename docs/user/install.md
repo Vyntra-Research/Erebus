@@ -1,6 +1,6 @@
 # Install Erebus
 
-Erebus `0.1.1` targets Windows 10 and newer. It runs locally and uses your Codex subscription. This is the current release scope, not a limit on future platforms or providers.
+Erebus `0.1.2` targets Windows 10 and newer. It runs locally and uses your Codex subscription. This is the current release scope, not a limit on future platforms or providers.
 
 ## Desktop release
 
@@ -16,15 +16,17 @@ Erebus keeps its Codex profile under its own application data. It does not reuse
 
 ## First login
 
-Open **Settings -> Providers -> Codex** after Erebus starts. If Codex is not authenticated, the provider status shows a command with the exact Erebus profile path. Run that command in PowerShell.
+Open **Settings -> Providers -> Codex** after Erebus starts, then select **Sign in to Codex**. Erebus opens the ChatGPT device page, shows the one-time code, and refreshes the provider when authorization finishes. It writes the session to the isolated Erebus profile; no `auth.json` copy is required.
 
-The default packaged path uses this form:
+If Codex says device authorization is disabled, enable device code authorization in the ChatGPT **Security** settings and try again.
+
+The provider status also shows a PowerShell fallback with the exact profile path. The default packaged path uses this form:
 
 ```powershell
 $env:CODEX_HOME="$env:USERPROFILE\.erebus\userdata\providers\codex"; codex login --device-auth
 ```
 
-If Codex says device authorization is disabled, enable device code authorization in the ChatGPT **Security** settings, then run the command again. Refresh the Codex provider status after login.
+Run it only if the in-app flow cannot start, then refresh the Codex provider status.
 
 ## Proteus
 

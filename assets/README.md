@@ -1,6 +1,6 @@
 # Erebus icon assets
 
-`erebus-icon.png` is the canonical high-resolution artwork. Generated desktop and web files live in the `dev`, `nightly`, and `prod` folders.
+`erebus-icon.png` is the canonical high-resolution artwork. `erebus-glyph-source.png` is the transparent monolith used for small desktop and interface marks. Generated desktop and web files live in the `dev`, `nightly`, and `prod` folders.
 
 The source contains soft gradients, facet shading, and a cast shadow. Keep the raster source for exact visual fidelity. Do not replace it with an approximate vector trace.
 
@@ -11,4 +11,4 @@ The release build uses:
 - `prod/erebus-universal-1024.png` for Linux packaging
 - `prod/erebus-web-*` for web and splash assets
 
-Web copies in `apps/web/public` must match the production assets before release.
+Run `pnpm brand:icons` after changing the transparent glyph. The exporter removes detached pixels, creates the dark and ice-white interface marks, adds a thin contrast contour to the desktop mark, and writes the multi-size Windows and web icons.

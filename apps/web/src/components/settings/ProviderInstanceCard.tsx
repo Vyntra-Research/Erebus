@@ -5,6 +5,7 @@ import {
   CopyIcon,
   DownloadIcon,
   LoaderIcon,
+  LogInIcon,
   PlusIcon,
   Trash2Icon,
   XIcon,
@@ -368,6 +369,8 @@ interface ProviderInstanceCardProps {
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
   readonly onRunUpdate?: (() => void) | undefined;
   readonly isUpdating?: boolean | undefined;
+  readonly onLogin?: (() => void) | undefined;
+  readonly isLoggingIn?: boolean | undefined;
 }
 
 /**
@@ -409,6 +412,8 @@ export function ProviderInstanceCard({
   onModelOrderChange,
   onRunUpdate,
   isUpdating = false,
+  onLogin,
+  isLoggingIn = false,
 }: ProviderInstanceCardProps) {
   const [activeTab, setActiveTab] = useState<"models" | "configuration">("configuration");
   const enabled = resolveProviderInstanceEnabled(instance);
@@ -421,6 +426,8 @@ export function ProviderInstanceCard({
   const rawSummary = getProviderSummary(liveProvider);
   const summary = enabled ? rawSummary : { headline: "Disabled", detail: null };
   const showEditorStatus = enabled && (statusKey === "warning" || statusKey === "error");
+  const showCodexLogin =
+    enabled && instance.driver === "codex" && liveProvider?.auth.status === "unauthenticated";
   const versionLabel = getProviderVersionLabel(liveProvider?.version);
   const versionAdvisory = getProviderVersionAdvisoryPresentation(liveProvider?.versionAdvisory);
   const updateCommand = versionAdvisory?.updateCommand ?? null;
@@ -747,10 +754,24 @@ export function ProviderInstanceCard({
             {titleTailNode}
           </div>
           {showEditorStatus ? (
-            <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-              <span>{summary.headline}</span>
-              {summary.detail ? <span>· {summary.detail}</span> : null}
-            </p>
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <p className="min-w-0 flex-1">
+                <span>{summary.headline}</span>
+                {summary.detail ? <span> · {summary.detail}</span> : null}
+              </p>
+              {showCodexLogin && onLogin ? (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={isLoggingIn}
+                  onClick={onLogin}
+                >
+                  {isLoggingIn ? <LoaderIcon className="animate-spin" /> : <LogInIcon />}
+                  {isLoggingIn ? "Signing in" : "Sign in to Codex"}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>

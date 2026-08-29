@@ -21,6 +21,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ErebusBrandMark } from "../ErebusBrandMark";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
@@ -49,7 +50,7 @@ function SidebarBrand() {
       className="relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2 md:flex"
       to="/"
     >
-      <img aria-hidden alt="" className="size-5 rounded-[5px]" src="/apple-touch-icon.png" />
+      <ErebusBrandMark className="size-5" />
       <span className="truncate text-sm font-semibold tracking-tight">{APP_BASE_NAME}</span>
     </Link>
   );

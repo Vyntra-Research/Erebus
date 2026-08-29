@@ -462,10 +462,22 @@
         height: 96px;
       }
 
-      #boot-shell-logo {
+      .boot-shell-logo {
         width: 64px;
         height: 64px;
         object-fit: contain;
+      }
+
+      .boot-shell-logo-light {
+        display: none;
+      }
+
+      html.dark .boot-shell-logo-dark {
+        display: none;
+      }
+
+      html.dark .boot-shell-logo-light {
+        display: block;
       }
     </style>
     <title>Erebus</title>
@@ -474,7 +486,17 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="Erebus splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Erebus" />
+          <img
+            class="boot-shell-logo boot-shell-logo-dark"
+            src="/erebus-glyph-dark.png"
+            alt="Erebus"
+          />
+          <img
+            class="boot-shell-logo boot-shell-logo-light"
+            src="/erebus-glyph-light.png"
+            alt=""
+            aria-hidden="true"
+          />
         </div>
       </div>
     </div>

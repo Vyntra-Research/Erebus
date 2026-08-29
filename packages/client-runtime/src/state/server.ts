@@ -1,4 +1,5 @@
 import {
+  type CodexDeviceLoginEvent,
   type EnvironmentId,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -27,6 +28,7 @@ import {
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
   createRuntimeCommand,
+  createRuntimeStreamCommand,
   scheduleAtomCommandEffect,
 } from "./runtime.ts";
 import { EnvironmentRegistry } from "../connection/registry.ts";
@@ -63,6 +65,12 @@ export type ServerUpdateState =
 export interface ServerUpdateTarget {
   readonly environmentId: EnvironmentId;
   readonly input: EnvironmentRpcInput<typeof WS_METHODS.serverUpdateServer>;
+}
+
+export interface CodexDeviceLoginTarget {
+  readonly environmentId: EnvironmentId;
+  readonly input: EnvironmentRpcInput<typeof WS_METHODS.serverLoginCodex>;
+  readonly onProgress?: (event: CodexDeviceLoginEvent) => void;
 }
 
 const IDLE_SERVER_UPDATE_STATE: ServerUpdateState = { status: "idle" };
@@ -693,6 +701,29 @@ export function createServerEnvironmentAtoms<R, E>(
       Atom.withLabel(`environment-data:server:providers:${environmentId}`),
     ),
   );
+  const loginCodex = createRuntimeStreamCommand(runtime, {
+    label: "environment-data:server:login-codex",
+    concurrency: {
+      mode: "singleFlight",
+      key: (target: CodexDeviceLoginTarget) => `${target.environmentId}:${target.input.instanceId}`,
+    },
+    execute: (target: CodexDeviceLoginTarget) =>
+      Stream.unwrap(
+        EnvironmentRegistry.pipe(
+          Effect.map((registry) =>
+            registry
+              .runStream(target.environmentId, runStream(WS_METHODS.serverLoginCodex, target.input))
+              .pipe(
+                Stream.tap((event) =>
+                  Effect.sync(() => {
+                    target.onProgress?.(event);
+                  }),
+                ),
+              ),
+          ),
+        ),
+      ),
+  });
 
   return {
     configValueAtom,
@@ -745,6 +776,7 @@ export function createServerEnvironmentAtoms<R, E>(
         key: ({ environmentId }) => environmentId,
       },
     }),
+    loginCodex,
     updateProvider: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-provider",
       tag: WS_METHODS.serverUpdateProvider,

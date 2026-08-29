@@ -273,6 +273,7 @@ export const WS_METHODS = {
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverLoginCodex: "server.loginCodex",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
@@ -369,6 +370,39 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
   }),
   success: ServerProviderUpdatedPayload,
   error: EnvironmentAuthorizationError,
+});
+
+export class CodexDeviceLoginError extends Schema.TaggedErrorClass<CodexDeviceLoginError>()(
+  "CodexDeviceLoginError",
+  {
+    instanceId: ProviderInstanceId,
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+export const CodexDeviceLoginEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("deviceCode"),
+    loginId: Schema.String,
+    userCode: Schema.String,
+    verificationUrl: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("complete"),
+    success: Schema.Literal(true),
+  }),
+]);
+export type CodexDeviceLoginEvent = typeof CodexDeviceLoginEvent.Type;
+
+export const WsServerLoginCodexRpc = Rpc.make(WS_METHODS.serverLoginCodex, {
+  payload: Schema.Struct({ instanceId: ProviderInstanceId }),
+  success: CodexDeviceLoginEvent,
+  error: Schema.Union([CodexDeviceLoginError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 
 export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
@@ -1021,6 +1055,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerLoginCodexRpc,
   WsServerUpdateProviderRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
