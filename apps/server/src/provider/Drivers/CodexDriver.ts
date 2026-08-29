@@ -59,6 +59,7 @@ import {
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
 } from "./CodexHomeLayout.ts";
+import { reconcileCodexRolloutPaths } from "./CodexRolloutPathRepair.ts";
 import { installManagedProteusForCodex } from "../../proteusRuntime.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
@@ -140,6 +141,17 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       });
       if (enabled) {
         yield* materializeCodexShadowHome(homeLayout).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
+        yield* reconcileCodexRolloutPaths(homeLayout.sharedHomePath).pipe(
           Effect.mapError(
             (cause) =>
               new ProviderDriverError({

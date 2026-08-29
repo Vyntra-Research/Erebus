@@ -6,7 +6,7 @@ The principal agent performs the research. Erebus keeps one active campaign per 
 
 ## Current release
 
-Erebus 0.1.3 currently ships as a Windows desktop app with Codex support. Other host and provider bindings are not enabled in this release.
+Erebus 0.1.4 currently ships as a Windows desktop app with Codex support. Other host and provider bindings are not enabled in this release.
 
 It includes:
 

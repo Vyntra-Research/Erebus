@@ -2,7 +2,7 @@
 
 > For maintainers. Using Erebus? See [docs/user](../user/).
 
-A provider is the agent runtime that does the actual work. Erebus `0.1.3` enables Codex only. The
+A provider is the agent runtime that does the actual work. Erebus `0.1.4` enables Codex only. The
 orchestration layer keeps the provider boundary so other runtimes can be added later without
 changing thread contracts.
 
@@ -18,7 +18,7 @@ The T3 Code base includes five driver bindings:
 | `grok`        | [`Drivers/GrokDriver.ts`][grok]         |
 | `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode] |
 
-Only `codex` enters the active registry in `0.1.3`. Erebus does not show, probe, refresh, or update
+Only `codex` enters the active registry in `0.1.4`. Erebus does not show, probe, refresh, or update
 the other bindings. They remain source-level compatibility code while their Erebus contracts and
 release support are unfinished.
 

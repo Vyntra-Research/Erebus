@@ -58,7 +58,7 @@ jobs:
           grep -n "__clerk_internal_electron_passkeys" apps/desktop/dist-electron/preload.cjs
 
   # Everything in the current desktop build except `erebus` (apps/server).
-  # Mobile remains in the inherited source tree but is not part of Erebus 0.1.3.
+  # Mobile remains in the inherited source tree but is not part of Erebus 0.1.4.
   # `--parallel` drops the package
   # dependency ordering that `vp run` applies by default: these `test` tasks
   # declare no `dependsOn` and resolve workspace deps from source, so ordering
