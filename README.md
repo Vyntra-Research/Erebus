@@ -1,4 +1,4 @@
-<h1 align="left"><img src="./assets/erebus-social.svg" alt="" width="64" height="64" align="middle"> Erebus</h1>
+<h1 align="left"><img src="./assets/erebus-readme-header.svg" alt="Erebus" width="248"></h1>
 
 Erebus is a research harness for long-running security work. It adds durable campaign contracts, Proteus memory, passive drift checks, and independent finding review to an agent workspace based on [T3 Code](https://github.com/pingdotgg/t3code).
 
