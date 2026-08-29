@@ -26,6 +26,9 @@
  * enforced by a test, not by inspection.
  */
 export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
+  // Erebus resolves the package's CLI, MCP runtime, plugin, and skills by
+  // filesystem path and copies the plugin into each isolated Codex home.
+  "@vyntra-research/proteus",
   "node-pty",
   "ffi-rs",
   "@yuuang/",

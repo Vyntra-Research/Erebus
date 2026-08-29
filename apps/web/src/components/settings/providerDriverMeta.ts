@@ -1,13 +1,6 @@
-import {
-  ClaudeSettings,
-  CodexSettings,
-  CursorSettings,
-  GrokSettings,
-  OpenCodeSettings,
-  ProviderDriverKind,
-} from "@t3tools/contracts";
+import { CodexSettings, ProviderDriverKind } from "@t3tools/contracts";
 import type * as Schema from "effect/Schema";
-import { ClaudeAI, CursorIcon, GrokIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { type Icon, OpenAI } from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -40,32 +33,6 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Codex",
     icon: OpenAI,
     settingsSchema: CodexSettings,
-  },
-  {
-    value: ProviderDriverKind.make("claudeAgent"),
-    label: "Claude",
-    icon: ClaudeAI,
-    settingsSchema: ClaudeSettings,
-  },
-  {
-    value: ProviderDriverKind.make("cursor"),
-    label: "Cursor",
-    icon: CursorIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: CursorSettings,
-  },
-  {
-    value: ProviderDriverKind.make("grok"),
-    label: "Grok",
-    icon: GrokIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: GrokSettings,
-  },
-  {
-    value: ProviderDriverKind.make("opencode"),
-    label: "OpenCode",
-    icon: OpenCodeIcon,
-    settingsSchema: OpenCodeSettings,
   },
 ];
 

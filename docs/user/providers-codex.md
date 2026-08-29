@@ -1,153 +1,35 @@
-# Codex
+# Codex profiles
 
-This guide is for people who want to use more than one Codex account in T3 Code. For Claude, see
-[Claude](./providers-claude.md). For first-time setup, see [Install T3 Code](./install.md).
+Erebus uses an isolated Codex profile by default. This prevents its app-server, sessions, configuration, plugins, and background work from contending with the Codex desktop app.
 
-Common reasons:
+## Default profile
 
-- use a work account for work projects
-- use a personal account for personal projects
-- switch to another account when one account hits limits
-- keep one shared Codex history instead of maintaining two separate Codex setups
-
-## I Only Use One Codex Account
-
-Use the default provider.
-
-In Settings, your Codex provider can stay like this:
+Leave **CODEX_HOME path** empty in the Codex provider settings. Erebus resolves it to its managed provider directory, normally:
 
 ```text
-Display name: Codex
-CODEX_HOME path: ~/.codex
-Shadow home path: empty
+%USERPROFILE%\.erebus\userdata\providers\codex
 ```
 
-Log in with Codex normally:
+The development build uses its worktree-local `.t3` state instead. The provider status always shows the effective login command when authentication is missing.
 
-```bash
-codex login
+On Windows, the default packaged command is:
+
+```powershell
+$env:CODEX_HOME="$env:USERPROFILE\.erebus\userdata\providers\codex"; codex login --device-auth
 ```
 
-## Send feedback to OpenAI
+After login, return to **Settings -> Providers -> Codex** and refresh the provider status.
 
-In an existing Codex thread, send `/feedback` or `/feedback` followed by a description of the
-issue. T3 Code uploads the thread and Codex logs to OpenAI and shows a thread ID that you can copy
-and share with OpenAI employees.
+## Proteus integration
 
-## Approve access to other apps
+Erebus manages Proteus inside this isolated profile. It pins the package version, copies the plugin and skills, writes only its owned Codex configuration sections, and calls the pinned CLI directly. A global Proteus install is not required.
 
-When a Codex tool needs access to an app such as Safari, T3 Code shows the app name and asks for
-approval. You can approve, decline, or cancel the request from the desktop app, web app, or mobile
-app. Some tools also offer approval for the current session or permanent approval.
+## More than one account
 
-## I Want Work And Personal Codex Accounts
+Add another Codex provider only when you need a separate account. Give it a clear display name and a separate **Shadow home path**, authenticate that directory, then refresh its status. Providers can continue the same task only when they share the same main `CODEX_HOME`.
 
-Use one real Codex home and one shadow home.
+Avoid pointing Erebus at the Codex desktop app's main home. Sharing it can mix client versions and saturate or corrupt active app-server work. If you set a custom home, use a directory dedicated to Erebus.
 
-Recommended setup:
+## Feedback to OpenAI
 
-```text
-~/.codex      shared Codex home
-~/.codex_p    second account auth
-```
-
-The idea is:
-
-- both accounts can see the same T3/Codex sessions
-- each account keeps its own login
-- existing threads can continue with either account
-
-### Set Up The First Account
-
-Log in normally:
-
-```bash
-codex login
-```
-
-This is the account used by `~/.codex`.
-
-In T3 Code Settings, name it something obvious:
-
-```text
-Display name: Codex Work
-CODEX_HOME path: ~/.codex
-Shadow home path: empty
-```
-
-### Set Up The Second Account
-
-Log in with a separate Codex home:
-
-```bash
-mkdir -p ~/.codex_p
-CODEX_HOME=~/.codex_p codex login
-```
-
-In T3 Code Settings, add another Codex provider:
-
-```text
-Display name: Codex Personal
-CODEX_HOME path: ~/.codex
-Shadow home path: ~/.codex_p
-```
-
-The important part is that both providers use the same `CODEX_HOME path`, but only the second one
-has a `Shadow home path`.
-
-## Which Account Am I Using?
-
-Open Settings and look at the provider row.
-
-T3 Code shows the authenticated email for providers that report one. Emails are blurred by default;
-click the blurred email to reveal it.
-
-Use display names and accent colors to make accounts easy to tell apart in the model picker.
-
-## I Need A Different API Key Or Endpoint
-
-Use the provider's Environment variables section in Settings.
-
-This is useful when a Codex-compatible setup needs account-specific variables. Add the variables to
-the provider instance that should receive them, and mark API keys or tokens as sensitive. Sensitive
-values are stored as server secrets and are not sent back to the app after saving.
-
-## Can I Switch Accounts In An Existing Thread?
-
-Yes, when both Codex providers share the same `CODEX_HOME path`.
-
-For example:
-
-```text
-Codex Work      CODEX_HOME path: ~/.codex
-Codex Personal  CODEX_HOME path: ~/.codex, Shadow home path: ~/.codex_p
-```
-
-Those two providers are considered compatible for continuation, so the locked model picker can show
-both.
-
-If you add a third Codex provider with a completely different `CODEX_HOME path`, T3 Code treats it
-as a different workspace. It will not be offered for existing threads created under `~/.codex`.
-
-## If Both Accounts Look The Same
-
-If two Codex providers show the same account or the same unexpected model list:
-
-1. Check the email in Settings.
-2. Refresh provider status.
-3. Confirm the second provider has `Shadow home path` set.
-4. Confirm the shadow directory has its own `auth.json`.
-5. If you copied `~/.codex` into the shadow directory, remove everything except `auth.json`.
-
-Example cleanup:
-
-```bash
-find ~/.codex_p -mindepth 1 ! -name auth.json -exec rm -rf {} +
-```
-
-## When To Use A Separate CODEX_HOME
-
-Use a totally separate `CODEX_HOME path` only when you want a separate Codex workspace.
-
-That means separate sessions and less account switching inside old threads. Most dual-account users
-should use the shared-home plus shadow-home setup instead.
+In an existing Codex task, send `/feedback` with an optional description. Erebus asks Codex to upload the relevant task and logs, then shows the returned task ID.

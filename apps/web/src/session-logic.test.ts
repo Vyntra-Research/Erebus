@@ -915,6 +915,19 @@ describe("workEntryIndicatesToolFailure", () => {
 });
 
 describe("deriveWorkLogEntries", () => {
+  it("preserves the evaluation id used to correlate research supervision UI", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "judge-evaluation",
+        kind: "research.judge.evaluation",
+        summary: "Judge verdict: accepted",
+        payload: { evaluationId: "evaluation-1" },
+      }),
+    ]);
+
+    expect(entries[0]?.supervisionEvaluationId).toBe("evaluation-1");
+  });
+
   it("omits tool started entries and keeps completed entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

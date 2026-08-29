@@ -21,7 +21,7 @@ describe("electron development launcher", () => {
     });
 
     assert.include(
-      script,
+      script.replaceAll("\\", "/"),
       "if [ -z \"${VITE_DEV_SERVER_URL:-}\" ]; then export VITE_DEV_SERVER_URL='http://127.0.0.1:8526'; fi",
     );
     assert.notInclude(script, "\nexport VITE_DEV_SERVER_URL=");
@@ -53,18 +53,18 @@ describe("electron development launcher", () => {
 
   it("keeps the native Electron executable name inside the branded macOS bundle", () => {
     const paths = resolveMacLauncherPaths(
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app",
-      "T3 Code (Dev)",
+      "/repo/apps/desktop/.electron-runtime/Erebus (Dev).app",
+      "Erebus (Dev)",
     );
 
-    assert.equal(paths.launcherExecutableName, "T3 Code (Dev) Launcher");
+    assert.equal(paths.launcherExecutableName, "Erebus (Dev) Launcher");
     assert.equal(
-      paths.launcherBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/T3 Code (Dev) Launcher",
+      paths.launcherBinaryPath.replaceAll("\\", "/"),
+      "/repo/apps/desktop/.electron-runtime/Erebus (Dev).app/Contents/MacOS/Erebus (Dev) Launcher",
     );
     assert.equal(
-      paths.runtimeElectronBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron",
+      paths.runtimeElectronBinaryPath.replaceAll("\\", "/"),
+      "/repo/apps/desktop/.electron-runtime/Erebus (Dev).app/Contents/MacOS/Electron",
     );
 
     const script = makeDevelopmentLauncherScript({
@@ -74,8 +74,8 @@ describe("electron development launcher", () => {
       environment: {},
     });
     assert.include(
-      script,
-      "exec '/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron'",
+      script.replaceAll("\\", "/"),
+      "exec '/repo/apps/desktop/.electron-runtime/Erebus (Dev).app/Contents/MacOS/Electron'",
     );
     assert.notInclude(script, "node_modules/electron");
   });
@@ -84,9 +84,15 @@ describe("electron development launcher", () => {
     const development = resolveMacLauncherIconPaths("/runtime", true);
     const production = resolveMacLauncherIconPaths("/runtime", false);
 
-    assert.match(development.sourceIconPath, /assets\/dev\/blueprint-macos-1024\.png$/);
-    assert.equal(development.generatedIconPath, "/runtime/icon-dev.icns");
-    assert.match(production.sourceIconPath, /assets\/prod\/black-macos-1024\.png$/);
-    assert.equal(production.generatedIconPath, "/runtime/icon-prod.icns");
+    assert.match(
+      development.sourceIconPath.replaceAll("\\", "/"),
+      /assets\/dev\/erebus-dev-macos-1024\.png$/,
+    );
+    assert.equal(development.generatedIconPath.replaceAll("\\", "/"), "/runtime/icon-dev.icns");
+    assert.match(
+      production.sourceIconPath.replaceAll("\\", "/"),
+      /assets\/prod\/erebus-macos-1024\.png$/,
+    );
+    assert.equal(production.generatedIconPath.replaceAll("\\", "/"), "/runtime/icon-prod.icns");
   });
 });

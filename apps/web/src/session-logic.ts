@@ -84,6 +84,8 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  /** Correlates a visible Observer/Judge card with its provider-facing control message. */
+  supervisionEvaluationId?: string;
   /** Grouping key for subagent lifecycle rows (one row per agent). */
   taskId?: string;
   /** Agent role (subagent_type) for labeled timeline rows. */
@@ -960,6 +962,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
+  const supervisionEvaluationId =
+    (activity.kind === "research.observer.intervention" ||
+      activity.kind === "research.judge.evaluation") &&
+    typeof payload?.evaluationId === "string" &&
+    payload.evaluationId.length > 0
+      ? payload.evaluationId
+      : null;
   if (detail) {
     entry.detail = detail;
   }
@@ -986,6 +995,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (requestKind) {
     entry.requestKind = requestKind;
+  }
+  if (supervisionEvaluationId) {
+    entry.supervisionEvaluationId = supervisionEvaluationId;
   }
   if (toolCallId) {
     entry.toolCallId = toolCallId;

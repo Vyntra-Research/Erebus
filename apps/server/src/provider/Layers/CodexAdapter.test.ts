@@ -51,7 +51,7 @@ const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
 class CodexAdapter extends Context.Service<CodexAdapter, CodexAdapterShape>()(
-  "t3/provider/Layers/CodexAdapter.test/CodexAdapter",
+  "erebus/provider/Layers/CodexAdapter.test/CodexAdapter",
 ) {}
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);
@@ -86,6 +86,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   public readonly interruptTurnImpl = vi.fn(
     (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
+  );
+
+  public readonly steerTurnImpl = vi.fn(
+    (_turnId: TurnId, _text: string): Promise<void> => Promise.resolve(undefined),
   );
 
   public readonly readThreadImpl = vi.fn(
@@ -138,6 +142,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   interruptTurn(turnId?: TurnId) {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
+  }
+
+  steerTurn(turnId: TurnId, text: string) {
+    return Effect.promise(() => this.steerTurnImpl(turnId, text));
   }
 
   readThread = Effect.promise(() => this.readThreadImpl());
@@ -402,6 +410,32 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         effort: "high",
         serviceTier: "priority",
       });
+    }),
+  );
+
+  it.effect("forwards passive steering to the exact active Codex turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("thread-steer");
+      const turnId = asTurnId("turn-steer");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      runtime.steerTurnImpl.mockClear();
+
+      yield* adapter.steerTurn!({
+        threadId,
+        expectedTurnId: turnId,
+        text: "Return to the active contract.",
+      });
+
+      NodeAssert.deepStrictEqual(runtime.steerTurnImpl.mock.calls, [
+        [turnId, "Return to the active contract."],
+      ]);
     }),
   );
 

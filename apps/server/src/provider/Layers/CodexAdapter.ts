@@ -42,6 +42,8 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import type { ResearchToolControllerShape } from "../../research/Services/ResearchToolController.ts";
+import { EREBUS_RESEARCH_DYNAMIC_TOOL } from "../../research/researchTools.ts";
 
 import {
   ProviderAdapterRequestError,
@@ -86,6 +88,7 @@ export interface CodexAdapterLiveOptions {
   >;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly researchToolController?: ResearchToolControllerShape;
 }
 
 interface CodexAdapterSessionContext {
@@ -1678,6 +1681,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const projectId = input.projectId;
+        const researchToolController = options?.researchToolController;
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -1694,6 +1699,27 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(projectId && researchToolController
+            ? {
+                dynamicTools: [EREBUS_RESEARCH_DYNAMIC_TOOL],
+                handleDynamicTool: (params, proteus) =>
+                  researchToolController.handle(
+                    {
+                      projectId,
+                      threadId: input.threadId,
+                      cwd: input.cwd ?? process.cwd(),
+                      proteus,
+                    },
+                    params,
+                  ),
+                getAdditionalDeveloperInstructions: () =>
+                  researchToolController.principalInstructions({
+                    projectId,
+                    threadId: input.threadId,
+                    cwd: input.cwd ?? process.cwd(),
+                  }),
+              }
+            : {}),
           ...(mcpSession
             ? {
                 environment: {
@@ -1870,6 +1896,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
+  const steerTurn: NonNullable<CodexAdapterShape["steerTurn"]> = (input) =>
+    requireSession(input.threadId).pipe(
+      Effect.flatMap((session) => session.runtime.steerTurn(input.expectedTurnId, input.text)),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(input.threadId, "turn/steer", cause),
+      ),
+    );
+
   const readThread: CodexAdapterShape["readThread"] = (threadId) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.readThread),
@@ -2005,6 +2041,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    steerTurn,
     readThread,
     rollbackThread,
     uploadFeedback,

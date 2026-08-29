@@ -39,6 +39,19 @@ import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 
 const CODEX_TIMEOUT_MS = 180_000;
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+type CodexJsonOperation =
+  | "generateCommitMessage"
+  | "generatePrContent"
+  | "generateBranchName"
+  | "generateThreadTitle"
+  | "generateStructured";
+
+export const codexTextGenerationExecutionPolicyArgs = (
+  operation: CodexJsonOperation,
+): ReadonlyArray<string> =>
+  operation === "generateStructured" ? ["--approve-for-me"] : ["-s", "read-only"];
+
 /**
  * Build a Codex text-generation closure bound to a specific `CodexSettings`
  * payload. See `makeCodexAdapter` for the overall per-instance rationale.
@@ -97,11 +110,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
 
   const encodeJsonForOperation = (
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle",
+    operation: CodexJsonOperation,
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -157,18 +166,16 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     imagePaths = [],
     cleanupPaths = [],
     modelSelection,
+    timeoutMs = CODEX_TIMEOUT_MS,
   }: {
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle";
+    operation: CodexJsonOperation;
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
     imagePaths?: ReadonlyArray<string>;
     cleanupPaths?: ReadonlyArray<string>;
     modelSelection: ModelSelection;
+    timeoutMs?: number;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const schemaJson = yield* encodeJsonForOperation(
       operation,
@@ -190,8 +197,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...codexExecLaunchArgs(launchArgs),
           "--ephemeral",
           "--skip-git-repo-check",
-          "-s",
-          "read-only",
+          ...codexTextGenerationExecutionPolicyArgs(operation),
           "--model",
           modelSelection.model,
           "--config",
@@ -263,7 +269,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     return yield* Effect.gen(function* () {
       yield* runCodexCommand().pipe(
         Effect.scoped,
-        Effect.timeoutOption(CODEX_TIMEOUT_MS),
+        Effect.timeoutOption(timeoutMs),
         Effect.flatMap(
           Option.match({
             onNone: () =>
@@ -405,10 +411,24 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateStructured: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateStructured"]
+  > = Effect.fn("CodexTextGeneration.generateStructured")(function* (input) {
+    return yield* runCodexJson({
+      operation: "generateStructured",
+      cwd: input.cwd,
+      prompt: input.prompt,
+      outputSchemaJson: input.outputSchema,
+      modelSelection: input.modelSelection,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    });
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateStructured,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

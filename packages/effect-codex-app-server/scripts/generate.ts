@@ -644,6 +644,30 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     }
   }
 
+  // Dynamic tools are still marked experimental upstream. The protocol emits
+  // their shared definitions and `item/tool/call`, but the per-type JSON file
+  // can omit the `thread/start.dynamicTools` property. Keep the generated
+  // client honest about the wire feature instead of casting at each caller.
+  const threadStartParams = aggregateSchemas.V2ThreadStartParams;
+  if (
+    threadStartParams &&
+    typeof threadStartParams === "object" &&
+    !Array.isArray(threadStartParams)
+  ) {
+    const properties = (threadStartParams as Record<string, unknown>).properties;
+    if (properties && !Array.isArray(properties) && typeof properties === "object") {
+      (properties as Record<string, unknown>).dynamicTools = {
+        anyOf: [
+          {
+            type: "array",
+            items: { $ref: "#/definitions/V2ThreadStartParams__DynamicToolSpec" },
+          },
+          { type: "null" },
+        ],
+      };
+    }
+  }
+
   const generator = makeJsonSchemaGenerator();
   for (const [name, schema] of Object.entries(aggregateSchemas).toSorted(([left], [right]) =>
     left.localeCompare(right),

@@ -1,13 +1,14 @@
 # Provider architecture
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using Erebus? See [docs/user](../user/).
 
-A provider is the agent runtime that does the actual work. T3 Code supports several, and the
-orchestration layer does not know which one is behind a thread.
+A provider is the agent runtime that does the actual work. Erebus `0.1.1` enables Codex only. The
+orchestration layer keeps the provider boundary so other runtimes can be added later without
+changing thread contracts.
 
-## Built-in drivers
+## Driver code
 
-[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with five entries:
+The T3 Code base includes five driver bindings:
 
 | Driver kind   | Driver source                           |
 | ------------- | --------------------------------------- |
@@ -17,7 +18,11 @@ orchestration layer does not know which one is behind a thread.
 | `grok`        | [`Drivers/GrokDriver.ts`][grok]         |
 | `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode] |
 
-Each driver declares its `driverKind`, a `configSchema`, and a `create` function that builds an
+Only `codex` enters the active registry in `0.1.1`. Erebus does not show, probe, refresh, or update
+the other bindings. They remain source-level compatibility code while their Erebus contracts and
+release support are unfinished.
+
+Each binding declares its `driverKind`, a `configSchema`, and a `create` function that builds an
 adapter in a child scope. Adapter implementations live beside them in
 `apps/server/src/provider/Layers/` (`CodexAdapter.ts`, `ClaudeAdapter.ts`, and so on) and conform to
 [`ProviderAdapter.ts`][adapter]. Read the driver plus its adapter to see how a specific agent's
@@ -36,8 +41,8 @@ Two registries separate configuration from live processes:
 [`ProviderService`][service] sits on top. It combines the adapter registry with the provider session
 directory to route session and turn operations for a thread, so callers name a thread, not an agent.
 
-Adding a driver means writing the driver plus adapter and adding it to `BUILT_IN_DRIVERS`. No
-orchestration, contract, or client change is required for the common case.
+Enabling another driver also requires an explicit release decision, settings UI, tests, and support
+policy. Adding it to `BUILT_IN_DRIVERS` alone does not enable it in Erebus.
 
 ## Model manifest
 

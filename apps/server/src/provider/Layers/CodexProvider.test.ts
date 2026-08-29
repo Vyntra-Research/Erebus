@@ -1,6 +1,23 @@
 import { assert, it } from "@effect/vitest";
+import type * as CodexSchema from "effect-codex-app-server/schema";
 
-import { applyPreferredCodexDefaultModel, mapCodexModelCapabilities } from "./CodexProvider.ts";
+import {
+  applyPreferredCodexDefaultModel,
+  codexLoginInstruction,
+  deriveProteusHealth,
+  mapCodexModelCapabilities,
+} from "./CodexProvider.ts";
+
+it("builds a login command for Erebus's isolated Codex profile", () => {
+  assert.equal(
+    codexLoginInstruction("C:\\Users\\researcher\\.erebus\\userdata\\providers\\codex", "win32"),
+    "$env:CODEX_HOME='C:\\Users\\researcher\\.erebus\\userdata\\providers\\codex'; codex login --device-auth",
+  );
+  assert.equal(
+    codexLoginInstruction("/home/researcher/.erebus/userdata/providers/codex", "linux"),
+    "CODEX_HOME='/home/researcher/.erebus/userdata/providers/codex' codex login --device-auth",
+  );
+});
 
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({
@@ -143,4 +160,61 @@ it("ignores custom models that shadow a preferred slug", () => {
   ]);
 
   assert.deepStrictEqual(models.find((model) => model.isDefault)?.slug, "gpt-5.4");
+});
+
+it("reports Proteus ready only when plugin, skills, and MCP tools are available", () => {
+  const checkedAt = "2026-08-27T12:00:00.000Z";
+  const health = deriveProteusHealth({
+    pluginList: {
+      marketplaces: [
+        {
+          name: "local",
+          plugins: [
+            {
+              id: "proteus@local",
+              name: "proteus",
+              installed: true,
+              enabled: true,
+              localVersion: "2.1.5",
+            },
+          ],
+        },
+      ],
+    } as unknown as CodexSchema.V2PluginListResponse,
+    skills: [{ name: "proteus:checkpoint", path: "C:/proteus/checkpoint", enabled: true }],
+    mcpStatus: {
+      data: [
+        {
+          name: "proteus",
+          tools: { campaign_status: { name: "campaign_status", inputSchema: {} } },
+          serverInfo: { name: "proteus", version: "2.1.5" },
+        },
+      ],
+    } as unknown as CodexSchema.V2ListMcpServerStatusResponse,
+    checkedAt,
+  });
+
+  assert.deepStrictEqual(health, {
+    runtime: "ready",
+    plugin: "ready",
+    skills: "ready",
+    mcp: "ready",
+    version: "2.1.5",
+    message: "Proteus is ready.",
+    checkedAt,
+  });
+});
+
+it("reports missing Proteus parts without failing the Codex provider probe", () => {
+  const health = deriveProteusHealth({
+    pluginList: { marketplaces: [] },
+    skills: [],
+    mcpStatus: { data: [] },
+    checkedAt: "2026-08-27T12:00:00.000Z",
+  });
+
+  assert.equal(health.plugin, "missing");
+  assert.equal(health.skills, "missing");
+  assert.equal(health.mcp, "missing");
+  assert.equal(health.runtime, "missing");
 });

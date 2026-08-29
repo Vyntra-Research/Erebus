@@ -1,6 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as Schema from "effect/Schema";
 import type { ChatAttachment, ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
 
@@ -113,8 +114,17 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Provider-private structured generation for isolated supervisor jobs. */
+    readonly generateStructured?: <S extends Schema.Top>(input: {
+      readonly cwd: string;
+      readonly prompt: string;
+      readonly outputSchema: S;
+      readonly modelSelection: ModelSelection;
+      readonly timeoutMs?: number;
+    }) => Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]>;
   }
->()("t3/textGeneration/TextGeneration") {}
+>()("erebus/textGeneration/TextGeneration") {}
 
 /** @deprecated Use `TextGeneration["Service"]`. */
 export type TextGenerationShape = TextGeneration["Service"];

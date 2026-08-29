@@ -1,6 +1,8 @@
 # Mobile appearance
 
-T3 Code Mobile includes the T3 Code, T3 Chat, Grove, Ocean, Ember, and Iris themes. Each theme has
+> Inherited T3 Code documentation. The mobile client is not enabled in Erebus `0.1.1`.
+
+Erebus Mobile includes the Erebus, T3 Chat, Grove, Ocean, Ember, and Iris themes. Each theme has
 light and dark colors that apply throughout the app, including code reviews, file previews, the
 terminal, native headers, and sheets.
 

@@ -8,6 +8,7 @@ import type {
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSession,
+  ProviderSteerTurnInput,
   ProviderTurnStartResult,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -143,6 +144,10 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       Effect.void,
   );
 
+  const steerTurn = vi.fn(
+    (_input: ProviderSteerTurnInput): Effect.Effect<void, ProviderAdapterError> => Effect.void,
+  );
+
   const respondToRequest = vi.fn(
     (
       _threadId: ThreadId,
@@ -221,6 +226,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     startSession,
     sendTurn,
     interruptTurn,
+    ...(provider === CODEX_DRIVER ? { steerTurn } : {}),
     respondToRequest,
     respondToUserInput,
     stopSession,
@@ -257,6 +263,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     startSession,
     sendTurn,
     interruptTurn,
+    steerTurn,
     respondToRequest,
     respondToUserInput,
     stopSession,
@@ -953,6 +960,21 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
+
+      yield* provider.steerTurn({
+        threadId: session.threadId,
+        expectedTurnId: asTurnId("turn-thread-1"),
+        text: "Return to the active research gate.",
+      });
+      assert.deepEqual(routing.codex.steerTurn.mock.calls, [
+        [
+          {
+            threadId: session.threadId,
+            expectedTurnId: asTurnId("turn-thread-1"),
+            text: "Return to the active research gate.",
+          },
+        ],
+      ]);
 
       yield* provider.respondToRequest({
         threadId: session.threadId,

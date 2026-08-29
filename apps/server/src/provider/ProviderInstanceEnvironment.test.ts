@@ -18,4 +18,18 @@ describe("mergeProviderInstanceEnvironment", () => {
       PATH: "/bin",
     });
   });
+
+  it("does not leak the T3 server NODE_ENV unless the provider sets it", () => {
+    expect(
+      mergeProviderInstanceEnvironment(undefined, { NODE_ENV: "development", PATH: "/bin" }),
+    ).toEqual({
+      PATH: "/bin",
+    });
+    expect(
+      mergeProviderInstanceEnvironment(
+        [{ name: "NODE_ENV", value: "production", sensitive: false }],
+        { NODE_ENV: "development", PATH: "/bin" },
+      ),
+    ).toEqual({ NODE_ENV: "production", PATH: "/bin" });
+  });
 });

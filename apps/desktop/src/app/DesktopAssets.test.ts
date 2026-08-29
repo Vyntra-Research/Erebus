@@ -16,9 +16,9 @@ const environmentLayer = DesktopEnvironment.layer({
   platform: "darwin",
   processArch: "arm64",
   appVersion: "1.2.3",
-  appPath: "/Applications/T3 Code.app/Contents/Resources/app.asar",
+  appPath: "/Applications/Erebus.app/Contents/Resources/app.asar",
   isPackaged: true,
-  resourcesPath: "/Applications/T3 Code.app/Contents/Resources",
+  resourcesPath: "/Applications/Erebus.app/Contents/Resources",
   runningUnderArm64Translation: false,
 }).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))));
 
@@ -44,7 +44,8 @@ describe("DesktopAssets", () => {
         ),
       );
       const fileSystemLayer = FileSystem.layerNoop({
-        exists: (path) => Effect.succeed(String(path).includes("/assets/dev/")),
+        exists: (path) =>
+          Effect.succeed(String(path).replaceAll("\\", "/").includes("/assets/dev/")),
       });
       const assets = yield* DesktopAssets.DesktopAssets.pipe(
         Effect.provide(
@@ -56,8 +57,14 @@ describe("DesktopAssets", () => {
 
       const icons = yield* assets.iconPaths;
 
-      assert.match(Option.getOrThrow(icons.ico), /assets\/dev\/blueprint-windows\.ico$/);
-      assert.match(Option.getOrThrow(icons.png), /assets\/dev\/blueprint-universal-1024\.png$/);
+      assert.match(
+        Option.getOrThrow(icons.ico).replaceAll("\\", "/"),
+        /assets\/dev\/erebus-dev-windows\.ico$/,
+      );
+      assert.match(
+        Option.getOrThrow(icons.png).replaceAll("\\", "/"),
+        /assets\/dev\/erebus-dev-universal-1024\.png$/,
+      );
       assert.isTrue(Option.isNone(icons.icns));
     }),
   );
@@ -74,7 +81,10 @@ describe("DesktopAssets", () => {
         description: "private filesystem diagnostic",
       });
       const fileSystemLayer = FileSystem.layerNoop({
-        exists: (path) => (path === candidatePath ? Effect.fail(cause) : Effect.succeed(false)),
+        exists: (path) =>
+          String(path).replaceAll("\\", "/") === candidatePath
+            ? Effect.fail(cause)
+            : Effect.succeed(false),
       });
       const assetsLayer = DesktopAssets.layer.pipe(
         Layer.provide(Layer.merge(fileSystemLayer, environmentLayer)),
@@ -85,10 +95,10 @@ describe("DesktopAssets", () => {
 
       assert.instanceOf(error, DesktopAssets.DesktopAssetProbeError);
       assert.equal(error.fileName, fileName);
-      assert.equal(error.candidatePath, candidatePath);
+      assert.equal(error.candidatePath.replaceAll("\\", "/"), candidatePath);
       assert.strictEqual(error.cause, cause);
       assert.equal(
-        error.message,
+        error.message.replaceAll("\\", "/"),
         `Failed to probe desktop asset "${fileName}" at ${candidatePath}.`,
       );
       assert.notInclude(error.message, "private filesystem diagnostic");

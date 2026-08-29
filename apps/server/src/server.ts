@@ -121,6 +121,12 @@ import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 import { forkParked, ServerActivation } from "./serverActivation.ts";
+import { ResearchCampaignStoreLive } from "./research/Layers/ResearchCampaignStore.ts";
+import { ResearchEngineLive } from "./research/Layers/ResearchEngine.ts";
+import { ResearchEvaluatorLive } from "./research/Layers/ResearchEvaluator.ts";
+import { ResearchSupervisorLive } from "./research/Layers/ResearchSupervisor.ts";
+import { ResearchToolControllerLive } from "./research/Layers/ResearchToolController.ts";
+import { ProteusBridgeLive } from "./research/Layers/ProteusBridge.ts";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
@@ -244,6 +250,10 @@ const PlatformServicesLive = Layer.unwrap(
   }),
 );
 
+const ResearchSupervisorRuntimeLive = ResearchSupervisorLive.pipe(
+  Layer.provideMerge(ResearchEvaluatorLive),
+);
+
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
@@ -252,6 +262,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
+  Layer.provideMerge(ResearchSupervisorRuntimeLive),
 );
 
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
@@ -270,6 +281,19 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+
+const ResearchCampaignStoreLayerLive = ResearchCampaignStoreLive.pipe(
+  Layer.provideMerge(SqlitePersistenceLayerLive),
+);
+const ResearchEngineLayerLive = ResearchEngineLive.pipe(
+  Layer.provideMerge(ResearchCampaignStoreLayerLive),
+);
+const ResearchLayerLive = ResearchToolControllerLive.pipe(
+  Layer.provideMerge(ResearchEngineLayerLive),
+  Layer.provideMerge(ProteusBridgeLive.pipe(Layer.provide(ProcessRunner.layer))),
+);
+const ProviderInstanceRegistryHydrationWithResearchLive =
+  ProviderInstanceRegistryHydrationLive.pipe(Layer.provideMerge(ResearchLayerLive));
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
@@ -373,7 +397,7 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
@@ -390,7 +414,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  Layer.provideMerge(ProviderInstanceRegistryHydrationWithResearchLive),
+);
+
+const RuntimeCoreDependenciesLive = RuntimeCoreServicesLive.pipe(
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).

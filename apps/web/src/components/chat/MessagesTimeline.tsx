@@ -86,6 +86,7 @@ import {
   shouldPreserveAssistantLineBreaks,
   toolGroupAction,
   workEntryIsVisibleInGroup,
+  workLogEntryIsResearchSupervision,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -1386,11 +1387,19 @@ const WorkGroupSection = memo(function WorkGroupSection({
     [groupedEntries, isExpandedToolGroupEntry],
   );
   const onlyToolEntries = nonEmptyEntries.every((entry) => workLogEntryIsToolLike(entry));
-  const groupLabel = onlyToolEntries
-    ? nonEmptyEntries.length === 1
-      ? "1 tool call"
-      : `${nonEmptyEntries.length} tool calls`
-    : "Work Log";
+  const supervisionSource = nonEmptyEntries.find(
+    workLogEntryIsResearchSupervision,
+  )?.sourceActivityKind;
+  const groupLabel =
+    supervisionSource === "research.observer.intervention"
+      ? "Observer"
+      : supervisionSource === "research.judge.evaluation"
+        ? "Judge"
+        : onlyToolEntries
+          ? nonEmptyEntries.length === 1
+            ? "1 tool call"
+            : `${nonEmptyEntries.length} tool calls`
+          : "Work Log";
   const GroupContainer = isExpandedToolGroupEntry ? "div" : "section";
 
   if (nonEmptyEntries.length === 0) return null;
@@ -2458,6 +2467,12 @@ const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
 
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
+  if (workEntry.sourceActivityKind === "research.observer.intervention") {
+    return "eye";
+  }
+  if (workEntry.sourceActivityKind === "research.judge.evaluation") {
+    return "message-circle";
+  }
   if (
     workEntry.sourceActivityKind === "user-input.requested" ||
     workEntry.sourceActivityKind === "user-input.resolved"

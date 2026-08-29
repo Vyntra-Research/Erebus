@@ -108,6 +108,7 @@ function createProviderServiceHarness(
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
     interruptTurn: () => unsupported(),
+    steerTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
@@ -449,6 +450,7 @@ describe("CheckpointReactor", () => {
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       provider,
+      checkpointStore,
       cwd,
       drain,
     };
@@ -849,6 +851,40 @@ describe("CheckpointReactor", () => {
     ).toBe("v1\n");
   });
 
+  it("skips checkpoint capture when an empty .git directory is not a repository", async () => {
+    const nonRepository = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-empty-git-"));
+    tempDirs.push(nonRepository);
+    NodeFS.mkdirSync(NodePath.join(nonRepository, ".git"));
+    const harness = await createHarness({
+      providerSessionCwd: nonRepository,
+      projectWorkspaceRoot: nonRepository,
+      threadWorktreePath: nonRepository,
+      seedFilesystemCheckpoints: false,
+    });
+    const hasCheckpointRef = vi.spyOn(harness.checkpointStore, "hasCheckpointRef");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-empty-git"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: MessageId.make("message-empty-git"),
+          role: "user",
+          text: "start turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await harness.drain();
+
+    expect(hasCheckpointRef).not.toHaveBeenCalled();
+    expect(NodeFS.readdirSync(NodePath.join(nonRepository, ".git"))).toEqual([]);
+  });
+
   it("captures turn completion checkpoint from project workspace root when provider session cwd is unavailable", async () => {
     const harness = await createHarness({
       hasSession: false,
@@ -1239,6 +1275,7 @@ describe("CheckpointReactor", () => {
     const harness = await createHarness({ hasSession: false });
     const createdAt = "2026-01-01T00:00:00.000Z";
 
+    // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- This legacy async harness exposes promise-based setup and drain helpers.
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.checkpoint.revert",

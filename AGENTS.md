@@ -1,36 +1,34 @@
-# T3 Code
+# Erebus
 
-T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs (Codex, Claude Code, Cursor, Grok, OpenCode) and serves web, desktop, and mobile clients.
+Erebus is a local, Codex-first research harness based on T3 Code. A Node WebSocket server wraps provider CLIs and serves the web and desktop clients. Its research control plane adds Proteus-backed campaigns, an Observer, and an independent finding Judge.
 
-You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
+Erebus `0.1.1` targets Windows desktop and local Codex use. The inherited mobile, relay, hosted-app, and other provider surfaces remain in the tree but are not enabled until Erebus tests and publishes them.
 
-## What makes T3 Code special?
+## Product rules
 
-We have over 200,000 users who love T3 Code. It's important we maintain the things they love as we continue to iterate on the product. Here's a brief list of the things we can never compromise on.
+Keep the useful upstream properties while making Erebus's research behavior explicit and durable.
 
 ### 1. Open at the core
 
-T3 Code is truly open. We share our roadmap, we share how we think about things, and of course we share all our code. A large number of our users run forks. We work in the open, and should strive to stay that way.
+Erebus is open source. Keep public code useful to external readers and keep private campaign data, plans, credentials, machine paths, and unpublished findings out of the repository.
 
 ### 2. Performance without compromise
 
-Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're proud of the performance of T3 Code. We regularly audit for performance regressions, often caused by sending too much data over websockets, css animations causing gpu spikes, lists being hard to render, and more. Make sure all changes are considerate of performance impact.
+Users run long research tasks and notice dropped frames, stale state, and excess traffic. Audit WebSocket payload size, list rendering, CSS work, and background evaluation cost.
 
-### 3. Remote ready
+### 3. Research integrity
 
-The architecture of T3 Code's websocket layer (npx t3) enables a lot of awesome remote features. These have become core to the product. Whether users are connecting directly over their local network, using Tailscale, or leaning in fully with T3 Connect (our tunnel solution, also in this repo), we need to make sure new features are properly supported.
+One task may have one live Erebus campaign. Different tasks may run different campaigns. Observer corrections are live and must not queue after a turn or pause. Judge results are durable follow-ups after finding submission. Neither supervisor may silently change campaign scope or authority.
 
-### 4. Multi-surface
+### 4. Isolated local state
 
-T3 Code has 3 key app surfaces: **web**, **desktop**, and **mobile**.
+Erebus uses its own application data and Codex home. Never point tests or development servers at a live Codex desktop profile. Erebus manages its pinned Proteus CLI, MCP server, plugin, and skills inside that isolated home.
 
-**Web** is kind of two surfaces, as we have the public facing "app.t3.codes" as well as locally hosting the web app through the `npx t3` command. Both need to be supported by all new features where reasonable.
+### 5. Preserve the upstream architecture
 
-**Desktop** is the main surface most users install first. It's a full Electron app that bundles the server runner as well. The desktop app can also be used as the host server, allowing remote connections from app.t3.codes or the mobile app.
+Web, desktop, and server remain separate surfaces. Wire changes still belong in `packages/contracts`; shared client logic belongs in `packages/client-runtime`. Keep compatibility identifiers such as `T3CODE_*`, `.t3`, and `@t3tools/*` until a deliberate migration removes them.
 
-**Mobile** is a React Native app for both iOS and Android, available on the App Store and Google Play. The mobile app allows for connecting to any T3 Code server to control work remotely.
-
-## A note from Theo
+## Upstream design note
 
 I like ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
 
@@ -38,28 +36,28 @@ Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to ho
 
 The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
-Of note: Most T3 Code contributions will come from T3 Code itself, often controlled remotely. This means you should be careful about accessing data, killing dev servers, and other things that may damage the T3 Code instance that the contributor is using.
+These principles come from the T3 Code base and still apply: use the smallest model that makes correct behavior clear, avoid scope creep, and protect live developer state.
 
 ## A small glossary
 
 We need to be on the same page with terminology. When communicating, use this language:
 
-- **you** means the agent reading this file and changing T3 Code.
-- **we, us, and maintainers** mean Theo, Julius and the people building T3 Code. These are who you are talking to now.
-- **user** means the person using T3 Code to direct coding agents.
-- **agent** means the coding agent a user runs inside T3 Code. Depending on context, that may also include you.
-- **provider** means the agent runtime or harness T3 Code talks to, such as Codex, Claude, Cursor, or OpenCode.
+- **you** means the agent reading this file and changing Erebus.
+- **we, us, and maintainers** mean Vyntra Research and Erebus contributors.
+- **user** means the person using Erebus to direct coding agents.
+- **agent** means the coding agent a user runs inside Erebus. Depending on context, that may also include you.
+- **provider** means the agent runtime or harness Erebus talks to, such as Codex, Claude, Cursor, or OpenCode.
 - **client** means the web, desktop, or mobile UI.
 - **environment** means one running T3 server and the machine, filesystem, provider credentials, and state it owns.
 - **project** means an environment-local workspace record rooted at a directory.
 - **thread** means the durable conversation and work history for a project.
 - **turn** means one user-to-agent cycle, including follow-up work such as checkpointing.
-- **T3 home** means the base data directory. Runtime state normally lives below its userdata directory.
+- **Erebus home** means the base data directory. Runtime state normally lives below its userdata directory.
 
 ## The three ways to hurt yourself
 
 1. **Killing by pattern.** Never `pkill -f`, `pgrep | kill`, or `kill` a PID you found by matching a name, path, or worktree string. Your own agent process has this worktree's path in its argv, and this machine runs several other dev servers at once. Kill only a PID you captured at spawn, or the owner of your port from `ss -H -ltnp` after confirming `/proc/<pid>/cwd` is your worktree.
-2. **Writing to the live install.** `~/.t3/userdata` is the developer's real T3 Code database, in use while you work. Reading it and copying from it are fine, and a good way to get real test data (see Test data). Never start a server against it, never open it read-write, never clean it up.
+2. **Writing to a live install.** A developer may have live Erebus, T3 Code, or Codex state open while you work. Reading and copying a snapshot can be safe; starting a test server against it, opening it read-write, or cleaning it is not.
 3. **Baking in origins.** Never set `VITE_HTTP_URL` or `VITE_WS_URL` for dev. Dev is single-origin and Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known`. Setting them bakes localhost into the bundle and silently breaks every remote browser.
 
 ## Hit every surface
@@ -135,7 +133,7 @@ Full glossary with file links: `docs/internals/glossary.md`
 ## Where code lives
 
 - `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read `.repos/effect-smol/LLMS.md` before writing Effect code.
-- `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native, `apps/marketing` is the site.
+- `apps/web` - React/Vite UI. `apps/desktop` wraps it, and `apps/mobile` is the React Native client.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
 - `packages/client-runtime` - client code shared by web and mobile.

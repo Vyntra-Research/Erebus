@@ -31,7 +31,7 @@ import bundledManifestJson from "./model-manifest.json" with { type: "json" };
 import type { ServerProviderDraft } from "./providerSnapshot.ts";
 
 const MODEL_MANIFEST_URL =
-  "https://raw.githubusercontent.com/pingdotgg/t3code/main/apps/server/src/provider/model-manifest.json";
+  "https://raw.githubusercontent.com/Vyntra-Research/Erebus/main/apps/server/src/provider/model-manifest.json";
 
 /** How long a fetched manifest stays fresh before the next probe re-fetches. */
 const MANIFEST_TTL_MS = 60 * 60 * 1000;
@@ -128,7 +128,7 @@ export class ModelManifest extends Context.Service<
      * the teardown of whichever instance happened to trigger it. */
     readonly refreshInBackground: Effect.Effect<void>;
   }
->()("t3/provider/ModelManifest") {}
+>()("erebus/provider/ModelManifest") {}
 
 /** Constant service for tests and callers that only need the bundled data. */
 export const BundledOnlyModelManifest: ModelManifest["Service"] = {

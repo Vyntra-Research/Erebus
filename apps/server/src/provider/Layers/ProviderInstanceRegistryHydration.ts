@@ -57,12 +57,17 @@ import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.t
 import { ProviderInstanceRegistryMutator } from "../Services/ProviderInstanceRegistryMutator.ts";
 import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistryLive.ts";
 
+const ACTIVE_PROVIDER_DRIVER_KIND = "codex";
+const ACTIVE_BUILT_IN_DRIVERS = BUILT_IN_DRIVERS.filter(
+  (driver) => driver.driverKind === ACTIVE_PROVIDER_DRIVER_KIND,
+);
+
 /**
  * Synthesize a `ProviderInstanceConfigMap` from a `ServerSettings` snapshot.
  *
  * Strategy:
- *   1. Copy all explicit `settings.providerInstances` entries verbatim.
- *   2. For each built-in driver whose `defaultInstanceIdForDriver(id)` key
+ *   1. Copy explicit Codex instances and ignore inactive driver bindings.
+ *   2. For the active built-in driver whose `defaultInstanceIdForDriver(id)` key
  *      is *not* already in the explicit map, synthesize an entry from the
  *      matching legacy `settings.providers.<kind>` blob.
  *
@@ -73,9 +78,13 @@ import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistry
 export const deriveProviderInstanceConfigMap = (
   settings: ServerSettings,
 ): ProviderInstanceConfigMap => {
-  const merged: Record<string, ProviderInstanceConfig> = { ...settings.providerInstances };
+  const merged: Record<string, ProviderInstanceConfig> = Object.fromEntries(
+    Object.entries(settings.providerInstances).filter(
+      ([, instance]) => instance.driver === ACTIVE_PROVIDER_DRIVER_KIND,
+    ),
+  );
 
-  for (const driver of BUILT_IN_DRIVERS) {
+  for (const driver of ACTIVE_BUILT_IN_DRIVERS) {
     const instanceId = defaultInstanceIdForDriver(driver.driverKind);
     if (instanceId in merged) {
       // Explicit `providerInstances` entry for this slot — user-authored
@@ -165,7 +174,7 @@ export const ProviderInstanceRegistryHydrationLive: Layer.Layer<
         : deriveProviderInstanceConfigMap(initialSettings);
 
     const mutableLayer = ProviderInstanceRegistryMutableLayer({
-      drivers: BUILT_IN_DRIVERS,
+      drivers: ACTIVE_BUILT_IN_DRIVERS,
       configMap: initialConfigMap,
     });
 

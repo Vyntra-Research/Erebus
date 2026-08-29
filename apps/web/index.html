@@ -65,6 +65,20 @@
               chrome: "oklch(0.22813 0.020366 307.469)",
             },
           },
+          codex: {
+            light: {
+              background: "oklch(1 0 0)",
+              foreground: "oklch(0.159066 0 0)",
+              accent: "oklch(0.53586 0.100758 172.274)",
+              chrome: "oklch(0.976419 0.001323 286.375)",
+            },
+            dark: {
+              background: "oklch(0.209036 0 0)",
+              foreground: "oklch(0.943089 0 0)",
+              accent: "oklch(0.637426 0.124194 169.506)",
+              chrome: "oklch(0.209036 0 0)",
+            },
+          },
           grove: {
             light: {
               background: "oklch(0.972369 0.005497 157.15)",
@@ -123,7 +137,7 @@
           },
         };
         // Keep the built-in mode list in sync with the runtime so the selected
-        // T3 Chat palette is visible before React has mounted.
+        // Erebus palette is visible before React has mounted.
         const BUILT_IN_THEME_MODES = Object.fromEntries(
           Object.entries(BUILT_IN_THEME_PALETTES).map(([id, palettes]) => [
             id,
@@ -135,6 +149,7 @@
           "light",
           "dark",
           "t3-chat",
+          "codex",
           "grove",
           "ocean",
           "ember",
@@ -219,7 +234,7 @@
         try {
           const storedTheme = window.localStorage.getItem("t3code:theme");
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          // Older builds stored the dark T3 Chat palette as its own theme id
+          // Older builds stored the dark Erebus palette as its own theme id
           // and every maintainer theme under a t3- prefix; keep those
           // preferences readable. Mirrors the runtime's legacy alias table.
           const LEGACY_THEME_IDS = {
@@ -453,13 +468,13 @@
         object-fit: contain;
       }
     </style>
-    <title>T3 Code (Alpha)</title>
+    <title>Erebus</title>
   </head>
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="T3 Code splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T3 Code" />
+        <div id="boot-shell-card" aria-label="Erebus splash screen">
+          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Erebus" />
         </div>
       </div>
     </div>

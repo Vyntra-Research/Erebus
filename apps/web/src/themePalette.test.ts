@@ -26,6 +26,7 @@ import {
   subscribeToThemePreview,
   subscribeToCustomThemes,
   themeAllowsSidebarArtwork,
+  CODEX_THEME,
   T3_CHAT_THEME,
   EMBER_THEME,
   GROVE_THEME,
@@ -108,7 +109,7 @@ describe("theme files", () => {
     expect(dark.secondaryLabel).toBe(dark.textMuted);
     expect(contrastRatio(light.accentForeground, light.accent)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(dark.accentForeground, dark.accent)).toBeGreaterThanOrEqual(4.5);
-    // Status colors fall back to T3 Code's standard red and amber rather than
+    // Status colors fall back to Erebus's standard red and amber rather than
     // the flagship palette's, so no generated theme inherits a brand tint.
     const channels = (value: string) =>
       [1, 3, 5].map((index) => Number.parseInt(asHex(value).slice(index, index + 2), 16)) as [
@@ -474,6 +475,29 @@ describe("theme files", () => {
       }
     }
     expect(themeAllowsSidebarArtwork("my-custom-theme")).toBe(false);
+  });
+
+  it("keeps the Codex palette neutral, readable, and free of T3 artwork", () => {
+    expect(getThemeDefinition(CODEX_THEME.id)).toBe(CODEX_THEME);
+    expect(getThemeModes(CODEX_THEME)).toEqual(["light", "dark"]);
+    expect(themeAllowsSidebarArtwork(CODEX_THEME.id)).toBe(false);
+
+    for (const mode of ["light", "dark"] as const) {
+      const colors = getThemeColorsForMode(CODEX_THEME, mode)!;
+      expect(contrastRatio(colors.text, colors.canvas)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(colors.textMuted, colors.canvas)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(colors.accentForeground, colors.accent)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(colors.messageForeground, colors.messageSurface)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+      expect(
+        contrastRatio(colors.messageActionForeground, colors.messageAction),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(colors.messageActionForeground, colors.messageActionHover),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(colors.placeholder, colors.surfaceRaised)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it("rejects a variant that repeats the base appearance", () => {

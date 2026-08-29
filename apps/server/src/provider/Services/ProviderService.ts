@@ -20,6 +20,7 @@ import type {
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
+  ProviderSteerTurnInput,
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -59,6 +60,8 @@ export interface ProviderServiceShape {
   readonly interruptTurn: (
     input: ProviderInterruptTurnInput,
   ) => Effect.Effect<void, ProviderServiceError>;
+
+  readonly steerTurn: (input: ProviderSteerTurnInput) => Effect.Effect<void, ProviderServiceError>;
 
   /**
    * Respond to a provider approval request.
@@ -126,5 +129,5 @@ export interface ProviderServiceShape {
  * ProviderService - Service tag for provider orchestration.
  */
 export class ProviderService extends Context.Service<ProviderService, ProviderServiceShape>()(
-  "t3/provider/Services/ProviderService",
+  "erebus/provider/Services/ProviderService",
 ) {}

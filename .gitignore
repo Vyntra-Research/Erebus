@@ -15,6 +15,11 @@ build/
 release/
 release-mock/
 .t3
+.erebus/
+.vros/
+/userdata/
+/worktrees/
+/caches/
 .idea/
 apps/web/.playwright
 apps/web/playwright-report

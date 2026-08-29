@@ -227,10 +227,10 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
 });
 
 describe("provider enabled defaults", () => {
-  it("enables only the stable bindings by default", () => {
+  it("enables only Codex by default", () => {
     const decoded = decodeServerSettings({});
     expect(decoded.providers.codex.enabled).toBe(true);
-    expect(decoded.providers.claudeAgent.enabled).toBe(true);
+    expect(decoded.providers.claudeAgent.enabled).toBe(false);
     expect(decoded.providers.cursor.enabled).toBe(false);
     expect(decoded.providers.grok.enabled).toBe(false);
     expect(decoded.providers.opencode.enabled).toBe(false);
@@ -290,6 +290,53 @@ describe("ServerSettings worktree defaults", () => {
     expect(
       decodeServerSettingsPatch({ newWorktreesStartFromOrigin: false }).newWorktreesStartFromOrigin,
     ).toBe(false);
+  });
+});
+
+describe("ServerSettings research supervision", () => {
+  it("provides conservative Observer and Judge defaults for legacy settings", () => {
+    expect(decodeServerSettings({}).researchSupervision).toEqual({
+      observerMessageWindow: 5,
+      observerInterventionConfidence: 0.8,
+      observerCooldownMessages: 5,
+      observerMaxInterventionsPerTurn: 1,
+      evaluatorModel: "gpt-daybreak-blue-latest",
+      evaluatorReasoningEffort: "xhigh",
+    });
+  });
+
+  it("accepts bounded supervision updates", () => {
+    expect(
+      decodeServerSettingsPatch({
+        researchSupervision: {
+          observerMessageWindow: 8,
+          observerInterventionConfidence: 0.9,
+          observerCooldownMessages: 3,
+          observerMaxInterventionsPerTurn: 2,
+          evaluatorModel: " gpt-daybreak-blue-latest ",
+          evaluatorReasoningEffort: "high",
+        },
+      }).researchSupervision,
+    ).toEqual({
+      observerMessageWindow: 8,
+      observerInterventionConfidence: 0.9,
+      observerCooldownMessages: 3,
+      observerMaxInterventionsPerTurn: 2,
+      evaluatorModel: "gpt-daybreak-blue-latest",
+      evaluatorReasoningEffort: "high",
+    });
+  });
+
+  it.each([
+    { observerMessageWindow: 0 },
+    { observerMessageWindow: 51 },
+    { observerInterventionConfidence: 1.01 },
+    { observerCooldownMessages: -1 },
+    { observerMaxInterventionsPerTurn: 0 },
+    { evaluatorModel: " " },
+    { evaluatorReasoningEffort: "impossible" },
+  ])("rejects invalid supervision settings: %o", (researchSupervision) => {
+    expect(() => decodeServerSettingsPatch({ researchSupervision })).toThrow();
   });
 });
 

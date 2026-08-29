@@ -33,25 +33,32 @@ const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
 const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
 const REPLACEABLE_SHARED_RUNTIME_DIRECTORIES = new Set(["mcp-oauth-locks"]);
 
-function resolveHomePath(path: Path.Path, value: string | undefined): string {
-  const expanded =
-    value && value.trim().length > 0
-      ? expandHomePath(value)
-      : path.join(NodeOS.homedir(), ".codex");
+function resolveHomePath(
+  path: Path.Path,
+  value: string | undefined,
+  defaultHomePath: string | undefined,
+): string {
+  const configured = value?.trim();
+  const fallback = defaultHomePath?.trim();
+  const expanded = expandHomePath(configured || fallback || path.join(NodeOS.homedir(), ".codex"));
   return path.resolve(expanded);
 }
 
 export const resolveCodexHomeLayout = Effect.fn("resolveCodexHomeLayout")(function* (
   config: CodexSettings,
+  options: { readonly defaultHomePath?: string } = {},
 ): Effect.fn.Return<CodexHomeLayout, never, Path.Path> {
   const path = yield* Path.Path;
-  const sharedHomePath = resolveHomePath(path, config.homePath);
+  const sharedHomePath = resolveHomePath(path, config.homePath, options.defaultHomePath);
   const shadowHomePath = config.shadowHomePath.trim();
   if (shadowHomePath.length === 0) {
     return {
       mode: "direct",
       sharedHomePath,
-      effectiveHomePath: config.homePath.trim().length > 0 ? sharedHomePath : undefined,
+      effectiveHomePath:
+        config.homePath.trim().length > 0 || options.defaultHomePath?.trim()
+          ? sharedHomePath
+          : undefined,
       continuationKey: `codex:home:${sharedHomePath}`,
     };
   }
@@ -320,10 +327,9 @@ const ensureShadowAuthIsPrivate = Effect.fn("CodexHomeLayout.ensureShadowAuthIsP
 export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome")(function* (
   layout: CodexHomeLayout,
 ) {
-  if (layout.mode !== "authOverlay") return;
   const effectiveHomePath = layout.effectiveHomePath;
   if (!effectiveHomePath) return;
-  if (layout.sharedHomePath === effectiveHomePath) {
+  if (layout.mode === "authOverlay" && layout.sharedHomePath === effectiveHomePath) {
     return yield* new CodexShadowHomePathConflictError({
       sharedHomePath: layout.sharedHomePath,
       effectiveHomePath,
@@ -346,6 +352,11 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
           }),
       }),
     );
+
+  if (layout.mode === "direct") {
+    yield* makeDirectory(effectiveHomePath);
+    return;
+  }
 
   yield* Effect.all(
     [

@@ -48,6 +48,13 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
 export const resolveUserDataPath = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
+  const currentPath = environment.path.join(
+    environment.appDataDirectory,
+    environment.userDataDirName,
+  );
+  if (environment.legacyUserDataDirName === environment.userDataDirName) {
+    return currentPath;
+  }
   const legacyPath = environment.path.join(
     environment.appDataDirectory,
     environment.legacyUserDataDirName,
@@ -61,9 +68,7 @@ export const resolveUserDataPath = Effect.gen(function* () {
         }),
     ),
   );
-  return legacyPathExists
-    ? legacyPath
-    : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
+  return legacyPathExists ? legacyPath : currentPath;
 }).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
 
 export const make = Effect.gen(function* () {

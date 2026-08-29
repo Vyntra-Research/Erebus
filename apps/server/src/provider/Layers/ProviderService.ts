@@ -18,6 +18,7 @@ import {
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
   ProviderSessionStartInput,
+  ProviderSteerTurnInput,
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
   type ProviderInstanceId,
@@ -615,7 +616,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (!instanceInfo.enabled) {
           return yield* toValidationError(
             "ProviderService.startSession",
-            `Provider instance '${resolvedInstanceId}' is disabled in T3 Code settings.`,
+            `Provider instance '${resolvedInstanceId}' is disabled in Erebus settings.`,
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
@@ -861,6 +862,28 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             }),
         }),
       );
+    },
+  );
+
+  const steerTurn: ProviderServiceMethod<"steerTurn"> = Effect.fn("steerTurn")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.steerTurn",
+        schema: ProviderSteerTurnInput,
+        payload: rawInput,
+      });
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.steerTurn",
+        allowRecovery: false,
+      });
+      if (!routed.adapter.steerTurn) {
+        return yield* toValidationError(
+          "ProviderService.steerTurn",
+          `Provider '${routed.adapter.provider}' does not support passive turn steering.`,
+        );
+      }
+      yield* routed.adapter.steerTurn(input);
     },
   );
 
@@ -1223,6 +1246,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    steerTurn,
     respondToRequest,
     respondToUserInput,
     stopSession,

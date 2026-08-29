@@ -13,7 +13,10 @@ import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@t3tools
 
 import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
-import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
+import {
+  codexTextGenerationExecutionPolicyArgs,
+  makeCodexTextGeneration,
+} from "./CodexTextGeneration.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
@@ -670,4 +673,14 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
+
+  it("auto-reviews tools only for isolated structured generation", () => {
+    expect(codexTextGenerationExecutionPolicyArgs("generateStructured")).toEqual([
+      "--approve-for-me",
+    ]);
+    expect(codexTextGenerationExecutionPolicyArgs("generateCommitMessage")).toEqual([
+      "-s",
+      "read-only",
+    ]);
+  });
 });

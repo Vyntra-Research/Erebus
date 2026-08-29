@@ -5,6 +5,7 @@ import {
   EventId,
   IsoDateTime,
   ProviderItemId,
+  ProjectId,
   ThreadId,
   TurnId,
 } from "./baseSchemas.ts";
@@ -52,6 +53,7 @@ export type ProviderSession = typeof ProviderSession.Type;
 
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
+  projectId: Schema.optional(ProjectId),
   provider: Schema.optional(ProviderDriverKind),
   // See ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),
@@ -90,6 +92,13 @@ export const ProviderInterruptTurnInput = Schema.Struct({
   turnId: Schema.optional(TurnId),
 });
 export type ProviderInterruptTurnInput = typeof ProviderInterruptTurnInput.Type;
+
+export const ProviderSteerTurnInput = Schema.Struct({
+  threadId: ThreadId,
+  expectedTurnId: TurnId,
+  text: TrimmedNonEmptyString,
+});
+export type ProviderSteerTurnInput = typeof ProviderSteerTurnInput.Type;
 
 export const ProviderStopSessionInput = Schema.Struct({
   threadId: ThreadId,

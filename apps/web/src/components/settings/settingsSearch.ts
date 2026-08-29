@@ -5,6 +5,7 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/providers"
+  | "/settings/research"
   | "/settings/integrations"
   | "/settings/source-control"
   | "/settings/connections"
@@ -29,6 +30,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
+  "/settings/research": "Research",
   "/settings/integrations": "Integrations",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
@@ -42,6 +44,36 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * here once instead of separately in the panel and the index.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "research-observer-message-window",
+    title: "Observer message window",
+    to: "/settings/research",
+  },
+  {
+    id: "research-observer-confidence",
+    title: "Observer intervention confidence",
+    to: "/settings/research",
+  },
+  {
+    id: "research-observer-cooldown",
+    title: "Observer cooldown",
+    to: "/settings/research",
+  },
+  {
+    id: "research-observer-turn-limit",
+    title: "Observer corrections per turn",
+    to: "/settings/research",
+  },
+  {
+    id: "research-evaluator-model",
+    title: "Observer and Judge model",
+    to: "/settings/research",
+  },
+  {
+    id: "research-evaluator-effort",
+    title: "Observer and Judge reasoning effort",
+    to: "/settings/research",
+  },
   {
     id: "color-scheme",
     title: "Color scheme",

@@ -54,7 +54,7 @@ const decodeServerSettings = Schema.decodeSync(ServerSettings);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodedDefaultServerSettings = encodeServerSettings(DEFAULT_SERVER_SETTINGS);
 
-const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({});
+const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({ enabled: true });
 const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({});
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 const disabledCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({
@@ -301,6 +301,15 @@ function makeCodexProbeSnapshot(
       },
     ],
     skills: [],
+    proteus: {
+      runtime: "unknown",
+      plugin: "unknown",
+      skills: "unknown",
+      mcp: "unknown",
+      version: null,
+      message: null,
+      checkedAt: "2026-08-27T12:00:00.000Z",
+    },
     ...input,
   };
 }
@@ -424,7 +433,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "unauthenticated");
           assert.strictEqual(
             status.message,
-            "Codex CLI is not authenticated. Run `codex login` and try again.",
+            "Codex is not authenticated in the Erebus profile. Run `codex login --device-auth` and try again. If device login is disabled, enable device code authorization in ChatGPT Security settings first.",
           );
         }),
       );
@@ -1599,7 +1608,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       );
 
-      it.effect("includes unavailable instance snapshots in getProviders", () =>
+      it.effect("excludes inactive provider instances from getProviders", () =>
         Effect.gen(function* () {
           const serverSettings = yield* makeMutableServerSettingsService(
             decodeServerSettings(
@@ -1655,109 +1664,96 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             const providers = yield* registry.getProviders;
             const ghost = providers.find((provider) => provider.instanceId === "ghost_main");
 
-            assert.notStrictEqual(ghost, undefined);
-            assert.strictEqual(ghost?.driver, "ghostDriver");
-            assert.strictEqual(ghost?.availability, "unavailable");
-            assert.match(ghost?.unavailableReason ?? "", /ghostDriver/);
+            assert.strictEqual(ghost, undefined);
           }).pipe(Effect.provide(runtimeServices));
         }),
       );
 
-      it.effect(
-        "keeps Cursor disabled and skips provider probing when settings use their defaults",
-        () =>
-          Effect.gen(function* () {
-            const serverSettings = yield* makeMutableServerSettingsService(
-              decodeServerSettings(
-                deepMerge(encodedDefaultServerSettings, {
-                  providers: {
-                    codex: {
-                      enabled: false,
-                    },
-                    grok: {
-                      enabled: false,
-                    },
+      it.effect("excludes Cursor and skips its probe when settings use their defaults", () =>
+        Effect.gen(function* () {
+          const serverSettings = yield* makeMutableServerSettingsService(
+            decodeServerSettings(
+              deepMerge(encodedDefaultServerSettings, {
+                providers: {
+                  codex: {
+                    enabled: false,
                   },
-                }),
+                  grok: {
+                    enabled: false,
+                  },
+                },
+              }),
+            ),
+          );
+          let cursorSpawned = false;
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const providerRegistryLayer = ProviderRegistryLive.pipe(
+            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(
+              Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
+            ),
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), {
+                prefix: "t3-provider-registry-",
+              }),
+            ),
+            Layer.provideMerge(TestHttpClientLive),
+            Layer.provideMerge(
+              Layer.succeed(
+                ProviderEventLoggers.ProviderEventLoggers,
+                ProviderEventLoggers.NoOpProviderEventLoggers,
               ),
-            );
-            let cursorSpawned = false;
-            const scope = yield* Scope.make();
-            yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
-            const providerRegistryLayer = ProviderRegistryLive.pipe(
-              Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
-              Layer.provideMerge(
-                Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
-              ),
-              Layer.provideMerge(
-                ServerConfig.layerTest(process.cwd(), {
-                  prefix: "t3-provider-registry-",
-                }),
-              ),
-              Layer.provideMerge(TestHttpClientLive),
-              Layer.provideMerge(
-                Layer.succeed(
-                  ProviderEventLoggers.ProviderEventLoggers,
-                  ProviderEventLoggers.NoOpProviderEventLoggers,
-                ),
-              ),
-              Layer.provideMerge(ModelManifest.layerTest),
-              Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
-              Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
-              Layer.provideMerge(
-                mockCommandSpawnerLayer((command, args) => {
-                  if (command === "cursor-agent") {
-                    cursorSpawned = true;
-                  }
-                  const joined = args.join(" ");
-                  if (joined === "--version") {
-                    return {
-                      stdout: `${command} 1.0.0\n`,
-                      stderr: "",
-                      code: 0,
-                    };
-                  }
-                  if (joined === "auth status") {
-                    return {
-                      stdout: '{"authenticated":true}\n',
-                      stderr: "",
-                      code: 0,
-                    };
-                  }
-                  throw new Error(`Unexpected args: ${command} ${joined}`);
-                }),
-              ),
-            );
-            const runtimeServices = yield* Layer.build(
-              Layer.mergeAll(
-                Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
-                providerRegistryLayer,
-              ),
-            ).pipe(Scope.provide(scope));
+            ),
+            Layer.provideMerge(ModelManifest.layerTest),
+            Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
+            Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+            Layer.provideMerge(
+              mockCommandSpawnerLayer((command, args) => {
+                if (command === "cursor-agent") {
+                  cursorSpawned = true;
+                }
+                const joined = args.join(" ");
+                if (joined === "--version") {
+                  return {
+                    stdout: `${command} 1.0.0\n`,
+                    stderr: "",
+                    code: 0,
+                  };
+                }
+                if (joined === "auth status") {
+                  return {
+                    stdout: '{"authenticated":true}\n',
+                    stderr: "",
+                    code: 0,
+                  };
+                }
+                throw new Error(`Unexpected args: ${command} ${joined}`);
+              }),
+            ),
+          );
+          const runtimeServices = yield* Layer.build(
+            Layer.mergeAll(
+              Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
+              providerRegistryLayer,
+            ),
+          ).pipe(Scope.provide(scope));
 
-            yield* Effect.gen(function* () {
-              const registry = yield* ProviderRegistry.ProviderRegistry;
-              const providers = yield* registry.getProviders;
-              const cursorProvider = providers.find(
-                (provider) => provider.instanceId === ProviderInstanceId.make("cursor"),
-              );
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry.ProviderRegistry;
+            const providers = yield* registry.getProviders;
+            const cursorProvider = providers.find(
+              (provider) => provider.instanceId === ProviderInstanceId.make("cursor"),
+            );
 
-              assert.deepStrictEqual(providers.map((provider) => provider.instanceId).toSorted(), [
-                "claudeAgent",
-                "codex",
-                "cursor",
-                "grok",
-                "opencode",
-              ]);
-              assert.strictEqual(cursorProvider?.enabled, false);
-              assert.strictEqual(cursorProvider?.status, "disabled");
-              assert.strictEqual(
-                cursorProvider?.message,
-                "Cursor is disabled in T3 Code settings.",
-              );
-              assert.strictEqual(cursorSpawned, false);
-            }).pipe(Effect.provide(runtimeServices));
-          }),
+            assert.deepStrictEqual(
+              providers.map((provider) => provider.instanceId),
+              ["codex"],
+            );
+            assert.strictEqual(cursorProvider, undefined);
+            assert.strictEqual(cursorSpawned, false);
+          }).pipe(Effect.provide(runtimeServices));
+        }),
       );
 
       it.effect("skips codex probes entirely when the provider is disabled", () =>
@@ -1768,7 +1764,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.enabled, false);
           assert.strictEqual(status.status, "disabled");
           assert.strictEqual(status.installed, false);
-          assert.strictEqual(status.message, "Codex is disabled in T3 Code settings.");
+          assert.strictEqual(status.message, "Codex is disabled in Erebus settings.");
         }),
       );
     });

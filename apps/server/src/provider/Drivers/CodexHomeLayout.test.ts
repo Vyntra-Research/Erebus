@@ -59,6 +59,28 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
       }),
     );
 
+    it.effect("uses and creates the isolated default CODEX_HOME", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* makeTempDir("t3code-codex-default-root-");
+        const defaultHomePath = path.join(root, "providers", "codex");
+
+        const layout = yield* resolveCodexHomeLayout(decodeCodexSettings({}), {
+          defaultHomePath,
+        });
+        yield* materializeCodexShadowHome(layout);
+
+        expect(layout).toMatchObject({
+          mode: "direct",
+          sharedHomePath: defaultHomePath,
+          effectiveHomePath: defaultHomePath,
+          continuationKey: `codex:home:${defaultHomePath}`,
+        });
+        expect(yield* fileSystem.exists(defaultHomePath)).toBe(true);
+      }),
+    );
+
     it.effect("uses the shared home for continuation and the shadow home for runtime", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;

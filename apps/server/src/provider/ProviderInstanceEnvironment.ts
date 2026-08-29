@@ -4,12 +4,12 @@ export function mergeProviderInstanceEnvironment(
   environment: ProviderInstanceEnvironment | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  if (!environment || environment.length === 0) {
-    return baseEnv;
-  }
-
   const next: NodeJS.ProcessEnv = { ...baseEnv };
-  for (const variable of environment) {
+  // NODE_ENV describes the T3 server process. Inheriting it silently changes
+  // application builds and tests launched by an agent. A provider can still
+  // opt in through its explicit environment settings.
+  delete next.NODE_ENV;
+  for (const variable of environment ?? []) {
     next[variable.name] = variable.value;
   }
   return next;

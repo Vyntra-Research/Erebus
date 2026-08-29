@@ -4,7 +4,7 @@ import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { describe } from "vite-plus/test";
-import { DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_MODEL, ThreadId, TurnId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
@@ -16,8 +16,10 @@ import {
 } from "../CodexDeveloperInstructions.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
+  buildTurnSteerParams,
   buildTurnStartParams,
   describeMcpElicitation,
+  handleDynamicToolCallForProviderThread,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
@@ -25,6 +27,72 @@ import {
   toMcpElicitationResponse,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+
+const proteusHealth = {
+  runtime: "ready",
+  plugin: "ready",
+  skills: "ready",
+  mcp: "ready",
+  version: "2.1.5",
+  message: null,
+  checkedAt: "2026-08-28T00:00:00.000Z",
+} as const;
+
+const dynamicToolParams = {
+  namespace: "research",
+  tool: "get_status",
+  callId: "call-1",
+  threadId: "provider-thread-1",
+  turnId: "turn-1",
+  arguments: { campaignId: "smoke-test" },
+} as const;
+
+it.effect("dispatches a dynamic tool call from the active provider thread", () =>
+  Effect.gen(function* () {
+    let calls = 0;
+    const response = yield* handleDynamicToolCallForProviderThread({
+      providerThreadId: "provider-thread-1",
+      params: dynamicToolParams,
+      proteus: proteusHealth,
+      handle: () => {
+        calls += 1;
+        return Effect.succeed({ success: true, contentItems: [] });
+      },
+    });
+
+    NodeAssert.equal(calls, 1);
+    NodeAssert.equal(response.success, true);
+  }),
+);
+
+it.effect("rejects a dynamic tool call from another provider thread", () =>
+  Effect.gen(function* () {
+    let calls = 0;
+    const response = yield* handleDynamicToolCallForProviderThread({
+      providerThreadId: "provider-thread-2",
+      params: dynamicToolParams,
+      proteus: proteusHealth,
+      handle: () => {
+        calls += 1;
+        return Effect.succeed({ success: true, contentItems: [] });
+      },
+    });
+
+    NodeAssert.equal(calls, 0);
+    NodeAssert.equal(response.success, false);
+  }),
+);
+
+it("builds native steering for the exact expected turn", () => {
+  NodeAssert.deepStrictEqual(
+    buildTurnSteerParams("provider-thread-1", TurnId.make("turn-1"), "Return to the contract."),
+    {
+      threadId: "provider-thread-1",
+      expectedTurnId: "turn-1",
+      input: [{ type: "text", text: "Return to the contract." }],
+    },
+  );
+});
 
 describe("CodexSessionRuntimeIdentifierGenerationError", () => {
   it("retains identifier purpose and the random source failure", () => {
@@ -248,6 +316,24 @@ describe("buildTurnStartParams", () => {
       ],
     });
   });
+
+  it.effect("injects refreshed Erebus instructions even when interaction mode is absent", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "Continue",
+        additionalDeveloperInstructions: "<erebus_campaign_state>active</erebus_campaign_state>",
+      });
+
+      NodeAssert.equal(params.collaborationMode?.mode, "default");
+      NodeAssert.ok(
+        params.collaborationMode?.settings.developer_instructions?.includes(
+          "<erebus_campaign_state>active</erebus_campaign_state>",
+        ),
+      );
+    }),
+  );
 });
 
 describe("Codex MCP elicitation approvals", () => {
@@ -460,7 +546,7 @@ describe("buildCodexDeveloperInstructions", () => {
     });
 
     NodeAssert.ok(instructions.startsWith(codexDefaultModeDeveloperInstructions(true)));
-    NodeAssert.match(instructions, /T3 Code/);
+    NodeAssert.match(instructions, /Erebus/);
     NodeAssert.match(instructions, /Codex harness/);
     NodeAssert.match(instructions, /as gpt-5\.3-codex with high reasoning effort/);
   });
@@ -519,7 +605,7 @@ describe("T3 browser developer instructions", () => {
     ]) {
       NodeAssert.doesNotMatch(instructions, /preview_status/);
       NodeAssert.doesNotMatch(instructions, /preview_open/);
-      NodeAssert.doesNotMatch(instructions, /T3 Code collaborative browser/);
+      NodeAssert.doesNotMatch(instructions, /Erebus collaborative browser/);
       // Steering away from other browser automation must go with the tools;
       // keeping it would leave the model talked out of its only option.
       NodeAssert.doesNotMatch(instructions, /Do not switch to global browser skills/);
@@ -775,6 +861,46 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it.effect("registers dynamic tools on a fresh Codex thread", () =>
+    Effect.gen(function* () {
+      let startPayload: CodexRpc.ClientRequestParamsByMethod["thread/start"] | undefined;
+      const client = {
+        request: <M extends "thread/start" | "thread/resume">(
+          method: M,
+          payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) => {
+          if (method === "thread/start") {
+            startPayload = payload as CodexRpc.ClientRequestParamsByMethod["thread/start"];
+          }
+          return Effect.succeed(
+            makeThreadOpenResponse("fresh-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
+          );
+        },
+      };
+      const dynamicTools = [
+        {
+          type: "namespace",
+          name: "research",
+          description: "Research controls",
+          tools: [],
+        },
+      ] as const;
+
+      yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+        dynamicTools,
+      });
+
+      NodeAssert.deepStrictEqual(startPayload?.dynamicTools, dynamicTools);
+    }),
+  );
+
   it.effect("falls back to thread/start when resume fails recoverably", () =>
     Effect.gen(function* () {
       const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];

@@ -6,6 +6,7 @@ import {
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   shouldPreserveAssistantLineBreaks,
+  workLogEntryIsResearchSupervision,
 } from "./MessagesTimeline.logic";
 
 describe("shouldPreserveAssistantLineBreaks", () => {
@@ -16,6 +17,247 @@ describe("shouldPreserveAssistantLineBreaks", () => {
       ),
     ).toBe(true);
     expect(shouldPreserveAssistantLineBreaks("A normal\\nmarkdown paragraph")).toBe(false);
+  });
+});
+
+describe("research supervision timeline entries", () => {
+  it("recognizes Observer and Judge activity kinds", () => {
+    expect(
+      workLogEntryIsResearchSupervision({
+        id: "observer",
+        createdAt: "2026-01-01T00:00:00Z",
+        label: "Observer course correction delivered",
+        tone: "info",
+        sourceActivityKind: "research.observer.intervention",
+      }),
+    ).toBe(true);
+    expect(
+      workLogEntryIsResearchSupervision({
+        id: "judge",
+        createdAt: "2026-01-01T00:00:01Z",
+        label: "Judge verdict: accepted",
+        tone: "info",
+        sourceActivityKind: "research.judge.evaluation",
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps each supervision event visible and outside adjacent work overflow", () => {
+    const timelineEntries = [
+      {
+        id: "work-before-entry",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:01Z",
+        entry: {
+          id: "work-before",
+          createdAt: "2026-01-01T00:00:01Z",
+          label: "Regular work before supervision",
+          tone: "info" as const,
+        },
+      },
+      {
+        id: "observer-entry",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:02Z",
+        entry: {
+          id: "observer",
+          createdAt: "2026-01-01T00:00:02Z",
+          label: "Observer course correction delivered",
+          detail: "Return to the active branch.",
+          tone: "info" as const,
+          sourceActivityKind: "research.observer.intervention",
+        },
+      },
+      {
+        id: "judge-entry",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:03Z",
+        entry: {
+          id: "judge",
+          createdAt: "2026-01-01T00:00:03Z",
+          label: "Judge verdict: accepted",
+          detail: "All gates passed.",
+          tone: "info" as const,
+          sourceActivityKind: "research.judge.evaluation",
+        },
+      },
+      {
+        id: "work-after-entry",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:04Z",
+        entry: {
+          id: "work-after",
+          createdAt: "2026-01-01T00:00:04Z",
+          label: "Regular work after supervision",
+          tone: "info" as const,
+        },
+      },
+    ];
+
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "work-before-entry",
+      "observer-entry",
+      "judge-entry",
+      "work-after-entry",
+    ]);
+    const observerRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "work" }> =>
+        row.id === "observer-entry" && row.kind === "work",
+    );
+    const judgeRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "work" }> =>
+        row.id === "judge-entry" && row.kind === "work",
+    );
+    expect(observerRow?.groupedEntries).toHaveLength(1);
+    expect(judgeRow?.groupedEntries).toHaveLength(1);
+  });
+
+  it("keeps an Observer correction visible after its provider turn settles", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user" as never,
+            role: "user",
+            text: "Continue the campaign",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-first-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:01Z",
+          message: {
+            id: "assistant-first" as never,
+            role: "assistant",
+            text: "Inspecting the active branch.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:01Z",
+            updatedAt: "2026-01-01T00:00:02Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "observer-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:03Z",
+          entry: {
+            id: "observer",
+            createdAt: "2026-01-01T00:00:03Z",
+            turnId: "turn-1" as never,
+            label: "Observer course correction delivered",
+            detail: "Return to the campaign objective.",
+            tone: "info",
+            sourceActivityKind: "research.observer.intervention",
+          },
+        },
+        {
+          id: "assistant-final-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:04Z",
+          message: {
+            id: "assistant-final" as never,
+            role: "assistant",
+            text: "Route corrected.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:04Z",
+            updatedAt: "2026-01-01T00:00:05Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toContain("observer-entry");
+  });
+
+  it("shows the Judge card without duplicating its provider-facing steering message", () => {
+    const evaluationId = "d261f6cb-fd92-483c-82e5-1f26512ad1dd";
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "judge-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:01Z",
+          entry: {
+            id: "judge",
+            createdAt: "2026-01-01T00:00:01Z",
+            label: "Judge verdict: accepted",
+            detail: "All gates passed.",
+            tone: "info",
+            sourceActivityKind: "research.judge.evaluation",
+            supervisionEvaluationId: evaluationId,
+          },
+        },
+        {
+          id: `erebus:judge-follow-up:${evaluationId}`,
+          kind: "message",
+          createdAt: "2026-01-01T00:00:02Z",
+          message: {
+            id: `erebus:judge-follow-up:${evaluationId}` as never,
+            role: "user",
+            text: `<erebus_steering source="judge" delivery="followUp" evaluation_id="${evaluationId}">\n<handling>Control context</handling>\n</erebus_steering>`,
+            turnId: null,
+            createdAt: "2026-01-01T00:00:02Z",
+            updatedAt: "2026-01-01T00:00:02Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["judge-entry"]);
+  });
+
+  it("keeps the provider-facing steering message as a fallback when its card is missing", () => {
+    const evaluationId = "evaluation-without-card";
+    const messageId = `erebus:judge-follow-up:${evaluationId}`;
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: messageId,
+          kind: "message",
+          createdAt: "2026-01-01T00:00:02Z",
+          message: {
+            id: messageId as never,
+            role: "user",
+            text: `<erebus_steering source="judge" delivery="followUp" evaluation_id="${evaluationId}">\n<handling>Control context</handling>\n</erebus_steering>`,
+            turnId: null,
+            createdAt: "2026-01-01T00:00:02Z",
+            updatedAt: "2026-01-01T00:00:02Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual([messageId]);
   });
 });
 

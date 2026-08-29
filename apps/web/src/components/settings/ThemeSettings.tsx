@@ -19,6 +19,7 @@ import {
   type ThemeAppearance,
   type ThemeDefinition,
   type ThemeHalves,
+  CODEX_THEME,
   T3_CHAT_THEME,
   EMBER_THEME,
   GROVE_THEME,
@@ -51,6 +52,7 @@ import {
 import { ThemeWireframe } from "./ThemeWireframe";
 
 const MAINTAINER_THEMES: ReadonlyArray<ThemeDefinition> = [
+  CODEX_THEME,
   T3_CHAT_THEME,
   GROVE_THEME,
   OCEAN_THEME,
@@ -683,7 +685,7 @@ export function ThemeLibrary({
 
   // Rings always show the effective owner of each appearance: an unpicked
   // half belongs to the default card (a null owner), so a fresh install
-  // shows T3 Code selected instead of nothing.
+  // shows Erebus selected instead of nothing.
   const pickedModesFor = (cardId: string | null): ThemeMode[] => {
     const rings: ThemeMode[] = [];
     if (lightOwner === cardId) rings.push("light");
@@ -849,7 +851,7 @@ export function ThemeLibrary({
   return (
     <div className="space-y-3">
       <p className="px-3 text-[13px] leading-[1.45] text-muted-foreground/80 sm:px-4">
-        Choose how T3 Code looks. Use a built-in theme or make your own.
+        Choose how Erebus looks. Use a built-in theme or make your own.
       </p>
       <h3 className="px-3 text-sm font-medium tracking-[-0.005em] text-foreground sm:px-4">
         Color scheme

@@ -1,25 +1,22 @@
-# T3 Code docs
+# Erebus docs
 
-## Using T3 Code
+## Using Erebus
 
 - [Install and first run](./user/install.md)
+- [Research supervision](./user/research-supervision.md)
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Organizing threads](./user/thread-sidebar.md)
 - [Review usage](./user/usage.md)
 - [Customize a project icon](./user/project-settings.md)
-- [Mobile appearance](./user/mobile-appearance.md)
-- [Remote access](./user/remote-access.md)
+- Mobile and remote clients remain inherited development surfaces and are not enabled in `0.1.1`.
 - [Keeping app and server in sync](./user/updating.md)
 - [Source control integrations](./user/source-control.md)
-- [Background service (Linux)](./user/background-service.md)
-- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md)
-
-Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
+- Provider: [Codex](./user/providers-codex.md)
 
 ---
 
-## Working on T3 Code
+## Working on Erebus
 
 Everything below is for maintainers. Setup lives in the [root README](../README.md);
 policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../AGENTS.md).
@@ -34,13 +31,10 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Server updates](./internals/server-updates.md)
 - [Resource telemetry](./internals/resource-telemetry.md)
 - [Environment auth](./internals/environment-auth.md)
-- [T3 Connect](./internals/t3-connect.md)
+- Inherited relay, mobile, and other provider code remains dormant in `0.1.1`.
 - [CI gates](./internals/ci.md)
 - [Engineering work artifacts](./internals/work-artifacts.md)
 
 ### Runbooks
 
 - [Release](./operations/release.md)
-- [Observability](./operations/observability.md)
-- [Relay observability](./operations/relay-observability.md)
-- [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)

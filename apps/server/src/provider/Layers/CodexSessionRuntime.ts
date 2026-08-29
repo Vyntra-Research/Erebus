@@ -13,6 +13,7 @@ import {
   type ProviderSession,
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
+  type ResearchProteusHealth,
   RuntimeMode,
   ThreadId,
   TurnId,
@@ -36,7 +37,7 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { buildCodexInitializeParams } from "./CodexProvider.ts";
+import { buildCodexInitializeParams, readCodexProteusHealth } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
@@ -160,6 +161,35 @@ export interface CodexSessionRuntimeOptions {
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly appServerArgs?: ReadonlyArray<string>;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
+  readonly handleDynamicTool?: (
+    params: EffectCodexSchema.DynamicToolCallParams,
+    proteus: ResearchProteusHealth,
+  ) => Effect.Effect<EffectCodexSchema.DynamicToolCallResponse>;
+  readonly getAdditionalDeveloperInstructions?: () => Effect.Effect<string>;
+}
+
+type CodexDynamicToolHandler = NonNullable<CodexSessionRuntimeOptions["handleDynamicTool"]>;
+
+export function handleDynamicToolCallForProviderThread(input: {
+  readonly providerThreadId: string | undefined;
+  readonly params: EffectCodexSchema.DynamicToolCallParams;
+  readonly proteus: ResearchProteusHealth;
+  readonly handle: CodexDynamicToolHandler;
+}): Effect.Effect<EffectCodexSchema.DynamicToolCallResponse> {
+  if (!input.providerThreadId || input.params.threadId !== input.providerThreadId) {
+    return Effect.succeed({
+      success: false,
+      contentItems: [
+        {
+          type: "inputText",
+          text: "Dynamic tool call rejected: provider thread mismatch.",
+        },
+      ],
+    });
+  }
+
+  return input.handle(input.params, input.proteus);
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -191,6 +221,10 @@ export interface CodexSessionRuntimeShape {
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly steerTurn: (
+    expectedTurnId: TurnId,
+    text: string,
+  ) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
     numTurns: number,
@@ -525,6 +559,7 @@ function buildThreadStartParams(input: {
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   return {
@@ -532,6 +567,7 @@ function buildThreadStartParams(input: {
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     approvalsReviewer: config.approvalsReviewer,
+    ...(input.dynamicTools ? { dynamicTools: input.dynamicTools } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
@@ -563,21 +599,24 @@ function buildCodexCollaborationMode(input: {
   readonly model?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly browserToolsAvailable?: boolean;
+  readonly additionalDeveloperInstructions?: string;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
-  if (input.interactionMode === undefined) {
+  if (input.interactionMode === undefined && !input.additionalDeveloperInstructions?.trim()) {
     return undefined;
   }
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
   const reasoningEffort = input.effort ?? "medium";
+  const interactionMode = input.interactionMode ?? "default";
   return {
-    mode: input.interactionMode,
+    mode: interactionMode,
     settings: {
       model,
       reasoning_effort: reasoningEffort,
       developer_instructions: buildCodexDeveloperInstructions(
-        input.interactionMode,
+        interactionMode,
         { model, reasoningEffort },
         input.browserToolsAvailable ?? true,
+        input.additionalDeveloperInstructions,
       ),
     },
   };
@@ -597,6 +636,7 @@ export function buildTurnStartParams(input: {
   readonly interactionMode?: ProviderInteractionMode;
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean;
+  readonly additionalDeveloperInstructions?: string;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -618,6 +658,9 @@ export function buildTurnStartParams(input: {
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
+    ...(input.additionalDeveloperInstructions
+      ? { additionalDeveloperInstructions: input.additionalDeveloperInstructions }
+      : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -690,6 +733,7 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -697,16 +741,19 @@ export const openCodexThread = (input: {
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
+    ...(input.dynamicTools ? { dynamicTools: input.dynamicTools } : {}),
   });
 
   if (resumeThreadId === undefined) {
     return input.client.request("thread/start", startParams);
   }
 
+  const { dynamicTools: _dynamicTools, ...resumeParams } = startParams;
+
   return input.client
     .request("thread/resume", {
       threadId: resumeThreadId,
-      ...startParams,
+      ...resumeParams,
     })
     .pipe(
       Effect.catchIf(isRecoverableThreadResumeError, (error) =>
@@ -720,6 +767,18 @@ export const openCodexThread = (input: {
       ),
     );
 };
+
+export function buildTurnSteerParams(
+  threadId: string,
+  expectedTurnId: TurnId,
+  text: string,
+): CodexRpc.ClientRequestParamsByMethod["turn/steer"] {
+  return {
+    threadId,
+    expectedTurnId,
+    input: [{ type: "text", text }],
+  };
+}
 
 function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
   switch (notification.method) {
@@ -1130,6 +1189,15 @@ export const makeCodexSessionRuntime = (
     const collabChildLiveTurnsRef = yield* Ref.make(new Map<string, string>());
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter();
     const closedRef = yield* Ref.make(false);
+    const proteusHealthRef = yield* Ref.make<ResearchProteusHealth>({
+      runtime: "unknown",
+      plugin: "unknown",
+      skills: "unknown",
+      mcp: "unknown",
+      version: null,
+      message: "Proteus has not been checked for this session.",
+      checkedAt: DateTime.formatIso(yield* DateTime.now),
+    });
 
     // `~` is not shell-expanded when env vars are set via
     // `child_process.spawn`; `expandHomePath` lets a configured
@@ -1941,6 +2009,21 @@ export const makeCodexSessionRuntime = (
       }),
     );
 
+    if (options.handleDynamicTool) {
+      yield* client.handleServerRequest("item/tool/call", (payload) =>
+        Effect.gen(function* () {
+          const providerThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
+          const proteus = yield* Ref.get(proteusHealthRef);
+          return yield* handleDynamicToolCallForProviderThread({
+            providerThreadId,
+            params: payload,
+            proteus,
+            handle: options.handleDynamicTool!,
+          });
+        }),
+      );
+    }
+
     yield* client.handleUnknownServerRequest((method) =>
       Effect.fail(CodexErrors.CodexAppServerRequestError.methodNotFound(method)),
     );
@@ -2030,6 +2113,12 @@ export const makeCodexSessionRuntime = (
       yield* client.request("initialize", buildCodexInitializeParams());
       yield* client.notify("initialized", undefined);
 
+      if (options.handleDynamicTool) {
+        yield* readCodexProteusHealth(client, options.cwd).pipe(
+          Effect.flatMap((health) => Ref.set(proteusHealthRef, health)),
+        );
+      }
+
       const requestedModel = normalizeCodexModelSlug(options.model);
 
       const opened = yield* openCodexThread({
@@ -2040,6 +2129,7 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        ...(options.dynamicTools ? { dynamicTools: options.dynamicTools } : {}),
       });
 
       const providerThreadId = opened.thread.id;
@@ -2105,6 +2195,9 @@ export const makeCodexSessionRuntime = (
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
+          const additionalDeveloperInstructions = options.getAdditionalDeveloperInstructions
+            ? yield* options.getAdditionalDeveloperInstructions()
+            : "";
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
@@ -2118,6 +2211,7 @@ export const makeCodexSessionRuntime = (
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.
             browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
+            ...(additionalDeveloperInstructions ? { additionalDeveloperInstructions } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
@@ -2179,6 +2273,11 @@ export const makeCodexSessionRuntime = (
             threadId: providerThreadId,
             turnId: effectiveTurnId,
           });
+        }),
+      steerTurn: (expectedTurnId, text) =>
+        Effect.gen(function* () {
+          const threadId = yield* readProviderThreadId;
+          yield* client.request("turn/steer", buildTurnSteerParams(threadId, expectedTurnId, text));
         }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;

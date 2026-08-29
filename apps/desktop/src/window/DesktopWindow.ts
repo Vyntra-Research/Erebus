@@ -129,6 +129,25 @@ function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
   return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
 }
 
+export function getMainWindowMaterialOptions(
+  shouldUseDarkColors: boolean,
+  platform: NodeJS.Platform,
+): Pick<
+  Electron.BrowserWindowConstructorOptions,
+  "backgroundColor" | "backgroundMaterial" | "transparent"
+> {
+  if (platform === "win32") {
+    return {
+      backgroundColor: "#00000000",
+      backgroundMaterial: "acrylic",
+      transparent: true,
+    };
+  }
+  return {
+    backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
+  };
+}
+
 type DisplayBounds = Pick<Electron.Rectangle, "x" | "y" | "width" | "height">;
 
 function windowFitsWithinDisplay(
@@ -238,7 +257,9 @@ function syncWindowAppearance(
       return;
     }
 
-    window.setBackgroundColor(getInitialWindowBackgroundColor(shouldUseDarkColors));
+    window.setBackgroundColor(
+      platform === "win32" ? "#00000000" : getInitialWindowBackgroundColor(shouldUseDarkColors),
+    );
     const { titleBarOverlay } = getWindowTitleBarOptions(shouldUseDarkColors, platform);
     if (typeof titleBarOverlay === "object") {
       window.setTitleBarOverlay(titleBarOverlay);
@@ -353,7 +374,7 @@ export const make = Effect.gen(function* () {
       show: false,
       autoHideMenuBar: true,
       ...(environment.platform === "darwin" ? { disableAutoHideCursor: true } : {}),
-      backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
+      ...getMainWindowMaterialOptions(shouldUseDarkColors, environment.platform),
       ...iconOption,
       title: environment.displayName,
       ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),

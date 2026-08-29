@@ -30,6 +30,58 @@ export function workEntryIsVisibleInGroup(
   );
 }
 
+export function workLogEntryIsResearchSupervision(entry: WorkLogEntry): boolean {
+  return (
+    entry.sourceActivityKind === "research.observer.intervention" ||
+    entry.sourceActivityKind === "research.judge.evaluation"
+  );
+}
+
+type ResearchSupervisionSource = "observer" | "judge";
+
+function researchSupervisionSource(entry: WorkLogEntry): ResearchSupervisionSource | null {
+  if (entry.sourceActivityKind === "research.observer.intervention") return "observer";
+  if (entry.sourceActivityKind === "research.judge.evaluation") return "judge";
+  return null;
+}
+
+function parseErebusSteeringMessage(
+  message: ChatMessage,
+): { source: ResearchSupervisionSource; evaluationId: string } | null {
+  if (
+    message.role !== "user" ||
+    (!String(message.id).startsWith("erebus:") && !String(message.id).startsWith("vigil:")) ||
+    typeof message.text !== "string"
+  ) {
+    return null;
+  }
+  const openingTag = /^<(?:erebus|vigil)_steering\s+([^>\r\n]+)>/.exec(message.text.trimStart());
+  if (!openingTag?.[1]) return null;
+  const source = /\bsource="(observer|judge)"/.exec(openingTag[1])?.[1];
+  const evaluationId = /\bevaluation_id="([^"]+)"/.exec(openingTag[1])?.[1];
+  if ((source !== "observer" && source !== "judge") || !evaluationId) return null;
+  return { source, evaluationId };
+}
+
+function omitVisuallyDuplicatedSupervisionMessages(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+): ReadonlyArray<TimelineEntry> {
+  const visibleSupervisionKeys = new Set<string>();
+  for (const timelineEntry of timelineEntries) {
+    if (timelineEntry.kind !== "work" || !timelineEntry.entry.supervisionEvaluationId) continue;
+    const source = researchSupervisionSource(timelineEntry.entry);
+    if (source) {
+      visibleSupervisionKeys.add(`${source}:${timelineEntry.entry.supervisionEvaluationId}`);
+    }
+  }
+  if (visibleSupervisionKeys.size === 0) return timelineEntries;
+  return timelineEntries.filter((timelineEntry) => {
+    if (timelineEntry.kind !== "message") return true;
+    const steering = parseErebusSteeringMessage(timelineEntry.message);
+    return !steering || !visibleSupervisionKeys.has(`${steering.source}:${steering.evaluationId}`);
+  });
+}
+
 export interface TimelineEndState {
   readonly isAtEnd?: boolean;
   readonly contentLength?: number;
@@ -605,7 +657,12 @@ function deriveTurnFolds(input: {
       // Agent-spawn CTA rows never fold: workflows outlive their launching
       // turn (dynamic spawns, background execution), and folding the CTA
       // when the turn settles makes a still-running fleet invisible.
-      if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
+      // Research supervision is also durable user-facing control state. It
+      // must remain visible even when the provider turn around it is folded.
+      if (
+        entry.kind === "work" &&
+        (entry.entry.agentSpawn !== undefined || workLogEntryIsResearchSupervision(entry.entry))
+      ) {
         continue;
       }
       hiddenEntryIds.add(entry.id);
@@ -668,17 +725,18 @@ export function deriveMessagesTimelineRows(input: {
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
 }): MessagesTimelineRow[] {
+  const timelineEntries = omitVisuallyDuplicatedSupervisionMessages(input.timelineEntries);
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
-    input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
+    timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
-  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
+  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineEntries);
   const unsettledTurnId = deriveUnsettledTurnId(
     input.latestTurn ?? null,
     input.runningTurnId ?? null,
   );
   const foldsByAnchorEntryId = deriveTurnFolds({
-    timelineEntries: input.timelineEntries,
+    timelineEntries,
     terminalAssistantMessageIds,
     latestTurn: input.latestTurn ?? null,
     unsettledTurnId,
@@ -692,13 +750,13 @@ export function deriveMessagesTimelineRows(input: {
     }
   }
 
-  let activeTurnHeaderIndex = input.timelineEntries.length;
+  let activeTurnHeaderIndex = timelineEntries.length;
   if (input.isWorking) {
-    const latestUserMessageIndex = lastUserMessageIndex(input.timelineEntries);
+    const latestUserMessageIndex = lastUserMessageIndex(timelineEntries);
     const firstOwnedAfterUser =
       unsettledTurnId === null
         ? -1
-        : input.timelineEntries.findIndex(
+        : timelineEntries.findIndex(
             (entry, index) =>
               index > latestUserMessageIndex && timelineEntryTurnId(entry) === unsettledTurnId,
           );
@@ -717,7 +775,7 @@ export function deriveMessagesTimelineRows(input: {
   const isVisibleActiveToolEntry = (entry: WorkLogEntry) =>
     workLogEntryIsToolLike(entry) && workEntryIsVisibleInGroup(entry, true);
   const activeEntries = input.isWorking
-    ? input.timelineEntries.filter((entry, index) => entryBelongsToActiveTurn(entry, index))
+    ? timelineEntries.filter((entry, index) => entryBelongsToActiveTurn(entry, index))
     : [];
   const activeTurnHasVisibleContent = activeEntries.some((entry) => {
     if (entry.kind === "message") {
@@ -735,8 +793,8 @@ export function deriveMessagesTimelineRows(input: {
   });
 
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
-  for (let index = input.timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
-    const entry = input.timelineEntries[index]!;
+  for (let index = timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
+    const entry = timelineEntries[index]!;
     if (
       !entryBelongsToActiveTurn(entry, index) ||
       entry.kind !== "work" ||
@@ -795,8 +853,8 @@ export function deriveMessagesTimelineRows(input: {
     }
   };
 
-  for (let index = 0; index < input.timelineEntries.length; index += 1) {
-    const timelineEntry = input.timelineEntries[index];
+  for (let index = 0; index < timelineEntries.length; index += 1) {
+    const timelineEntry = timelineEntries[index];
     if (!timelineEntry) {
       continue;
     }
@@ -832,11 +890,15 @@ export function deriveMessagesTimelineRows(input: {
     if (timelineEntry.kind === "work") {
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
-      while (cursor < input.timelineEntries.length) {
-        const nextEntry = input.timelineEntries[cursor];
+      while (
+        !workLogEntryIsResearchSupervision(timelineEntry.entry) &&
+        cursor < timelineEntries.length
+      ) {
+        const nextEntry = timelineEntries[cursor];
         if (
           !nextEntry ||
           nextEntry.kind !== "work" ||
+          workLogEntryIsResearchSupervision(nextEntry.entry) ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)
@@ -1033,7 +1095,7 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
 
-  if (input.isWorking && activeTurnHeaderIndex === input.timelineEntries.length) {
+  if (input.isWorking && activeTurnHeaderIndex === timelineEntries.length) {
     appendWorkingRow();
   }
 

@@ -63,4 +63,4 @@ export interface ProjectionStateRepositoryShape {
 export class ProjectionStateRepository extends Context.Service<
   ProjectionStateRepository,
   ProjectionStateRepositoryShape
->()("t3/persistence/Services/ProjectionState/ProjectionStateRepository") {}
+>()("erebus/persistence/Services/ProjectionState/ProjectionStateRepository") {}

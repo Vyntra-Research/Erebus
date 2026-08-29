@@ -1,10 +1,10 @@
 # Scripts
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using Erebus? See [docs/user](../user/).
 
 ## First checkout
 
-T3 Code uses [Vite+](https://viteplus.dev/guide/). Install the global `vp` command, install
+Erebus uses [Vite+](https://viteplus.dev/guide/). Install the global `vp` command, install
 dependencies, then start the dev stack:
 
 ```bash
@@ -34,7 +34,6 @@ authenticated.
   without Bun present it selects `NodePtyAdapter` and `NodeHttpServer`.
 - `vp run dev:web`: Starts just the Vite dev server for the web app.
 - `vp run dev:desktop`: Starts the Electron shell against the dev server.
-- `vp run dev:marketing`: Starts the Astro marketing site.
 - Pass dev-runner flags directly after the root task name, for example:
   `vp run dev --home-dir /tmp/t3code-dev`
 

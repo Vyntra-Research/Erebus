@@ -15,6 +15,8 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 
 import type {
   CodexSettings,
+  ResearchDependencyState,
+  ResearchProteusHealth,
   ServerProvider,
   ServerProviderState,
   ModelCapabilities,
@@ -25,6 +27,7 @@ import type {
 import { PREFERRED_DEFAULT_CODEX_MODELS, ServerSettingsError } from "@t3tools/contracts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 import {
@@ -37,6 +40,7 @@ import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
+const PROTEUS_STATUS_PROBE_TIMEOUT = "5 seconds" as const;
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -48,6 +52,7 @@ export interface CodexAppServerProviderSnapshot {
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
+  readonly proteus: ResearchProteusHealth;
 }
 
 const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
@@ -287,6 +292,98 @@ function parseCodexSkillsListResponse(
   });
 }
 
+export const readCodexProteusHealth = Effect.fn("readCodexProteusHealth")(function* (
+  client: CodexClient.CodexAppServerClient["Service"],
+  cwd: string,
+) {
+  const checkedAt = DateTime.formatIso(yield* DateTime.now);
+  const [skillsResult, pluginListResult, mcpStatusResult] = yield* Effect.all(
+    [
+      client.request("skills/list", { cwds: [cwd] }).pipe(
+        Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
+        Effect.orElseSucceed(() => Option.none()),
+      ),
+      client.request("plugin/list", { cwds: [cwd] }).pipe(
+        Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
+        Effect.orElseSucceed(() => Option.none()),
+      ),
+      client.request("mcpServerStatus/list", { detail: "toolsAndAuthOnly", limit: 100 }).pipe(
+        Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
+        Effect.orElseSucceed(() => Option.none()),
+      ),
+    ],
+    { concurrency: "unbounded" },
+  );
+  const skills = Option.isSome(skillsResult)
+    ? parseCodexSkillsListResponse(skillsResult.value, cwd)
+    : [];
+  return deriveProteusHealth({
+    pluginList: Option.isSome(pluginListResult) ? pluginListResult.value : undefined,
+    skills,
+    mcpStatus: Option.isSome(mcpStatusResult) ? mcpStatusResult.value : undefined,
+    checkedAt,
+  });
+});
+
+const isProteusName = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "proteus" || normalized.startsWith("proteus:");
+};
+
+export function deriveProteusHealth(input: {
+  readonly pluginList: CodexSchema.V2PluginListResponse | undefined;
+  readonly skills: ReadonlyArray<ServerProviderSkill>;
+  readonly mcpStatus: CodexSchema.V2ListMcpServerStatusResponse | undefined;
+  readonly checkedAt: string;
+}): ResearchProteusHealth {
+  const plugin = input.pluginList?.marketplaces
+    .flatMap((marketplace) => marketplace.plugins)
+    .find((candidate) => isProteusName(candidate.name) || isProteusName(candidate.id));
+  const mcp = input.mcpStatus?.data.find((candidate) => isProteusName(candidate.name));
+
+  let pluginState: ResearchDependencyState = "unknown";
+  if (input.pluginList) {
+    if (!plugin || !plugin.installed) {
+      pluginState = "missing";
+    } else if (plugin.availability === "DISABLED_BY_ADMIN") {
+      pluginState = "incompatible";
+    } else {
+      pluginState = plugin.enabled ? "ready" : "failed";
+    }
+  }
+
+  const hasProteusSkills = input.skills.some((skill) => isProteusName(skill.name));
+  const skillsState: ResearchDependencyState = hasProteusSkills
+    ? "ready"
+    : input.pluginList
+      ? "missing"
+      : "unknown";
+
+  let mcpState: ResearchDependencyState = "unknown";
+  if (input.mcpStatus) {
+    if (!mcp) {
+      mcpState = "missing";
+    } else {
+      mcpState = Object.keys(mcp.tools).length > 0 ? "ready" : "failed";
+    }
+  }
+
+  const issues: string[] = [];
+  if (pluginState !== "ready") issues.push(`plugin ${pluginState}`);
+  if (skillsState !== "ready") issues.push(`skills ${skillsState}`);
+  if (mcpState !== "ready") issues.push(`MCP ${mcpState}`);
+
+  return {
+    runtime: mcpState,
+    plugin: pluginState,
+    skills: skillsState,
+    mcp: mcpState,
+    version: plugin?.localVersion ?? plugin?.version ?? mcp?.serverInfo?.version ?? null,
+    message: issues.length === 0 ? "Proteus is ready." : `Proteus: ${issues.join(", ")}.`,
+    checkedAt: input.checkedAt,
+  };
+}
+
 const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   client: CodexClient.CodexAppServerClient["Service"],
 ) {
@@ -309,7 +406,7 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   return {
     clientInfo: {
       name: "t3code_desktop",
-      title: "T3 Code Desktop",
+      title: "Erebus Desktop",
       version: packageJson.version,
     },
     capabilities: {
@@ -371,7 +468,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   const initialize = yield* client.request("initialize", {
     clientInfo: {
       name: "t3code_desktop",
-      title: "T3 Code Desktop",
+      title: "Erebus Desktop",
       version: "0.1.0",
     },
     capabilities: {
@@ -383,6 +480,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   // Extract the version string after the first '/' in userAgent, up to the next space or the end
   const versionMatch = initialize.userAgent.match(/\/([^\s]+)/);
   const version = versionMatch ? versionMatch[1] : undefined;
+  const checkedAt = DateTime.formatIso(yield* DateTime.now);
 
   const accountResponse = yield* client.request("account/read", {});
   if (!accountResponse.account && accountResponse.requiresOpenaiAuth) {
@@ -391,18 +489,45 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
       version,
       models: appendCustomCodexModels([], input.customModels ?? []),
       skills: [],
+      proteus: {
+        runtime: "unknown",
+        plugin: "unknown",
+        skills: "unknown",
+        mcp: "unknown",
+        version: null,
+        message: "Authenticate Codex before checking Proteus.",
+        checkedAt,
+      },
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models] = yield* Effect.all(
+  const [skillsResponse, models, pluginListResult, mcpStatusResult] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
+      client
+        .request("plugin/list", {
+          cwds: [input.cwd],
+        })
+        .pipe(
+          Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
+          Effect.orElseSucceed(() => Option.none()),
+        ),
+      client
+        .request("mcpServerStatus/list", {
+          detail: "toolsAndAuthOnly",
+          limit: 100,
+        })
+        .pipe(
+          Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
+          Effect.orElseSucceed(() => Option.none()),
+        ),
     ],
     { concurrency: "unbounded" },
   );
+  const skills = parseCodexSkillsListResponse(skillsResponse, input.cwd);
 
   return {
     account: accountResponse,
@@ -410,7 +535,13 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     models: applyPreferredCodexDefaultModel(
       appendCustomCodexModels(models, input.customModels ?? []),
     ),
-    skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
+    skills,
+    proteus: deriveProteusHealth({
+      pluginList: Option.isSome(pluginListResult) ? pluginListResult.value : undefined,
+      skills,
+      mcpStatus: Option.isSome(mcpStatusResult) ? mcpStatusResult.value : undefined,
+      checkedAt,
+    }),
   } satisfies CodexAppServerProviderSnapshot;
 });
 
@@ -449,7 +580,7 @@ const makePendingCodexProvider = (
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Codex is disabled in T3 Code settings.",
+          message: "Codex is disabled in Erebus settings.",
         },
       });
     }
@@ -470,7 +601,26 @@ const makePendingCodexProvider = (
     });
   });
 
-function accountProbeStatus(account: CodexAppServerProviderSnapshot["account"]): {
+export function codexLoginInstruction(
+  homePath?: string,
+  platform: NodeJS.Platform = "linux",
+): string {
+  if (!homePath) return "codex login --device-auth";
+
+  if (platform === "win32") {
+    const escapedHomePath = homePath.replaceAll("'", "''");
+    return `$env:CODEX_HOME='${escapedHomePath}'; codex login --device-auth`;
+  }
+
+  const escapedHomePath = homePath.replaceAll("'", `'"'"'`);
+  return `CODEX_HOME='${escapedHomePath}' codex login --device-auth`;
+}
+
+function accountProbeStatus(
+  account: CodexAppServerProviderSnapshot["account"],
+  homePath?: string,
+  platform: NodeJS.Platform = "linux",
+): {
   readonly status: Exclude<ServerProviderState, "disabled">;
   readonly auth: ServerProvider["auth"];
   readonly message?: string;
@@ -492,7 +642,7 @@ function accountProbeStatus(account: CodexAppServerProviderSnapshot["account"]):
     return {
       status: "error",
       auth: { status: "unauthenticated" },
-      message: "Codex CLI is not authenticated. Run `codex login` and try again.",
+      message: `Codex is not authenticated in the Erebus profile. Run \`${codexLoginInstruction(homePath, platform)}\` and try again. If device login is disabled, enable device code authorization in ChatGPT Security settings first.`,
     };
   }
 
@@ -520,6 +670,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   ChildProcessSpawner.ChildProcessSpawner
 > {
   const resolvedEnvironment = environment ?? process.env;
+  const platform = yield* HostProcessPlatform;
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const emptyModels = emptyCodexModelsFromSettings(codexSettings);
 
@@ -535,7 +686,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Codex is disabled in T3 Code settings.",
+        message: "Codex is disabled in Erebus settings.",
       },
     });
   }
@@ -592,7 +743,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   const snapshot = probeResult.success.value;
-  const accountStatus = accountProbeStatus(snapshot.account);
+  const accountStatus = accountProbeStatus(snapshot.account, codexSettings.homePath, platform);
 
   return buildServerProvider({
     presentation: CODEX_PRESENTATION,
@@ -600,6 +751,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     checkedAt,
     models: snapshot.models,
     skills: snapshot.skills,
+    proteus: snapshot.proteus,
     slashCommands: [
       {
         name: "feedback",

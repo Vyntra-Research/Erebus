@@ -1,6 +1,6 @@
 # Workspace layout
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using Erebus? See [docs/user](../user/).
 
 A pnpm workspace driven by [vite-plus](https://vite.plus) (`vp`). See [scripts.md](./scripts.md) for
 the task commands.
@@ -16,7 +16,6 @@ the task commands.
   loads the web bundle over the `t3code://` protocol, and owns SSH-managed remote environments.
 - `apps/mobile` (`@t3tools/mobile`): Expo/React Native client. Same client runtime composition as
   web, different platform layer and UI.
-- `apps/marketing` (`@t3tools/marketing`): Astro marketing site.
 
 ## packages
 

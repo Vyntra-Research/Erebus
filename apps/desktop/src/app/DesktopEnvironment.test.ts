@@ -3,9 +3,15 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Test assertions mirror Node's platform path normalization.
+import * as NodePath from "node:path";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
+
+const expectedPath = (value: string): string => NodePath.normalize(value);
+
+const expectedAbsolutePath = (value: string): string => NodePath.resolve(value);
 
 const defaultInput = {
   dirname: "/repo/apps/desktop/dist-electron",
@@ -13,9 +19,9 @@ const defaultInput = {
   platform: "darwin",
   processArch: "arm64",
   appVersion: "0.0.22",
-  appPath: "/Applications/T3 Code.app/Contents/Resources/app.asar",
+  appPath: "/Applications/Erebus.app/Contents/Resources/app.asar",
   isPackaged: false,
-  resourcesPath: "/Applications/T3 Code.app/Contents/Resources",
+  resourcesPath: "/Applications/Erebus.app/Contents/Resources",
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
@@ -51,25 +57,41 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, true);
-      assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
+      assert.equal(
+        environment.appDataDirectory,
+        expectedPath("/Users/alice/Library/Application Support"),
+      );
       assert.equal(environment.baseDir, "/tmp/t3");
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.desktopSettingsPath, "/tmp/t3/userdata/desktop-settings.json");
-      assert.equal(environment.clientSettingsPath, "/tmp/t3/userdata/client-settings.json");
+      assert.equal(environment.stateDir, expectedPath("/tmp/t3/userdata"));
+      assert.equal(
+        environment.desktopSettingsPath,
+        expectedPath("/tmp/t3/userdata/desktop-settings.json"),
+      );
+      assert.equal(
+        environment.clientSettingsPath,
+        expectedPath("/tmp/t3/userdata/client-settings.json"),
+      );
       assert.equal(
         environment.savedEnvironmentRegistryPath,
-        "/tmp/t3/userdata/saved-environments.json",
+        expectedPath("/tmp/t3/userdata/saved-environments.json"),
       );
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
-      assert.equal(environment.rootDir, "/repo");
-      assert.equal(environment.appRoot, "/repo");
-      assert.equal(environment.serverRoot, "/repo");
-      assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
-      assert.equal(environment.backendCwd, "/repo");
-      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev");
-      assert.equal(environment.linuxWmClass, "t3code-dev");
+      assert.equal(environment.serverSettingsPath, expectedPath("/tmp/t3/userdata/settings.json"));
+      assert.equal(environment.logDir, expectedPath("/tmp/t3/userdata/logs"));
+      assert.equal(
+        environment.browserArtifactsDir,
+        expectedPath("/tmp/t3/userdata/browser-artifacts"),
+      );
+      const expectedRoot = expectedAbsolutePath("/repo");
+      assert.equal(environment.rootDir, expectedRoot);
+      assert.equal(environment.appRoot, expectedRoot);
+      assert.equal(environment.serverRoot, expectedRoot);
+      assert.equal(
+        environment.backendEntryPath,
+        `${expectedRoot}${expectedPath("/apps/server/dist/bin.mjs")}`,
+      );
+      assert.equal(environment.backendCwd, expectedRoot);
+      assert.equal(environment.appUserModelId, "research.vyntra.erebus.dev");
+      assert.equal(environment.linuxWmClass, "erebus-dev");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -92,10 +114,13 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, false);
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
+      assert.equal(environment.stateDir, expectedPath("/tmp/t3/userdata"));
+      assert.equal(environment.logDir, expectedPath("/tmp/t3/userdata/logs"));
+      assert.equal(
+        environment.browserArtifactsDir,
+        expectedPath("/tmp/t3/userdata/browser-artifacts"),
+      );
+      assert.equal(environment.serverSettingsPath, expectedPath("/tmp/t3/userdata/settings.json"));
     }),
   );
 
@@ -109,10 +134,10 @@ describe("DesktopEnvironment", () => {
       });
 
       assert.equal(environment.appRoot, "/install/resources/app.asar");
-      assert.equal(environment.serverRoot, "/install/resources/server.asar");
+      assert.equal(environment.serverRoot, expectedPath("/install/resources/server.asar"));
       assert.equal(
         environment.backendEntryPath,
-        "/install/resources/server.asar/apps/server/dist/bin.mjs",
+        expectedPath("/install/resources/server.asar/apps/server/dist/bin.mjs"),
       );
     }),
   );
@@ -125,8 +150,8 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, expectedPath("/Users/alice/.erebus/dev"));
+      assert.equal(production.stateDir, expectedPath("/Users/alice/.erebus/userdata"));
     }),
   );
 
@@ -159,7 +184,7 @@ describe("DesktopEnvironment", () => {
       );
       assert.deepEqual(
         environment.resolvePickFolderDefaultPath({ initialPath: "~/project" }),
-        Option.some("/Users/alice/project"),
+        Option.some(expectedPath("/Users/alice/project")),
       );
     }),
   );

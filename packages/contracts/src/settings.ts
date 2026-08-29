@@ -336,7 +336,8 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "CODEX_HOME path",
-        description: "Custom Codex home and config directory.",
+        description:
+          "Custom Codex home and config directory. Erebus uses an isolated home under its own data directory when this is blank.",
         providerSettingsForm: {
           placeholder: "~/.codex",
           clearWhenEmpty: "omit",
@@ -348,7 +349,7 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Shadow home path",
         description:
-          "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.",
+          "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME. Do not use the Codex app home as the shared source.",
         providerSettingsForm: {
           placeholder: "~/.codex-t3/personal",
           clearWhenEmpty: "omit",
@@ -381,7 +382,7 @@ const CLAUDE_AUTO_COMPACT_WINDOW_PATTERN = /^(?:|[1-9]\d{5}|1000000)$/;
 export const ClaudeSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting("claude").pipe(
@@ -520,7 +521,7 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "Server URL",
-        description: "Leave blank to let T3 Code spawn the server when needed.",
+        description: "Leave blank to let Erebus spawn the server when needed.",
         providerSettingsForm: {
           placeholder: "http://127.0.0.1:4096",
           clearWhenEmpty: "omit",
@@ -616,6 +617,81 @@ export const BackgroundActivitySettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
+export const MIN_RESEARCH_OBSERVER_MESSAGE_WINDOW = 1;
+export const MAX_RESEARCH_OBSERVER_MESSAGE_WINDOW = 50;
+export const DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW = 5;
+export const ResearchObserverMessageWindow = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_RESEARCH_OBSERVER_MESSAGE_WINDOW,
+    maximum: MAX_RESEARCH_OBSERVER_MESSAGE_WINDOW,
+  }),
+);
+
+export const MIN_RESEARCH_OBSERVER_CONFIDENCE = 0;
+export const MAX_RESEARCH_OBSERVER_CONFIDENCE = 1;
+export const DEFAULT_RESEARCH_OBSERVER_CONFIDENCE = 0.8;
+export const ResearchObserverConfidence = Schema.Number.check(
+  Schema.isBetween({
+    minimum: MIN_RESEARCH_OBSERVER_CONFIDENCE,
+    maximum: MAX_RESEARCH_OBSERVER_CONFIDENCE,
+  }),
+);
+
+export const MIN_RESEARCH_OBSERVER_COOLDOWN_MESSAGES = 0;
+export const MAX_RESEARCH_OBSERVER_COOLDOWN_MESSAGES = 100;
+export const DEFAULT_RESEARCH_OBSERVER_COOLDOWN_MESSAGES = 5;
+export const ResearchObserverCooldownMessages = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_RESEARCH_OBSERVER_COOLDOWN_MESSAGES,
+    maximum: MAX_RESEARCH_OBSERVER_COOLDOWN_MESSAGES,
+  }),
+);
+
+export const MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN = 1;
+export const MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN = 10;
+export const DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN = 1;
+export const ResearchObserverInterventionsPerTurn = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
+    maximum: MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
+  }),
+);
+
+export const ResearchEvaluatorReasoningEffort = Schema.Literals([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+]);
+export type ResearchEvaluatorReasoningEffort = typeof ResearchEvaluatorReasoningEffort.Type;
+export const DEFAULT_RESEARCH_EVALUATOR_MODEL = "gpt-daybreak-blue-latest";
+export const DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT: ResearchEvaluatorReasoningEffort =
+  "xhigh";
+
+export const ResearchSupervisionSettings = Schema.Struct({
+  observerMessageWindow: ResearchObserverMessageWindow.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW)),
+  ),
+  observerInterventionConfidence: ResearchObserverConfidence.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_CONFIDENCE)),
+  ),
+  observerCooldownMessages: ResearchObserverCooldownMessages.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_COOLDOWN_MESSAGES)),
+  ),
+  observerMaxInterventionsPerTurn: ResearchObserverInterventionsPerTurn.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN)),
+  ),
+  evaluatorModel: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_EVALUATOR_MODEL)),
+  ),
+  evaluatorReasoningEffort: ResearchEvaluatorReasoningEffort.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT)),
+  ),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type ResearchSupervisionSettings = typeof ResearchSupervisionSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -636,6 +712,7 @@ export const ServerSettings = Schema.Struct({
    * between a desktop window and a phone attached to the same server.
    */
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  researchSupervision: ResearchSupervisionSettings,
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
   // consumers should resolve `backgroundActivity` instead.
@@ -850,6 +927,16 @@ export const ServerSettingsPatch = Schema.Struct({
   enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  researchSupervision: Schema.optionalKey(
+    Schema.Struct({
+      observerMessageWindow: Schema.optionalKey(ResearchObserverMessageWindow),
+      observerInterventionConfidence: Schema.optionalKey(ResearchObserverConfidence),
+      observerCooldownMessages: Schema.optionalKey(ResearchObserverCooldownMessages),
+      observerMaxInterventionsPerTurn: Schema.optionalKey(ResearchObserverInterventionsPerTurn),
+      evaluatorModel: Schema.optionalKey(TrimmedNonEmptyString),
+      evaluatorReasoningEffort: Schema.optionalKey(ResearchEvaluatorReasoningEffort),
+    }),
+  ),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

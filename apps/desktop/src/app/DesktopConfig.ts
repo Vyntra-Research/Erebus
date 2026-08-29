@@ -10,6 +10,13 @@ const trimNonEmptyOption = (value: string): Option.Option<string> => {
 const trimmedString = (name: string) =>
   Config.string(name).pipe(Config.option, Config.map(Option.flatMap(trimNonEmptyOption)));
 
+const aliasedTrimmedString = (name: string, legacyName: string) =>
+  Config.string(name).pipe(
+    Config.orElse(() => Config.string(legacyName)),
+    Config.option,
+    Config.map(Option.flatMap(trimNonEmptyOption)),
+  );
+
 const optionalBoolean = (name: string) =>
   Config.boolean(name).pipe(Config.option, Config.map(Option.getOrElse(() => false)));
 
@@ -36,7 +43,9 @@ export const DesktopConfig = Config.all({
   appDataDirectory: trimmedString("APPDATA"),
   xdgConfigHome: trimmedString("XDG_CONFIG_HOME"),
   xdgDataHome: trimmedString("XDG_DATA_HOME"),
-  t3Home: trimmedString("T3CODE_HOME"),
+  // The field name remains internal compatibility vocabulary; new installs
+  // use EREBUS_HOME and may still read the old T3CODE_HOME override.
+  t3Home: aliasedTrimmedString("EREBUS_HOME", "T3CODE_HOME"),
   devServerUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option),
   appUserModelIdOverride: trimmedString("T3CODE_DESKTOP_APP_USER_MODEL_ID"),
   devRemoteT3ServerEntryPath: trimmedString("T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH"),
