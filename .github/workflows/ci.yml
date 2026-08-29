@@ -57,7 +57,9 @@ jobs:
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
           grep -n "__clerk_internal_electron_passkeys" apps/desktop/dist-electron/preload.cjs
 
-  # Everything except `erebus` (apps/server). `--parallel` drops the package
+  # Everything in the current desktop build except `erebus` (apps/server).
+  # Mobile remains in the inherited source tree but is not part of Erebus 0.1.1.
+  # `--parallel` drops the package
   # dependency ordering that `vp run` applies by default: these `test` tasks
   # declare no `dependsOn` and resolve workspace deps from source, so ordering
   # only bought us idle runners between dependency layers. The concurrency
@@ -86,7 +88,7 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       - name: Test
-        run: vp run --parallel --concurrency-limit 4 --filter '!erebus' --filter '!@t3tools/monorepo' test
+        run: vp run --parallel --concurrency-limit 4 --filter '!erebus' --filter '!@t3tools/mobile' --filter '!@t3tools/monorepo' test
 
   # apps/server sets `fileParallelism: false`, so its 239 files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
