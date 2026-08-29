@@ -71,7 +71,7 @@ export const ResearchObserverPolicy = Schema.Struct({
     Schema.isLessThanOrEqualTo(1),
   ),
   cooldownMessages: NonNegativeInt,
-  maxInterventionsPerTurn: PositiveInt,
+  maxInterventionsPerTurn: Schema.NullOr(PositiveInt),
 });
 export type ResearchObserverPolicy = typeof ResearchObserverPolicy.Type;
 

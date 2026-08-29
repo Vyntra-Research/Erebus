@@ -299,7 +299,7 @@ describe("ServerSettings research supervision", () => {
       observerMessageWindow: 5,
       observerInterventionConfidence: 0.8,
       observerCooldownMessages: 5,
-      observerMaxInterventionsPerTurn: 1,
+      observerMaxInterventionsPerTurn: null,
       evaluatorModel: "gpt-daybreak-blue-latest",
       evaluatorReasoningEffort: "xhigh",
     });
@@ -337,6 +337,14 @@ describe("ServerSettings research supervision", () => {
     { evaluatorReasoningEffort: "impossible" },
   ])("rejects invalid supervision settings: %o", (researchSupervision) => {
     expect(() => decodeServerSettingsPatch({ researchSupervision })).toThrow();
+  });
+
+  it("accepts an unlimited Observer correction policy", () => {
+    expect(
+      decodeServerSettingsPatch({
+        researchSupervision: { observerMaxInterventionsPerTurn: null },
+      }).researchSupervision?.observerMaxInterventionsPerTurn,
+    ).toBeNull();
   });
 });
 

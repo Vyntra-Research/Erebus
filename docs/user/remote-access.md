@@ -1,6 +1,6 @@
 # Remote Access
 
-> Inherited T3 Code documentation. Hosted pairing, relay, and mobile access are not enabled in Erebus `0.1.2`.
+> Inherited T3 Code documentation. Hosted pairing, relay, and mobile access are not enabled in Erebus `0.1.3`.
 
 Use this when you want to connect to a Erebus server from another device such as a phone, tablet, or separate desktop app.
 

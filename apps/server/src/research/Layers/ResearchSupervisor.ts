@@ -496,7 +496,12 @@ const makeResearchSupervisor = Effect.gen(function* () {
     const interventionsThisTurn = recorded.projection.interventions.filter(
       (intervention) => intervention.expectedTurnId === expectedTurnId,
     ).length;
-    if (interventionsThisTurn >= observerPolicy.maxInterventionsPerTurn) return;
+    if (
+      observerPolicy.maxInterventionsPerTurn !== null &&
+      interventionsThisTurn >= observerPolicy.maxInterventionsPerTurn
+    ) {
+      return;
+    }
 
     const previousObserverIntervention = [...recorded.projection.interventions]
       .toReversed()

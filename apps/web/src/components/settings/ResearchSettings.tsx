@@ -45,6 +45,16 @@ const EFFORT_LABELS: Readonly<Record<ResearchEvaluatorReasoningEffort, string>> 
   max: "Max",
   ultra: "Ultra",
 };
+const UNLIMITED_OBSERVER_CORRECTIONS = "unlimited";
+const OBSERVER_CORRECTION_LIMITS = Array.from(
+  {
+    length:
+      MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN -
+      MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN +
+      1,
+  },
+  (_, index) => MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN + index,
+);
 
 function IntegerControl({
   label,
@@ -198,7 +208,7 @@ export function ResearchSettings() {
         />
         <SettingsRow
           {...searchableSetting("research-observer-turn-limit")}
-          description="Maximum live course corrections the Observer may send during one active principal response. A new user turn resets the limit."
+          description="Optional safety cap on live Observer corrections during one active principal response. Unlimited is recommended for long-running research; the message cooldown still applies."
           resetAction={
             research.observerMaxInterventionsPerTurn !==
             DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN ? (
@@ -214,15 +224,42 @@ export function ResearchSettings() {
             ) : null
           }
           control={
-            <IntegerControl
-              label="Maximum corrections per active run"
-              value={research.observerMaxInterventionsPerTurn}
-              min={MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN}
-              max={MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN}
-              onCommit={(observerMaxInterventionsPerTurn) =>
-                updateResearch({ observerMaxInterventionsPerTurn })
+            <Select
+              value={
+                research.observerMaxInterventionsPerTurn === null
+                  ? UNLIMITED_OBSERVER_CORRECTIONS
+                  : String(research.observerMaxInterventionsPerTurn)
               }
-            />
+              onValueChange={(value) => {
+                if (!value) return;
+                if (value === UNLIMITED_OBSERVER_CORRECTIONS) {
+                  updateResearch({ observerMaxInterventionsPerTurn: null });
+                  return;
+                }
+                const limit = Number(value);
+                if (OBSERVER_CORRECTION_LIMITS.includes(limit)) {
+                  updateResearch({ observerMaxInterventionsPerTurn: limit });
+                }
+              }}
+            >
+              <SelectTrigger className="w-40" aria-label="Maximum corrections per active run">
+                <SelectValue>
+                  {research.observerMaxInterventionsPerTurn === null
+                    ? "Unlimited"
+                    : research.observerMaxInterventionsPerTurn}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value={UNLIMITED_OBSERVER_CORRECTIONS}>
+                  Unlimited
+                </SelectItem>
+                {OBSERVER_CORRECTION_LIMITS.map((limit) => (
+                  <SelectItem hideIndicator key={limit} value={String(limit)}>
+                    {limit}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
       </SettingsSection>

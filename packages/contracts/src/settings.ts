@@ -649,7 +649,7 @@ export const ResearchObserverCooldownMessages = Schema.Int.check(
 
 export const MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN = 1;
 export const MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN = 10;
-export const DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN = 1;
+export const DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN: number | null = null;
 export const ResearchObserverInterventionsPerTurn = Schema.Int.check(
   Schema.isBetween({
     minimum: MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
@@ -680,7 +680,7 @@ export const ResearchSupervisionSettings = Schema.Struct({
   observerCooldownMessages: ResearchObserverCooldownMessages.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_COOLDOWN_MESSAGES)),
   ),
-  observerMaxInterventionsPerTurn: ResearchObserverInterventionsPerTurn.pipe(
+  observerMaxInterventionsPerTurn: Schema.NullOr(ResearchObserverInterventionsPerTurn).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN)),
   ),
   evaluatorModel: TrimmedNonEmptyString.pipe(
@@ -932,7 +932,9 @@ export const ServerSettingsPatch = Schema.Struct({
       observerMessageWindow: Schema.optionalKey(ResearchObserverMessageWindow),
       observerInterventionConfidence: Schema.optionalKey(ResearchObserverConfidence),
       observerCooldownMessages: Schema.optionalKey(ResearchObserverCooldownMessages),
-      observerMaxInterventionsPerTurn: Schema.optionalKey(ResearchObserverInterventionsPerTurn),
+      observerMaxInterventionsPerTurn: Schema.optionalKey(
+        Schema.NullOr(ResearchObserverInterventionsPerTurn),
+      ),
       evaluatorModel: Schema.optionalKey(TrimmedNonEmptyString),
       evaluatorReasoningEffort: Schema.optionalKey(ResearchEvaluatorReasoningEffort),
     }),

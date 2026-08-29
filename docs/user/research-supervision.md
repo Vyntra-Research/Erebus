@@ -11,7 +11,7 @@ Use **Settings -> Research** to set:
 - completed assistant messages per Observer window
 - minimum intervention confidence
 - cooldown after an intervention
-- maximum interventions per turn
+- an optional correction cap, unlimited by default
 - evaluator model and reasoning effort
 
 These are harness settings. A campaign agent cannot change the Observer cadence as a research decision.

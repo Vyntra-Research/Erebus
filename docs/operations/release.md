@@ -14,7 +14,7 @@ Erebus currently ships an unsigned Windows x64 installer. The release workflow s
 
 `.github/workflows/release.yml` checks the version in `apps/desktop/package.json`, builds the Windows x64 installer, creates the matching `v<version>` tag, and publishes the files in a GitHub Release. If the release already exists, the job exits without replacing it.
 
-A version with a suffix, such as `0.1.2-rc.1`, creates a prerelease. The workflow does not publish npm packages or build other platforms.
+A version with a suffix, such as `0.1.3-rc.1`, creates a prerelease. The workflow does not publish npm packages or build other platforms.
 
 ## Upstream history
 

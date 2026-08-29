@@ -54,7 +54,7 @@ it("owns Observer cadence and intervention thresholds in the harness", () => {
     messageWindow: 5,
     interventionConfidence: 0.8,
     cooldownMessages: 5,
-    maxInterventionsPerTurn: 1,
+    maxInterventionsPerTurn: null,
   });
 });
 

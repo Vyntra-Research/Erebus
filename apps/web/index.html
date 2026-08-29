@@ -462,22 +462,12 @@
         height: 96px;
       }
 
-      .boot-shell-logo {
-        width: 64px;
-        height: 64px;
-        object-fit: contain;
-      }
-
-      .boot-shell-logo-light {
-        display: none;
-      }
-
-      html.dark .boot-shell-logo-dark {
-        display: none;
-      }
-
-      html.dark .boot-shell-logo-light {
-        display: block;
+      .boot-shell-wordmark {
+        color: inherit;
+        font-family: Geist, "Segoe UI", sans-serif;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.025em;
       }
     </style>
     <title>Erebus</title>
@@ -486,17 +476,7 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="Erebus splash screen">
-          <img
-            class="boot-shell-logo boot-shell-logo-dark"
-            src="/erebus-glyph-dark.png"
-            alt="Erebus"
-          />
-          <img
-            class="boot-shell-logo boot-shell-logo-light"
-            src="/erebus-glyph-light.png"
-            alt=""
-            aria-hidden="true"
-          />
+          <span class="boot-shell-wordmark">Erebus</span>
         </div>
       </div>
     </div>

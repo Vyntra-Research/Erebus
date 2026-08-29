@@ -16,6 +16,6 @@ and pushes to `main`:
 `.github/workflows/release.yml` starts after CI passes on `main`. It builds the unsigned Windows x64
 installer, creates the version tag, and publishes the installer and update metadata in one GitHub
 Release. Other platform, mobile, relay, hosted preview, and package publication workflows are not
-enabled in `0.1.2`.
+enabled in `0.1.3`.
 
 See [Release Checklist](../operations/release.md) for the full release/signing setup checklist.

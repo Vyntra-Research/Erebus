@@ -61,7 +61,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "research-observer-turn-limit",
-    title: "Maximum corrections per active run",
+    title: "Observer correction limit",
     to: "/settings/research",
   },
   {

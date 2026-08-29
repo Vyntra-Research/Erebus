@@ -65,7 +65,7 @@ export interface ObserverCampaignSnapshot {
     readonly messageWindow: number;
     readonly interventionConfidence: number;
     readonly cooldownMessages: number;
-    readonly maxInterventionsPerTurn: number;
+    readonly maxInterventionsPerTurn: number | null;
   };
   readonly latestCheckpoint: {
     readonly proteusCheckpointId: string;

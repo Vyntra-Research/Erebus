@@ -125,68 +125,6 @@ function iceWhite(source: PNG): PNG {
   return output;
 }
 
-function maxFilter(values: Uint8Array, width: number, height: number, radius: number): Uint8Array {
-  const horizontal = new Uint8Array(values.length);
-  const output = new Uint8Array(values.length);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let maximum = 0;
-      for (
-        let sampleX = Math.max(0, x - radius);
-        sampleX <= Math.min(width - 1, x + radius);
-        sampleX++
-      ) {
-        maximum = Math.max(maximum, values[y * width + sampleX]!);
-      }
-      horizontal[y * width + x] = maximum;
-    }
-  }
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let maximum = 0;
-      for (
-        let sampleY = Math.max(0, y - radius);
-        sampleY <= Math.min(height - 1, y + radius);
-        sampleY++
-      ) {
-        maximum = Math.max(maximum, horizontal[sampleY * width + x]!);
-      }
-      output[y * width + x] = maximum;
-    }
-  }
-  return output;
-}
-
-function addIceContour(source: PNG): PNG {
-  const alpha = new Uint8Array(source.width * source.height);
-  for (let pixel = 0; pixel < alpha.length; pixel++) alpha[pixel] = source.data[pixel * 4 + 3]!;
-  const dilated = maxFilter(alpha, source.width, source.height, 7);
-  const output = new PNG({ width: source.width, height: source.height });
-
-  for (let pixel = 0; pixel < alpha.length; pixel++) {
-    const sourceOffset = pixel * 4;
-    const sourceAlpha = alpha[pixel]! / 255;
-    const contourAlpha = Math.max(0, dilated[pixel]! / 255 - sourceAlpha) * 0.72;
-    const outputAlpha = sourceAlpha + contourAlpha * (1 - sourceAlpha);
-    if (outputAlpha > 0) {
-      output.data[sourceOffset] = Math.round(
-        (source.data[sourceOffset]! * sourceAlpha + 224 * contourAlpha * (1 - sourceAlpha)) /
-          outputAlpha,
-      );
-      output.data[sourceOffset + 1] = Math.round(
-        (source.data[sourceOffset + 1]! * sourceAlpha + 230 * contourAlpha * (1 - sourceAlpha)) /
-          outputAlpha,
-      );
-      output.data[sourceOffset + 2] = Math.round(
-        (source.data[sourceOffset + 2]! * sourceAlpha + 238 * contourAlpha * (1 - sourceAlpha)) /
-          outputAlpha,
-      );
-    }
-    output.data[sourceOffset + 3] = Math.round(outputAlpha * 255);
-  }
-  return output;
-}
-
 function encodePng(image: PNG): Buffer {
   return PNG.sync.write(image, { colorType: 6 });
 }
@@ -221,7 +159,7 @@ const program = Effect.gen(function* () {
   );
   const darkGlyph = resize(source, OUTPUT_SIZE);
   const lightGlyph = iceWhite(darkGlyph);
-  const desktopGlyph = addIceContour(darkGlyph);
+  const desktopGlyph = darkGlyph;
 
   assertTransparentCanvas(source, "Erebus glyph source");
   assertTransparentCanvas(darkGlyph, "Erebus dark glyph");

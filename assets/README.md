@@ -11,4 +11,4 @@ The release build uses:
 - `prod/erebus-universal-1024.png` for Linux packaging
 - `prod/erebus-web-*` for web and splash assets
 
-Run `pnpm brand:icons` after changing the transparent glyph. The exporter removes detached pixels, creates the dark and ice-white interface marks, adds a thin contrast contour to the desktop mark, and writes the multi-size Windows and web icons.
+Run `pnpm brand:icons` after changing the transparent glyph. The exporter removes detached pixels, creates the dark and ice-white interface marks, preserves the source artwork for the desktop mark, and writes anti-aliased multi-size Windows and web icons.
