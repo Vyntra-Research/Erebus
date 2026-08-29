@@ -14,6 +14,8 @@ import { ResearchCampaignStoreLive } from "./ResearchCampaignStore.ts";
 import { ResearchEngineLive } from "./ResearchEngine.ts";
 import { ResearchToolControllerLive } from "./ResearchToolController.ts";
 
+const completedProteusCampaigns: string[] = [];
+
 const layer = it.layer(
   ResearchToolControllerLive.pipe(
     Layer.provideMerge(ResearchEngineLive),
@@ -25,24 +27,48 @@ const layer = it.layer(
       Layer.succeed(
         ProteusBridge,
         ProteusBridge.of({
+          resolveCampaign: (_root, campaignId) =>
+            Effect.succeed({
+              id: Number(campaignId.replace(/^\D/, "")),
+              status: "active",
+              campaignId: null,
+              root: _root,
+              activeRoundIds: [],
+            }),
           readCampaign: (_root, campaignId) =>
             Effect.succeed({
               id: Number(campaignId.replace(/^\D/, "")),
               status: "active",
               campaignId: null,
+              root: _root,
+              activeRoundIds: [],
             }),
           readBranch: (_root, branchId) =>
             Effect.succeed({
               id: Number(branchId.replace(/^\D/, "")),
               status: "open",
               campaignId: Number(branchId.replace(/^\D/, "")),
+              root: _root,
+              activeRoundIds: [],
             }),
           readCheckpoint: (_root, checkpointId) =>
             Effect.succeed({
               id: Number(checkpointId.replace(/^\D/, "")),
               status: null,
               campaignId: 2,
+              root: _root,
+              activeRoundIds: [],
             }),
+          completeCampaign: (root, campaignId) => {
+            completedProteusCampaigns.push(campaignId);
+            return Effect.succeed({
+              id: Number(campaignId.replace(/^\D/, "")),
+              status: "completed",
+              campaignId: null,
+              root,
+              activeRoundIds: [],
+            });
+          },
         }),
       ),
     ),
@@ -257,6 +283,7 @@ layer("ResearchToolController", (it) => {
       assert.isTrue(status.success);
       assert.equal(projection?.lastSequence, 1);
       assert.equal(projection?.campaign?.principalThreadId, context.threadId);
+      assert.equal(projection?.campaign?.proteusRoot, context.cwd);
     }),
   );
 
@@ -396,6 +423,81 @@ layer("ResearchToolController", (it) => {
       assert.equal(oldProjection?.campaign?.status, "aborted");
       assert.equal(currentProjection?.campaign?.id, "campaign-replacement");
       assert.equal(currentProjection?.campaign?.proteusCampaignId, "C28");
+    }),
+  );
+
+  it.effect("completes Proteus before marking an Erebus campaign complete", () =>
+    Effect.gen(function* () {
+      completedProteusCampaigns.length = 0;
+      const controller = yield* ResearchToolController;
+      const engine = yield* ResearchEngine;
+      assert.isDefined(controller);
+      const finishContext = { ...context, threadId: ThreadId.make("thread-finish") };
+
+      yield* controller!.handle(finishContext, {
+        namespace: "research",
+        tool: "create_campaign",
+        callId: "call-create-finish",
+        threadId: "provider-thread-finish",
+        turnId: "turn-1",
+        arguments: { campaignId: "campaign-finish", proteusCampaignId: "C29" },
+      });
+      yield* controller!.handle(finishContext, {
+        namespace: "research",
+        tool: "register_contract",
+        callId: "call-register-finish",
+        threadId: "provider-thread-finish",
+        turnId: "turn-1",
+        arguments: {
+          campaignId: "campaign-finish",
+          contract: {
+            id: "contract-finish",
+            revision: 1,
+            objective: "Finish synchronized research.",
+            target: "target",
+            authorization: "Authorized local research.",
+            attackerModel: "Unauthenticated external attacker.",
+            impactThreshold: "Practical confidentiality or integrity impact.",
+            scope: { included: ["target"], excluded: [], stopConditions: [] },
+            strategy: ["Trace the boundary."],
+            heuristics: ["Kill artificial scenarios."],
+            gates: [{ id: "G1", title: "Impact", requirement: "Prove impact.", required: true }],
+            duplicatePolicy: "Check prior findings.",
+            labPolicy: "Use documented defaults.",
+            reportPolicy: "Require reproducible evidence.",
+            proteusCampaignId: "C29",
+            createdAt: "2026-08-29T00:00:00.000Z",
+          },
+        },
+      });
+      yield* controller!.handle(finishContext, {
+        namespace: "research",
+        tool: "start",
+        callId: "call-start-finish",
+        threadId: "provider-thread-finish",
+        turnId: "turn-1",
+        arguments: {
+          campaignId: "campaign-finish",
+          contractId: "contract-finish",
+          contractRevision: 1,
+        },
+      });
+      const finishCall = {
+        namespace: "research",
+        tool: "finish",
+        callId: "call-finish",
+        threadId: "provider-thread-finish",
+        turnId: "turn-2",
+        arguments: { campaignId: "campaign-finish", reason: "Research is complete." },
+      } as const;
+      const response = yield* controller!.handle(finishContext, finishCall);
+      const replayed = yield* controller!.handle(finishContext, finishCall);
+      const projection = yield* engine.findProjection(ResearchCampaignId.make("campaign-finish"));
+
+      assert.isTrue(response.success);
+      assert.isTrue(replayed.success);
+      assert.deepStrictEqual(completedProteusCampaigns, ["C29"]);
+      assert.equal(projection?.campaign?.status, "completed");
     }),
   );
 });

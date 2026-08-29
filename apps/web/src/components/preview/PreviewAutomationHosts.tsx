@@ -60,6 +60,7 @@ import {
   previewAutomationOpenNeedsOverlay,
   shouldOpenPreviewMiniPlayer,
 } from "./previewAutomationOpenReadiness";
+import { recoverPreviewAutomationOverlay } from "./previewAutomationOverlayRecovery";
 import {
   assertPreviewRuntimeCurrent,
   waitForNavigationReadiness,
@@ -93,14 +94,21 @@ const waitForDesktopOverlay = async (
   timeoutMs: number,
 ): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
+  let registeredWebContentsId: number | null = null;
   while (Date.now() <= deadline) {
-    const state = assertPreviewRuntimeCurrent(threadRef, tabId, runtimeTabId, {
+    assertPreviewRuntimeCurrent(threadRef, tabId, runtimeTabId, {
       operation,
       requestId,
     });
-    if (state.desktopByTabId[tabId] && previewBridge) {
-      const status = await previewBridge.automation.status(runtimeTabId);
-      if (status.available) return;
+    if (previewBridge) {
+      const recovered = await recoverPreviewAutomationOverlay({
+        bridge: previewBridge,
+        runtimeTabId,
+        webview: findPreviewWebview(runtimeTabId),
+        registeredWebContentsId,
+      });
+      registeredWebContentsId = recovered.registeredWebContentsId;
+      if (recovered.available) return;
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
   }
@@ -114,6 +122,7 @@ const waitForDesktopOverlay = async (
 
 interface ExecutablePreviewWebview extends Element {
   readonly executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
+  readonly getWebContentsId: () => number;
 }
 
 const findPreviewWebview = (tabId: string): ExecutablePreviewWebview | null =>

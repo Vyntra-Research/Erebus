@@ -75,25 +75,33 @@ const makeResearchToolController = Effect.gen(function* () {
   const proteusBridge = yield* ProteusBridge;
   const serverSettings = yield* ServerSettingsService;
 
-  const validateProteusCampaign = Effect.fn("ResearchToolController.validateProteusCampaign")(
+  const resolveProteusCampaign = Effect.fn("ResearchToolController.resolveProteusCampaign")(
     function* (
       context: import("../Services/ResearchToolController.ts").ResearchToolContext,
       id: string,
     ) {
-      if (!proteusBridge) return ["Proteus validation bridge is unavailable"];
-      const result = yield* Effect.result(proteusBridge.readCampaign(context.cwd, id));
-      return result._tag === "Success" ? [] : [result.failure.detail];
+      if (!proteusBridge) return null;
+      return yield* Effect.result(proteusBridge.resolveCampaign(context.cwd, id));
     },
   );
 
+  const campaignProteusRoot = Effect.fn("ResearchToolController.campaignProteusRoot")(function* (
+    context: import("../Services/ResearchToolController.ts").ResearchToolContext,
+    campaign: import("@t3tools/contracts").ResearchCampaign,
+  ) {
+    if (campaign.proteusRoot) return { root: campaign.proteusRoot, issues: [] } as const;
+    const result = yield* resolveProteusCampaign(context, campaign.proteusCampaignId);
+    return !result
+      ? ({ root: null, issues: ["Proteus validation bridge is unavailable"] } as const)
+      : result._tag === "Success"
+        ? ({ root: result.success.root, issues: [] } as const)
+        : ({ root: null, issues: [result.failure.detail] } as const);
+  });
+
   const validateProteusBranch = Effect.fn("ResearchToolController.validateProteusBranch")(
-    function* (
-      context: import("../Services/ResearchToolController.ts").ResearchToolContext,
-      id: string,
-      campaignId: string,
-    ) {
+    function* (root: string, id: string, campaignId: string) {
       if (!proteusBridge) return ["Proteus validation bridge is unavailable"];
-      const result = yield* Effect.result(proteusBridge.readBranch(context.cwd, id));
+      const result = yield* Effect.result(proteusBridge.readBranch(root, id));
       if (result._tag === "Failure") return [result.failure.detail];
       const expectedCampaignId = proteusNumericId(campaignId);
       return result.success.campaignId === expectedCampaignId
@@ -103,13 +111,9 @@ const makeResearchToolController = Effect.gen(function* () {
   );
 
   const validateProteusCheckpoint = Effect.fn("ResearchToolController.validateProteusCheckpoint")(
-    function* (
-      context: import("../Services/ResearchToolController.ts").ResearchToolContext,
-      id: string,
-      campaignId: string,
-    ) {
+    function* (root: string, id: string, campaignId: string) {
       if (!proteusBridge) return ["Proteus validation bridge is unavailable"];
-      const result = yield* Effect.result(proteusBridge.readCheckpoint(context.cwd, id));
+      const result = yield* Effect.result(proteusBridge.readCheckpoint(root, id));
       if (result._tag === "Failure") return [result.failure.detail];
       const expectedCampaignId = proteusNumericId(campaignId);
       return result.success.campaignId === expectedCampaignId
@@ -167,6 +171,7 @@ const makeResearchToolController = Effect.gen(function* () {
                 projectId: context.projectId,
                 principalThreadId: context.threadId,
                 proteusCampaignId: input.proteusCampaignId,
+                proteusRoot: existingThreadCampaign.campaign.proteusRoot ?? context.cwd,
               });
               return toDynamicToolResponse(replayed.result);
             }
@@ -190,9 +195,16 @@ const makeResearchToolController = Effect.gen(function* () {
                 existingProteusCampaign.id,
               ]);
             }
-            const proteusIssues = yield* validateProteusCampaign(context, input.proteusCampaignId);
-            if (proteusIssues.length > 0) {
-              return failure("The Proteus campaign link could not be verified.", proteusIssues);
+            const proteusResult = yield* resolveProteusCampaign(context, input.proteusCampaignId);
+            if (!proteusResult) {
+              return failure("The Proteus campaign link could not be verified.", [
+                "Proteus validation bridge is unavailable",
+              ]);
+            }
+            if (proteusResult._tag === "Failure") {
+              return failure("The Proteus campaign link could not be verified.", [
+                proteusResult.failure.detail,
+              ]);
             }
             const dispatched = yield* engine.dispatch({
               type: "campaign.create",
@@ -201,6 +213,7 @@ const makeResearchToolController = Effect.gen(function* () {
               projectId: context.projectId,
               principalThreadId: context.threadId,
               proteusCampaignId: input.proteusCampaignId,
+              proteusRoot: proteusResult.success.root,
             });
             return toDynamicToolResponse(dispatched.result);
           }
@@ -298,9 +311,14 @@ const makeResearchToolController = Effect.gen(function* () {
               .map(([key, value]) => `Proteus ${key} is ${String(value)}`);
             const projection = yield* engine.findProjection(input.campaignId);
             if (projection?.campaign) {
-              dependencyIssues.push(
-                ...(yield* validateProteusCampaign(context, projection.campaign.proteusCampaignId)),
-              );
+              const linked = yield* campaignProteusRoot(context, projection.campaign);
+              dependencyIssues.push(...linked.issues);
+              if (linked.root && proteusBridge) {
+                const validated = yield* Effect.result(
+                  proteusBridge.readCampaign(linked.root, projection.campaign.proteusCampaignId),
+                );
+                if (validated._tag === "Failure") dependencyIssues.push(validated.failure.detail);
+              }
             }
             const dispatched = yield* engine.dispatch({
               type: "campaign.start",
@@ -321,14 +339,18 @@ const makeResearchToolController = Effect.gen(function* () {
               ]);
             }
             const projection = yield* engine.findProjection(input.campaignId);
-            const proteusCampaignId = projection?.campaign?.proteusCampaignId;
-            if (!proteusCampaignId) {
+            const campaign = projection?.campaign;
+            if (!campaign) {
               return failure("The campaign does not have a Proteus campaign link.");
             }
+            const linked = yield* campaignProteusRoot(context, campaign);
+            if (!linked.root) {
+              return failure("The Proteus campaign root could not be resolved.", linked.issues);
+            }
             const proteusIssues = yield* validateProteusCheckpoint(
-              context,
+              linked.root,
               input.proteusCheckpointId,
-              proteusCampaignId,
+              campaign.proteusCampaignId,
             );
             if (proteusIssues.length > 0) {
               return failure("The Proteus checkpoint link could not be verified.", proteusIssues);
@@ -357,17 +379,80 @@ const makeResearchToolController = Effect.gen(function* () {
             const dependencyIssues = dependencyEntries
               .filter(([, value]) => value !== "ready")
               .map(([key, value]) => `Proteus ${key} is ${String(value)}`);
+            const projection = yield* engine.findProjection(input.campaignId);
+            const campaign = projection?.campaign;
+            const reason =
+              "reason" in input && typeof input.reason === "string"
+                ? input.reason
+                : params.tool === "pause"
+                  ? "Paused by the principal research agent."
+                  : "Resumed by the principal research agent.";
+            if (params.tool === "finish" && campaign?.status === "completed") {
+              const replayed = yield* engine.dispatch({
+                type: "campaign.control",
+                commandId,
+                campaignId: input.campaignId,
+                action: params.tool,
+                reason,
+                proteusReady: dependencyIssues.length === 0,
+                dependencyIssues,
+              });
+              return toDynamicToolResponse(replayed.result);
+            }
+            if (params.tool === "finish") {
+              if (!campaign) return failure("The campaign does not exist.", ["campaign not found"]);
+              if (!["active", "paused"].includes(campaign.status)) {
+                return failure("Campaign finish was rejected.", [
+                  `cannot finish a ${campaign.status} campaign`,
+                ]);
+              }
+              const latestFindings = [...projection.findings]
+                .toReversed()
+                .filter(
+                  (finding, index, all) =>
+                    all.findIndex((candidate) => candidate.findingId === finding.findingId) ===
+                    index,
+                );
+              const pendingJudgeCount = latestFindings.filter((finding) => {
+                const evaluation = [...projection.judgeEvaluations]
+                  .toReversed()
+                  .find(
+                    (candidate) =>
+                      candidate.findingId === finding.findingId &&
+                      (candidate.findingRevision ?? 1) === (finding.revision ?? 1),
+                  );
+                return !evaluation || evaluation.verdict === "reviewBlocked";
+              }).length;
+              if (pendingJudgeCount > 0) {
+                return failure("Campaign finish was rejected.", [
+                  `${pendingJudgeCount} finding(s) still await judge review`,
+                ]);
+              }
+              const linked = yield* campaignProteusRoot(context, campaign);
+              if (!linked.root || !proteusBridge) {
+                return failure(
+                  "Proteus could not be completed; the Erebus campaign remains open.",
+                  linked.issues.length > 0
+                    ? linked.issues
+                    : ["Proteus validation bridge is unavailable"],
+                );
+              }
+              const completed = yield* Effect.result(
+                proteusBridge.completeCampaign(linked.root, campaign.proteusCampaignId, reason),
+              );
+              if (completed._tag === "Failure") {
+                return failure(
+                  "Proteus could not be completed; the Erebus campaign remains open.",
+                  [completed.failure.detail],
+                );
+              }
+            }
             const dispatched = yield* engine.dispatch({
               type: "campaign.control",
               commandId,
               campaignId: input.campaignId,
               action: params.tool,
-              reason:
-                "reason" in input && typeof input.reason === "string"
-                  ? input.reason
-                  : params.tool === "pause"
-                    ? "Paused by the principal research agent."
-                    : "Resumed by the principal research agent.",
+              reason,
               proteusReady: dependencyIssues.length === 0,
               dependencyIssues,
             });
@@ -384,17 +469,25 @@ const makeResearchToolController = Effect.gen(function* () {
               );
             }
             const projection = yield* engine.findProjection(input.campaignId);
-            const proteusCampaignId = projection?.campaign?.proteusCampaignId;
-            if (!proteusCampaignId) {
+            const campaign = projection?.campaign;
+            if (!campaign) {
               return findingSubmissionFailure(
                 params.tool,
                 "The campaign does not have a Proteus campaign link.",
               );
             }
+            const linked = yield* campaignProteusRoot(context, campaign);
+            if (!linked.root) {
+              return findingSubmissionFailure(
+                params.tool,
+                "The Proteus campaign root could not be resolved.",
+                linked.issues,
+              );
+            }
             const proteusIssues = yield* validateProteusBranch(
-              context,
+              linked.root,
               input.proteusBranchId,
-              proteusCampaignId,
+              campaign.proteusCampaignId,
             );
             if (proteusIssues.length > 0) {
               return findingSubmissionFailure(

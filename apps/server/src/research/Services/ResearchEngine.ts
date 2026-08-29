@@ -30,6 +30,7 @@ export type ResearchCommand =
       readonly projectId: ProjectId;
       readonly principalThreadId: ThreadId;
       readonly proteusCampaignId: string;
+      readonly proteusRoot: string;
     }
   | {
       readonly type: "contract.register";

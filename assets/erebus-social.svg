@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">Erebus</title>
+  <rect x="24" y="24" width="976" height="976" rx="216" fill="#f3eee6" stroke="#ded5c9" stroke-width="8"/>
+  <g transform="translate(512 524) scale(.72) translate(-512 -512)" stroke="none">
+    <path fill="#573034" d="M219 270 414 56 496 319Z"/>
+    <path fill="#1c0e0e" d="M414 56 673 121 848 351 779 423 496 319Z"/>
+    <path fill="#3d2022" d="M219 270 496 319 333 630 82 714Z"/>
+    <path fill="#29191b" d="M496 319 779 423 674 877 333 630Z"/>
+    <path fill="#070304" d="M848 351 889 741 849 872 674 877 779 423Z"/>
+    <path fill="#120709" d="M82 714 333 630 674 877 849 872 660 926 143 888Z"/>
+  </g>
+</svg>

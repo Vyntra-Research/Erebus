@@ -19,13 +19,45 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.decision.outputs.should_release }}
+    steps:
+      - name: Require a merged pull request
+        id: decision
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CI_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$CI_CONCLUSION" != "success" || "$CI_BRANCH" != "main" ]]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          merged_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TESTED_SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')"
+          if [[ "$merged_count" -gt 0 ]]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No pull request merged into main is associated with $TESTED_SHA."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
   windows:
     name: Windows x64
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    needs: gate
+    if: needs.gate.outputs.should_release == 'true'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -88,6 +120,13 @@ jobs:
           T3CODE_DESKTOP_OUTPUT_DIR: release
         run: vp run dist:desktop:win:x64
 
+      - name: Generate release notes from changelog
+        if: steps.existing.outputs.release != 'true'
+        shell: pwsh
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: node scripts/generate-changelog.mjs --version $env:TAG --out release/CHANGELOG.md
+
       - name: Upload workflow artifact
         if: steps.existing.outputs.release != 'true'
         uses: actions/upload-artifact@v7
@@ -126,7 +165,8 @@ jobs:
             $env:TARGET_SHA,
             "--title",
             "Erebus $env:VERSION",
-            "--generate-notes"
+            "--notes-file",
+            "release/CHANGELOG.md"
           )
           if ($env:VERSION.Contains("-")) {
             $releaseArgs += "--prerelease"
