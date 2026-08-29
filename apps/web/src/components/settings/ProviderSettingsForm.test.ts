@@ -23,44 +23,37 @@ describe("ProviderSettingsForm helpers", () => {
   });
 
   it("sources labels and descriptions from schema annotations", () => {
-    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
-    expect(opencode).toBeDefined();
+    const codex = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("codex")];
+    expect(codex).toBeDefined();
 
-    const serverPassword = deriveProviderSettingsFields(opencode!).find(
-      (field) => field.key === "serverPassword",
+    const shadowHomePath = deriveProviderSettingsFields(codex!).find(
+      (field) => field.key === "shadowHomePath",
     );
 
-    expect(serverPassword).toMatchObject({
-      label: "Server password",
-      description: "Stored in plain text on disk.",
-      control: "password",
+    expect(shadowHomePath).toMatchObject({
+      label: "Shadow home path",
+      description:
+        "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME. Do not use the Codex app home as the shared source.",
+      control: "text",
     });
   });
 
-  it("shows the auto-compaction threshold for Claude providers", () => {
-    const claude = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("claudeAgent")];
-    expect(claude).toBeDefined();
-
-    expect(deriveProviderSettingsFields(claude!).map((field) => field.key)).toEqual([
-      "binaryPath",
-      "homePath",
-      "autoCompactWindow",
-      "launchArgs",
-    ]);
+  it("exposes only Codex in the current build", () => {
+    expect(Object.keys(DRIVER_OPTION_BY_VALUE)).toEqual(["codex"]);
+    expect(DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("claudeAgent")]).toBeUndefined();
+    expect(DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")]).toBeUndefined();
   });
 
   it("preserves unknown config keys while omitting empty configurable fields", () => {
-    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
-    expect(opencode).toBeDefined();
+    const codex = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("codex")];
+    expect(codex).toBeDefined();
 
-    const serverUrl = deriveProviderSettingsFields(opencode!).find(
-      (field) => field.key === "serverUrl",
-    );
-    expect(serverUrl).toBeDefined();
+    const homePath = deriveProviderSettingsFields(codex!).find((field) => field.key === "homePath");
+    expect(homePath).toBeDefined();
 
     const next = nextProviderConfigWithFieldValue(
-      { forkOwned: 1, serverUrl: "http://127.0.0.1:4096" },
-      serverUrl!,
+      { forkOwned: 1, homePath: "~/.codex" },
+      homePath!,
       "",
     );
 
