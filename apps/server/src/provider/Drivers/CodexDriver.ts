@@ -138,18 +138,20 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      yield* materializeCodexShadowHome(homeLayout).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderDriverError({
-              driver: DRIVER_KIND,
-              instanceId,
-              detail: cause.message,
-              cause,
-            }),
-        ),
-      );
-      if (homeLayout.effectiveHomePath) {
+      if (enabled) {
+        yield* materializeCodexShadowHome(homeLayout).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
+      }
+      if (enabled && homeLayout.effectiveHomePath) {
         yield* installManagedProteusForCodex(homeLayout.effectiveHomePath).pipe(
           Effect.mapError(
             (cause) =>

@@ -32,6 +32,11 @@ interface ProteusPackageJson {
   readonly version?: unknown;
 }
 
+interface ErebusManagedMarker {
+  readonly owner?: unknown;
+  readonly version?: unknown;
+}
+
 export const resolveManagedProteusRuntime = Effect.fn("ProteusRuntime.resolve")(function* () {
   return yield* Effect.tryPromise({
     try: async (): Promise<ManagedProteusRuntime> => {
@@ -102,13 +107,6 @@ export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installFo
       const marketplaceRoot = NodePath.join(codexHome, "managed", "proteus", runtime.version);
       const installedPluginRoot = NodePath.join(marketplaceRoot, "plugins", "proteus");
       const markerPath = NodePath.join(marketplaceRoot, ".erebus-managed.json");
-      await NodeFSP.mkdir(NodePath.dirname(installedPluginRoot), { recursive: true });
-      await NodeFSP.cp(runtime.pluginRoot, installedPluginRoot, {
-        recursive: true,
-        force: true,
-        dereference: true,
-      });
-
       const sourceMarketplacePath = NodePath.join(
         runtime.packageRoot,
         ".agents",
@@ -121,29 +119,49 @@ export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installFo
         "plugins",
         "marketplace.json",
       );
-      await NodeFSP.mkdir(NodePath.dirname(marketplacePath), { recursive: true });
-      await NodeFSP.copyFile(sourceMarketplacePath, marketplacePath);
-
       const manifestPath = NodePath.join(installedPluginRoot, ".codex-plugin", "plugin.json");
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
-      const manifest = JSON.parse(await NodeFSP.readFile(manifestPath, "utf8")) as Record<
-        string,
-        unknown
-      >;
-      manifest.mcpServers = {
-        proteus: {
-          command: process.execPath,
-          args: [NodePath.join(installedPluginRoot, "dist", "mcp.js")],
-        },
-      };
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
-      await NodeFSP.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-      await NodeFSP.writeFile(
-        markerPath,
+      const markerMatches = await NodeFSP.readFile(markerPath, "utf8")
+        .then((value) => {
+          const marker = JSON.parse(value) as ErebusManagedMarker;
+          return marker.owner === "Erebus" && marker.version === runtime.version;
+        })
+        .catch(() => false);
+      const managedFilesExist = markerMatches
+        ? await Promise.all([NodeFSP.access(manifestPath), NodeFSP.access(marketplacePath)])
+            .then(() => true)
+            .catch(() => false)
+        : false;
+
+      if (!managedFilesExist) {
+        await NodeFSP.mkdir(NodePath.dirname(installedPluginRoot), { recursive: true });
+        await NodeFSP.cp(runtime.pluginRoot, installedPluginRoot, {
+          recursive: true,
+          force: true,
+          dereference: true,
+        });
+        await NodeFSP.mkdir(NodePath.dirname(marketplacePath), { recursive: true });
+        await NodeFSP.copyFile(sourceMarketplacePath, marketplacePath);
+
         // @effect-diagnostics-next-line preferSchemaOverJson:off
-        `${JSON.stringify({ owner: "Erebus", version: runtime.version }, null, 2)}\n`,
-        "utf8",
-      );
+        const manifest = JSON.parse(await NodeFSP.readFile(manifestPath, "utf8")) as Record<
+          string,
+          unknown
+        >;
+        manifest.mcpServers = {
+          proteus: {
+            command: process.execPath,
+            args: [NodePath.join(installedPluginRoot, "dist", "mcp.js")],
+          },
+        };
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        await NodeFSP.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+        await NodeFSP.writeFile(
+          markerPath,
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
+          `${JSON.stringify({ owner: "Erebus", version: runtime.version }, null, 2)}\n`,
+          "utf8",
+        );
+      }
 
       const configPath = NodePath.join(codexHome, "config.toml");
       const currentConfig = await NodeFSP.readFile(configPath, "utf8").catch((error: unknown) => {

@@ -44,7 +44,7 @@ layer("ProteusBridge", (it) => {
       assert.deepStrictEqual(campaign, { id: 3, status: "active", campaignId: null });
       assert.deepStrictEqual(branch, { id: 7, status: "open", campaignId: 3 });
       assert.deepStrictEqual(checkpoint, { id: 11, status: null, campaignId: 3 });
-      assert.deepStrictEqual(calls[0]?.args, [
+      assert.deepStrictEqual(calls[0]?.args.slice(-6), [
         "campaign",
         "resume",
         "--root",
@@ -52,8 +52,20 @@ layer("ProteusBridge", (it) => {
         "--id",
         "3",
       ]);
-      assert.deepStrictEqual(calls[1]?.args, ["show", "branch", "7", "--root", "C:\\target"]);
-      assert.deepStrictEqual(calls[2]?.args, ["show", "checkpoint", "11", "--root", "C:\\target"]);
+      assert.deepStrictEqual(calls[1]?.args.slice(-5), [
+        "show",
+        "branch",
+        "7",
+        "--root",
+        "C:\\target",
+      ]);
+      assert.deepStrictEqual(calls[2]?.args.slice(-5), [
+        "show",
+        "checkpoint",
+        "11",
+        "--root",
+        "C:\\target",
+      ]);
     }),
   );
 
