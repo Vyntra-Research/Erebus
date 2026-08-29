@@ -93,7 +93,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: erebus-windows-x64-${{ steps.version.outputs.value }}
-          path: release/*
+          path: |
+            release/Erebus-${{ steps.version.outputs.value }}-x64.exe
+            release/Erebus-${{ steps.version.outputs.value }}-x64.exe.blockmap
           if-no-files-found: error
 
       - name: Create version tag and GitHub release
@@ -116,7 +118,8 @@ jobs:
             "release",
             "create",
             $env:TAG,
-            "release/*",
+            "release/Erebus-$env:VERSION-x64.exe",
+            "release/Erebus-$env:VERSION-x64.exe.blockmap",
             "--repo",
             $env:GITHUB_REPOSITORY,
             "--target",
