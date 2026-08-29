@@ -117,7 +117,7 @@ layer("ResearchToolController", (it) => {
         messageWindow: 5,
         interventionConfidence: 0.8,
         cooldownMessages: 5,
-        maxInterventionsPerTurn: 1,
+        maxInterventionsPerTurn: null,
       });
     }),
   );
