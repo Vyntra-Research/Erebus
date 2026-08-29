@@ -88,7 +88,21 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       - name: Test
-        run: vp run --parallel --concurrency-limit 4 --filter '!erebus' --filter '!./apps/mobile' --filter '!@t3tools/monorepo' test
+        run: >-
+          vp run --parallel --concurrency-limit 4
+          --filter '@t3tools/desktop'
+          --filter '@t3tools/scripts'
+          --filter 'effect-acp'
+          --filter '@t3tools/oxlint-plugin-t3code'
+          --filter '@t3tools/contracts'
+          --filter 'effect-codex-app-server'
+          --filter '@t3tools/shared'
+          --filter '@t3tools/tailscale'
+          --filter '@t3tools/web'
+          --filter '@t3tools/client-runtime'
+          --filter '@t3tools/ssh'
+          --filter 't3code-relay'
+          test
 
   # apps/server sets `fileParallelism: false`, so its 239 files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
