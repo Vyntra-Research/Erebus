@@ -69,6 +69,7 @@ layer("ResearchEngine", (it) => {
         projectId: ProjectId.make("project-1"),
         principalThreadId: ThreadId.make("thread-1"),
         proteusCampaignId: "proteus-1",
+        proteusRoot: "C:\\workspace",
       } as const;
 
       const first = yield* engine.dispatch(command);
@@ -96,6 +97,7 @@ layer("ResearchEngine", (it) => {
         projectId: ProjectId.make("project-1"),
         principalThreadId: ThreadId.make("thread-2"),
         proteusCampaignId: "proteus-1",
+        proteusRoot: "C:\\workspace",
       });
       yield* engine.dispatch({
         type: "contract.register",
@@ -141,6 +143,7 @@ layer("ResearchEngine", (it) => {
         projectId: ProjectId.make("project-lifecycle"),
         principalThreadId: ThreadId.make("thread-lifecycle"),
         proteusCampaignId: "proteus-1",
+        proteusRoot: "C:\\workspace",
       });
       yield* engine.dispatch({
         type: "contract.register",

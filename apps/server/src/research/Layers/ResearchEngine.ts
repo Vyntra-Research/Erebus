@@ -76,6 +76,7 @@ function decideResearchCommand(
             observerThreadId: null,
             judgeThreadId: null,
             proteusCampaignId: command.proteusCampaignId,
+            proteusRoot: command.proteusRoot,
             activeContractId: null,
             activeContractRevision: null,
             status: "draft",

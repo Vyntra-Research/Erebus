@@ -131,6 +131,7 @@ export const ResearchCampaign = Schema.Struct({
   observerThreadId: Schema.NullOr(ThreadId),
   judgeThreadId: Schema.NullOr(ThreadId),
   proteusCampaignId: TrimmedNonEmptyString,
+  proteusRoot: Schema.optionalKey(TrimmedNonEmptyString),
   activeContractId: Schema.NullOr(ResearchContractId),
   activeContractRevision: Schema.NullOr(PositiveInt),
   status: ResearchCampaignStatus,
