@@ -11,7 +11,7 @@ Before updating:
 
 An update keeps projects, tasks, settings, and campaign state. If the built-in updater cannot complete, download and run the newer Windows installer from [Erebus releases](https://github.com/Vyntra-Research/Erebus/releases).
 
-Proteus updates independently. Erebus checks the latest stable Proteus release at most once every 24 hours when a Codex environment starts, verifies its package digest, and installs it before starting that environment. A running task keeps its current runtime until the environment starts again.
+Proteus updates independently. Erebus checks the latest stable Proteus release at most once every 24 hours when a Codex environment starts, verifies its package digest, and installs it before starting that environment. It retains the active and one previous managed version. A running task keeps its current runtime until the environment starts again.
 
 When a Codex home was copied or moved, Erebus repairs a stored rollout path only if the old path is missing and the matching rollout exists under the active home.
 

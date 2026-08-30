@@ -70,6 +70,67 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
     }),
   );
 
+  it.effect("retains the active and one previous owned Proteus version", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "erebus-proteus-retention-",
+      });
+      const codexHome = path.join(root, "codex-home");
+      const managedRuntimeRoot = path.join(root, "managed-runtime");
+      const runtimeVersionsRoot = path.join(managedRuntimeRoot, "packages");
+      const pluginVersionsRoot = path.join(codexHome, "managed", "proteus");
+      const checkedAt = Date.UTC(2026, 7, 30);
+      const bundled = yield* resolveManagedProteusRuntime(path.join(root, "empty-runtime"));
+
+      yield* Effect.promise(async () => {
+        for (const version of ["2.1.5", "2.1.6", "2.1.7"]) {
+          const runtimeRoot = path.join(runtimeVersionsRoot, version);
+          const pluginRoot = path.join(pluginVersionsRoot, version);
+          await NodeFSP.mkdir(runtimeRoot, { recursive: true });
+          await NodeFSP.mkdir(pluginRoot, { recursive: true });
+          await NodeFSP.writeFile(
+            path.join(runtimeRoot, ".erebus-managed-runtime.json"),
+            `{"owner":"Erebus","version":"${version}"}\n`,
+          );
+          await NodeFSP.writeFile(
+            path.join(pluginRoot, ".erebus-managed.json"),
+            `{"owner":"Erebus","version":"${version}"}\n`,
+          );
+        }
+        await NodeFSP.mkdir(path.join(runtimeVersionsRoot, "2.1.4"), { recursive: true });
+        await NodeFSP.mkdir(path.join(pluginVersionsRoot, "2.1.4"), { recursive: true });
+        await NodeFSP.mkdir(managedRuntimeRoot, { recursive: true });
+        await NodeFSP.writeFile(
+          path.join(managedRuntimeRoot, "update-state.json"),
+          `{"checkedAt":${checkedAt},"latestVersion":"${bundled.version}"}\n`,
+        );
+      });
+
+      let requests = 0;
+      const installed = yield* installManagedProteusForCodex(codexHome, {
+        managedRuntimeRoot,
+        now: () => checkedAt,
+        fetch: (async (_input: string | URL | Request) => {
+          requests += 1;
+          return new Response(null, { status: 500 });
+        }) as typeof globalThis.fetch,
+      });
+      const runtimeVersions = yield* Effect.promise(() =>
+        NodeFSP.readdir(runtimeVersionsRoot).then((entries) => entries.sort()),
+      );
+      const pluginVersions = yield* Effect.promise(() =>
+        NodeFSP.readdir(pluginVersionsRoot).then((entries) => entries.sort()),
+      );
+
+      expect(installed.version).toBe(bundled.version);
+      expect(requests).toBe(0);
+      expect(runtimeVersions).toEqual(["2.1.4", "2.1.7"]);
+      expect(pluginVersions).toEqual(["2.1.4", "2.1.7", bundled.version]);
+    }),
+  );
+
   it.effect("installs a newer verified Proteus release once per update window", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

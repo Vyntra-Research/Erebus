@@ -19,6 +19,7 @@ const PROTEUS_RELEASE_BASE = "https://github.com/Vyntra-Research/Proteus/release
 const PROTEUS_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 const PROTEUS_UPDATE_MAX_BYTES = 20 * 1024 * 1024;
 const PROTEUS_UPDATE_TIMEOUT_MS = 30_000;
+const PROTEUS_RETAINED_VERSIONS = 2;
 const updatePromises = new Map<string, Promise<ManagedProteusRuntime>>();
 let defaultManagedRuntimeRoot: string | undefined;
 
@@ -95,6 +96,37 @@ function compareVersions(left: string, right: string): number {
     if (difference !== 0) return difference;
   }
   return 0;
+}
+
+async function pruneOwnedVersions(
+  versionsRoot: string,
+  markerName: string,
+  activeVersion: string,
+): Promise<void> {
+  const entries = await NodeFSP.readdir(versionsRoot, { withFileTypes: true }).catch(() => []);
+  const owned: Array<{ readonly path: string; readonly version: string }> = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !parseVersion(entry.name)) continue;
+    const versionRoot = NodePath.join(versionsRoot, entry.name);
+    const marker = await NodeFSP.readFile(NodePath.join(versionRoot, markerName), "utf8")
+      .then((value) => JSON.parse(value) as ErebusManagedMarker)
+      .catch(() => null);
+    if (marker?.owner === "Erebus" && marker.version === entry.name) {
+      owned.push({ path: versionRoot, version: entry.name });
+    }
+  }
+
+  owned.sort((left, right) => compareVersions(right.version, left.version));
+  const retained = new Set([activeVersion]);
+  for (const candidate of owned) {
+    if (retained.size >= PROTEUS_RETAINED_VERSIONS) break;
+    retained.add(candidate.version);
+  }
+  for (const candidate of owned) {
+    if (!retained.has(candidate.version)) {
+      await NodeFSP.rm(candidate.path, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
 }
 
 async function runtimeFromPackageRoot(
@@ -414,6 +446,13 @@ export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installFo
   }
   return yield* Effect.tryPromise({
     try: async () => {
+      if (options.managedRuntimeRoot) {
+        await pruneOwnedVersions(
+          NodePath.join(options.managedRuntimeRoot, "packages"),
+          ".erebus-managed-runtime.json",
+          runtime.version,
+        );
+      }
       const marketplaceRoot = NodePath.join(codexHome, "managed", "proteus", runtime.version);
       const installedPluginRoot = NodePath.join(marketplaceRoot, "plugins", "proteus");
       const markerPath = NodePath.join(marketplaceRoot, ".erebus-managed.json");
@@ -492,6 +531,11 @@ export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installFo
         await NodeFSP.writeFile(temporaryPath, nextConfig, "utf8");
         await NodeFSP.rename(temporaryPath, configPath);
       }
+      await pruneOwnedVersions(
+        NodePath.join(codexHome, "managed", "proteus"),
+        ".erebus-managed.json",
+        runtime.version,
+      );
       return {
         ...runtime,
         marketplaceRoot,

@@ -22,7 +22,7 @@ It includes:
 - a Codex account
 - Git for repository projects
 
-Proteus needs no separate global install. Erebus ships a tested fallback, checks official stable Proteus releases, verifies the package digest, and installs updates in Erebus-managed storage.
+Proteus needs no separate global install. Erebus ships a tested fallback, checks official stable Proteus releases, verifies the package digest, and installs updates in Erebus-managed storage. It retains the active and one previous managed version instead of keeping an unbounded update history.
 
 ## Development
 
