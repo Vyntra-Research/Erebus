@@ -1,6 +1,6 @@
 # Install Erebus
 
-Erebus `0.1.5` targets Windows 10 and newer. It runs locally and uses your Codex subscription. This is the current release scope, not a limit on future platforms or providers.
+Erebus `0.1.6` targets Windows 10 and newer. It runs locally and uses your Codex subscription. This is the current release scope, not a limit on future platforms or providers.
 
 ## Desktop release
 
@@ -30,7 +30,7 @@ Run it only if the in-app flow cannot start, then refresh the Codex provider sta
 
 ## Proteus
 
-Do not install Proteus separately. Each Erebus release pins a tested Proteus version and installs its CLI, MCP server, plugin, and skills into the Erebus Codex profile. Erebus refreshes that managed copy when its pinned version changes and leaves other Codex configuration alone.
+Do not install Proteus separately. Erebus ships a tested Proteus fallback and installs its CLI, MCP server, plugin, and skills in the Erebus Codex profile. When a Codex environment starts, Erebus checks for a newer stable Proteus release at most once every 24 hours. It verifies the release package SHA-256 digest before installing it in versioned Erebus storage. A failed or unavailable update leaves the last verified runtime in place and does not stop Codex from starting.
 
 ## Build from source
 

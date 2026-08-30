@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.6 - 2026-08-29
+
+### Added
+
+- Added independent Proteus updates from verified stable GitHub release packages, with a daily check and the bundled runtime as an offline fallback.
+
+### Changed
+
+- Updated the bundled Proteus fallback from 2.1.7 to 2.1.8.
+- Documented the built-in Erebus download and install flow instead of requiring a manual installer download for every update.
+
 ## 0.1.5 - 2026-08-29
 
 ### Fixed

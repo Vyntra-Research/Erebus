@@ -164,7 +164,9 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         );
       }
       if (enabled && homeLayout.effectiveHomePath) {
-        yield* installManagedProteusForCodex(homeLayout.effectiveHomePath).pipe(
+        yield* installManagedProteusForCodex(homeLayout.effectiveHomePath, {
+          managedRuntimeRoot: path.join(serverConfig.stateDir, "managed", "proteus-runtime"),
+        }).pipe(
           Effect.mapError(
             (cause) =>
               new ProviderDriverError({
