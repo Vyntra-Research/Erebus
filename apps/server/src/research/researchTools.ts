@@ -206,7 +206,7 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
       type: "function",
       name: "checkpoint",
       description:
-        "Link a real Proteus checkpoint to a compact Erebus orchestration digest with killed paths, open deviations, and the next move. The checkpoint id may be bare (143) or use Proteus display form (CP143).",
+        "Link a real Proteus checkpoint to a compact Erebus orchestration digest with killed paths, open deviations, and the next move. The checkpoint id may be bare (74) or use the Proteus display form (K74).",
       inputSchema: objectSchema(
         {
           campaignId: { type: "string", minLength: 1 },

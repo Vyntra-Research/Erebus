@@ -16,7 +16,7 @@ const numericId = (
   operation: "campaign" | "branch" | "checkpoint",
   value: string,
 ): number | null => {
-  const prefix = operation === "campaign" ? "C" : operation === "branch" ? "B" : "(?:CP|P)";
+  const prefix = operation === "campaign" ? "C" : operation === "branch" ? "B" : "(?:K|CP|P)";
   const match = value.trim().match(new RegExp(`^(?:${prefix})?([1-9]\\d*)$`, "i"));
   if (!match?.[1]) return null;
   const parsed = Number(match[1]);

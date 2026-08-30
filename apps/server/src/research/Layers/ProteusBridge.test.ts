@@ -103,7 +103,7 @@ layer("ProteusBridge", (it) => {
       assert.isDefined(bridge);
       const campaign = yield* bridge!.resolveCampaign(nested, "C3");
       const branch = yield* bridge!.readBranch(root, "B7");
-      const checkpoint = yield* bridge!.readCheckpoint(root, "CP11");
+      const checkpoint = yield* bridge!.readCheckpoint(root, "K11");
 
       assert.deepStrictEqual(campaign, {
         id: 3,
@@ -162,7 +162,7 @@ layer("ProteusBridge", (it) => {
     }),
   );
 
-  it.effect("accepts bare ids and only the canonical prefix for each record kind", () =>
+  it.effect("accepts bare and display ids while rejecting a different record prefix", () =>
     Effect.gen(function* () {
       calls.length = 0;
       const bridge = yield* ProteusBridge;
@@ -176,6 +176,7 @@ layer("ProteusBridge", (it) => {
       campaignRoots.add(root);
       yield* bridge!.resolveCampaign(root, "3");
       yield* bridge!.readBranch("C:\\target", "B7");
+      yield* bridge!.readCheckpoint("C:\\target", "K11");
       yield* bridge!.readCheckpoint("C:\\target", "CP11");
       const callsBeforeWrongPrefix = calls.length;
 
