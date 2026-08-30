@@ -18,6 +18,11 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 function makeElectronAppLayer(
   appListeners: Map<string, (...args: readonly unknown[]) => void>,
   quit: Effect.Effect<void> = Effect.void,
+  options: {
+    readonly flushStorageData?: Effect.Effect<void>;
+    readonly relaunch?: Effect.Effect<void>;
+    readonly exit?: Effect.Effect<void>;
+  } = {},
 ) {
   const registerListener = (eventName: string, listener: (...args: readonly unknown[]) => void) =>
     Effect.acquireRelease(
@@ -35,9 +40,10 @@ function makeElectronAppLayer(
     name: Effect.succeed("Erebus"),
     systemLocale: Effect.succeed("en-US"),
     whenReady: Effect.void,
+    flushStorageData: options.flushStorageData ?? Effect.void,
     quit,
-    exit: () => Effect.void,
-    relaunch: () => Effect.void,
+    exit: () => options.exit ?? Effect.void,
+    relaunch: () => options.relaunch ?? Effect.void,
     setPath: () => Effect.void,
     setName: () => Effect.void,
     setAboutPanelOptions: () => Effect.void,
@@ -240,6 +246,56 @@ describe("DesktopLifecycle", () => {
           assert.equal(activationCount, 0);
         }),
       ).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("flushes renderer storage before a forced relaunch exits", () =>
+    Effect.gen(function* () {
+      const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+      const exitRequested = yield* Deferred.make<void>();
+      const events: string[] = [];
+      const record = (event: string) =>
+        Effect.sync(() => {
+          events.push(event);
+        });
+      const desktopShutdownLayer = Layer.succeed(DesktopShutdown.DesktopShutdown, {
+        request: record("shutdown"),
+        awaitRequest: Effect.void,
+        markComplete: Effect.void,
+        awaitComplete: Effect.void,
+        isComplete: Effect.succeed(true),
+      });
+      const environmentLayer = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+        platform: "win32",
+        isDevelopment: false,
+      } as DesktopEnvironment.DesktopEnvironment["Service"]);
+      const appLayer = makeElectronAppLayer(appListeners, Effect.void, {
+        flushStorageData: record("flush-storage"),
+        relaunch: record("relaunch"),
+        exit: record("exit").pipe(
+          Effect.andThen(Deferred.succeed(exitRequested, undefined)),
+          Effect.asVoid,
+        ),
+      });
+      const layer = DesktopLifecycle.layer.pipe(
+        Layer.provideMerge(appLayer),
+        Layer.provideMerge(electronThemeLayer),
+        Layer.provideMerge(makeElectronWindowLayer()),
+        Layer.provideMerge(
+          makeDesktopWindowLayer({ flushMainWindowBounds: record("flush-bounds") }),
+        ),
+        Layer.provideMerge(environmentLayer),
+        Layer.provideMerge(desktopShutdownLayer),
+        Layer.provideMerge(DesktopState.layer),
+      );
+
+      yield* Effect.gen(function* () {
+        const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+        yield* lifecycle.relaunch("test");
+        yield* Deferred.await(exitRequested).pipe(Effect.timeout("1 second"));
+      }).pipe(Effect.provide(layer));
+
+      assert.deepEqual(events, ["flush-bounds", "shutdown", "flush-storage", "relaunch", "exit"]);
     }),
   );
 });

@@ -14,6 +14,7 @@
 ### Fixed
 
 - Fixed Proteus plugin installation from packaged Windows builds so Codex remains available after an Erebus update.
+- Preserved the selected theme across forced restarts and desktop updates.
 - Published the desktop update manifest with each release and now show update-check failures in the UI.
 
 ## 0.1.6 - 2026-08-29

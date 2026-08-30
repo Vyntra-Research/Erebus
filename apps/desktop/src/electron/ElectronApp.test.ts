@@ -7,6 +7,7 @@ const {
   autoUpdaterOnMock,
   autoUpdaterRemoveListenerMock,
   exitMock,
+  flushStorageDataMock,
   getAppPathMock,
   getSystemLocaleMock,
   getVersionMock,
@@ -29,6 +30,7 @@ const {
   autoUpdaterOnMock: vi.fn(),
   autoUpdaterRemoveListenerMock: vi.fn(),
   exitMock: vi.fn(),
+  flushStorageDataMock: vi.fn(),
   getAppPathMock: vi.fn(() => "/app"),
   getSystemLocaleMock: vi.fn(() => "en-GB"),
   getVersionMock: vi.fn(() => "1.2.3"),
@@ -81,6 +83,11 @@ vi.mock("electron", () => ({
     whenReady: whenReadyMock,
     exit: exitMock,
   },
+  session: {
+    defaultSession: {
+      flushStorageData: flushStorageDataMock,
+    },
+  },
 }));
 
 import * as ElectronApp from "./ElectronApp.ts";
@@ -91,6 +98,7 @@ describe("ElectronApp", () => {
     autoUpdaterOnMock.mockClear();
     autoUpdaterRemoveListenerMock.mockClear();
     exitMock.mockClear();
+    flushStorageDataMock.mockClear();
     onMock.mockClear();
     quitMock.mockClear();
     relaunchMock.mockClear();
@@ -166,6 +174,31 @@ describe("ElectronApp", () => {
         error.message,
         "Failed to wait for the Electron app to become ready (packaged: true).",
       );
+    }).pipe(Effect.provide(ElectronApp.layer)),
+  );
+
+  it.effect("flushes renderer storage through the default session", () =>
+    Effect.gen(function* () {
+      const electronApp = yield* ElectronApp.ElectronApp;
+      yield* electronApp.flushStorageData;
+
+      assert.equal(flushStorageDataMock.mock.calls.length, 1);
+    }).pipe(Effect.provide(ElectronApp.layer)),
+  );
+
+  it.effect("preserves renderer storage flush failures", () =>
+    Effect.gen(function* () {
+      const cause = new Error("storage flush failed");
+      flushStorageDataMock.mockImplementationOnce(() => {
+        throw cause;
+      });
+
+      const electronApp = yield* ElectronApp.ElectronApp;
+      const error = yield* electronApp.flushStorageData.pipe(Effect.flip);
+
+      assert.instanceOf(error, ElectronApp.ElectronAppStorageFlushError);
+      assert.strictEqual(error.cause, cause);
+      assert.equal(error.message, "Failed to flush Electron renderer storage.");
     }).pipe(Effect.provide(ElectronApp.layer)),
   );
 
