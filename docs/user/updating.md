@@ -1,6 +1,6 @@
 # Update Erebus
 
-Erebus `0.1.4` updates through GitHub Releases. Erebus does not silently update while a research task is running.
+Erebus `0.1.5` updates through GitHub Releases. Erebus does not silently update while a research task is running.
 
 Before updating:
 
@@ -13,4 +13,4 @@ An update keeps projects, tasks, settings, and campaign state. It may refresh th
 
 When a Codex home was copied or moved, Erebus repairs a stored rollout path only if the old path is missing and the matching rollout exists under the active home.
 
-The inherited Linux service, hosted web app, mobile client, and relay updater are not enabled in `0.1.4`.
+The inherited Linux service, hosted web app, mobile client, and relay updater are not enabled in `0.1.5`.
