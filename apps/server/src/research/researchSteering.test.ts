@@ -26,6 +26,8 @@ it("marks live steering as control context and escapes the observation", () => {
   });
 
   assert.include(message, "not a new user request and not a final research iteration");
+  assert.include(message, "replay this exact literal block after automatic compaction");
+  assert.include(message, "its position does not make it the latest iteration");
   assert.include(message, "Fix &lt;gate&gt; &amp; continue.");
   assert.notInclude(message, "<observation>Fix <gate>");
 });

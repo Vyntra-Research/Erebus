@@ -1681,6 +1681,23 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const mcpAppServerArgs: string[] = [];
+        if (mcpSession?.previewEnabled) {
+          mcpAppServerArgs.push(
+            "-c",
+            `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
+            "-c",
+            'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
+          );
+        }
+        if (mcpSession?.researchFallbackEndpoint) {
+          mcpAppServerArgs.push(
+            "-c",
+            `mcp_servers.erebus-research.url=${mcpSession.researchFallbackEndpoint}`,
+            "-c",
+            'mcp_servers.erebus-research.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
+          );
+        }
         const projectId = input.projectId;
         const researchToolController = options?.researchToolController;
         const runtimeInput: CodexSessionRuntimeOptions = {
@@ -1699,6 +1716,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(mcpSession?.researchFallbackEndpoint
+            ? {
+                onProteusHealth: (health) =>
+                  McpProviderSession.setMcpProviderSessionProteusHealth(input.threadId, health),
+              }
+            : {}),
           ...(projectId && researchToolController
             ? {
                 dynamicTools: [EREBUS_RESEARCH_DYNAMIC_TOOL],
@@ -1720,18 +1743,13 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   }),
               }
             : {}),
-          ...(mcpSession
+          ...(mcpSession && mcpAppServerArgs.length > 0
             ? {
                 environment: {
                   ...(options?.environment ?? process.env),
                   T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
                 },
-                appServerArgs: [
-                  "-c",
-                  `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
-                  "-c",
-                  'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
-                ],
+                appServerArgs: mcpAppServerArgs,
               }
             : {}),
         };

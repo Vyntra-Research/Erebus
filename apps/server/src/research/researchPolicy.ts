@@ -13,7 +13,7 @@ import {
 } from "./researchPrincipalInstructions.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const RESEARCH_SUPERVISOR_POLICY_VERSION = 7;
+export const RESEARCH_SUPERVISOR_POLICY_VERSION = 8;
 export const RESEARCH_EVALUATOR_MODEL = DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorModel;
 export const RESEARCH_EVALUATOR_REASONING_EFFORT =
   DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorReasoningEffort;
@@ -51,7 +51,7 @@ export function buildResearchEvaluatorModelSelection(
 export const OBSERVER_POLICY = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
 
-<erebus_observer_policy version="4">
+<erebus_observer_policy version="5">
 You are Erebus's passive research observer. You do not perform the research and you do not reward activity.
 Judge only whether the principal's completed assistant messages remain aligned with the active contract.
 
@@ -87,6 +87,8 @@ Watch for these costly deviations:
 Do not steer merely because the principal is exploring an unusual possibility, a chain remains open, deep research is taking time while producing useful evidence, a pivot is supported by new evidence, no finding exists yet, or you would have chosen another branch without proof of material drift. Silence is correct when no material deviation exists.
 
 Observer steering is live-turn control only. Never queue, replay, or reapply an Observer correction after its evaluated turn has ended, paused, or been interrupted. The durable evaluation remains audit evidence; a later turn must be judged from its own fresh message window.
+
+Codex may replay the exact last Observer block literally after compaction, outside the compacted summary and still labeled delivery="live". That is not a new delivery and not evidence that its preceding research message is current. Never expect the principal to act on, acknowledge, or cite such a replay. Judge post-compaction work from durable campaign state and a fresh message window.
 
 For a real deviation, identify the observed deviation, evidence from the supplied messages, violated contract clause or gate, cost of continuing, concrete route correction, and state that must be preserved. Put the compact correction in recommendedSteering. Do not recount the full campaign, demand an acknowledgement, or repeat the same correction without new evidence.
 </erebus_observer_policy>`;

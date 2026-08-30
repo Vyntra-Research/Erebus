@@ -58,6 +58,7 @@ import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 const isModelSelection = Schema.is(ModelSelection);
@@ -139,6 +140,7 @@ function toRuntimePayloadFromSession(
     readonly modelSelection?: unknown;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
+    readonly erebusResearchNativeTools?: boolean;
   },
 ): Record<string, unknown> {
   return {
@@ -150,6 +152,9 @@ function toRuntimePayloadFromSession(
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
+      : {}),
+    ...(extra?.erebusResearchNativeTools !== undefined
+      ? { erebusResearchNativeTools: extra.erebusResearchNativeTools }
       : {}),
   };
 }
@@ -174,6 +179,28 @@ function readPersistedCwd(
   if (typeof rawCwd !== "string") return undefined;
   const trimmed = rawCwd.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readPersistedResearchNativeTools(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+): boolean {
+  return (
+    runtimePayload !== null &&
+    typeof runtimePayload === "object" &&
+    !Array.isArray(runtimePayload) &&
+    "erebusResearchNativeTools" in runtimePayload &&
+    runtimePayload.erebusResearchNativeTools === true
+  );
+}
+
+export function needsResearchMcpFallback(input: {
+  readonly provider: ProviderDriverKind;
+  readonly resumeCursor: unknown | undefined;
+  readonly hasNativeResearchTools: boolean;
+}): boolean {
+  return (
+    input.provider === "codex" && input.resumeCursor !== undefined && !input.hasNativeResearchTools
+  );
 }
 
 const dieOnMissingBindingInstanceId = (
@@ -234,14 +261,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-  /**
-   * Attach the `t3-code` MCP server to the session that is about to start.
-   *
-   * This is the only place a credential is minted, so withholding one here is
-   * what disables agent browser access everywhere: every adapter already
-   * treats a missing session as "no MCP server", and the `/mcp` endpoint
-   * accepts nothing but tokens issued from this path.
-   */
+  /** Attach only the MCP capabilities this exact provider session needs. */
   /**
    * Deny on an unreadable settings file rather than letting the read failure
    * escape: adding `ServerSettingsError` to `ProviderServiceError` would widen
@@ -260,20 +280,39 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ),
   );
 
-  const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
+  const prepareMcpSession = (input: {
+    readonly threadId: ThreadId;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly provider: ProviderDriverKind;
+    readonly resumeCursor: unknown | undefined;
+    readonly hasNativeResearchTools: boolean;
+  }) =>
     Effect.gen(function* () {
-      if (!(yield* agentBrowserAccessEnabled)) {
+      const previewEnabled = yield* agentBrowserAccessEnabled;
+      // Codex accepts dynamic tools only on thread/start. Its thread/resume
+      // request has no dynamicTools field, so an existing provider thread needs
+      // the authenticated MCP transport for the same durable research tools.
+      // Fresh Codex threads keep the native dynamic namespace exclusively.
+      const researchFallbackEnabled = needsResearchMcpFallback(input);
+      if (!previewEnabled && !researchFallbackEnabled) {
         // Revoke as well as clear. Every other prepare path reaches
         // `issueActiveMcpCredential`, which revokes the thread first, so
         // skipping it here would leave a previously issued bearer token valid
         // against `/mcp` for the rest of its liveness window — and later turns
         // would keep refreshing it. A session restart (runtime mode, cwd,
         // model) re-prepares without stopping, so it relies on this.
-        yield* revokeMcpCredential(threadId);
-        yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
+        yield* revokeMcpCredential(input.threadId);
+        yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(input.threadId));
         return undefined;
       }
-      const credential = yield* issueMcpCredential({ threadId, providerInstanceId });
+      const capabilities = new Set<McpInvocationContext.McpCapability>();
+      if (previewEnabled) capabilities.add("preview");
+      if (researchFallbackEnabled) capabilities.add("researchFallback");
+      const credential = yield* issueMcpCredential({
+        threadId: input.threadId,
+        providerInstanceId: input.providerInstanceId,
+        capabilities,
+      });
       if (credential) {
         yield* Effect.sync(() => McpProviderSession.setMcpProviderSession(credential.config));
       }
@@ -320,6 +359,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly modelSelection?: unknown;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
+      readonly erebusResearchNativeTools?: boolean;
     },
   ) =>
     Effect.gen(function* () {
@@ -454,7 +494,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
-      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
+      yield* prepareMcpSession({
+        threadId: input.binding.threadId,
+        providerInstanceId: bindingInstanceId,
+        provider: input.binding.provider,
+        resumeCursor: input.binding.resumeCursor,
+        hasNativeResearchTools: readPersistedResearchNativeTools(input.binding.runtimePayload),
+      });
       const resumed = yield* adapter
         .startSession({
           threadId: input.binding.threadId,
@@ -650,7 +696,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
-        yield* prepareMcpSession(threadId, resolvedInstanceId);
+        yield* prepareMcpSession({
+          threadId,
+          providerInstanceId: resolvedInstanceId,
+          provider: resolvedProvider,
+          resumeCursor: effectiveResumeCursor,
+          hasNativeResearchTools: readPersistedResearchNativeTools(
+            persistedBinding?.runtimePayload ?? null,
+          ),
+        });
         const session = yield* adapter
           .startSession({
             ...input,
@@ -678,6 +732,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
+          ...(resolvedProvider === "codex" &&
+          effectiveResumeCursor === undefined &&
+          input.projectId !== undefined
+            ? { erebusResearchNativeTools: true }
+            : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
