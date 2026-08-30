@@ -23,6 +23,7 @@ import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
@@ -250,6 +251,7 @@ export const make = Effect.gen(function* () {
   const config = yield* DesktopConfig.DesktopConfig;
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const desktopState = yield* DesktopState.DesktopState;
+  const electronApp = yield* ElectronApp.ElectronApp;
   const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
@@ -497,6 +499,7 @@ export const make = Effect.gen(function* () {
         (instance) => instance.stop({ timeout: Duration.seconds(5) }),
         { concurrency: "unbounded" },
       );
+      yield* electronApp.flushStorageData.pipe(Effect.orDie);
       yield* electronWindow.destroyAll;
       yield* electronUpdater.quitAndInstall({
         isSilent: true,

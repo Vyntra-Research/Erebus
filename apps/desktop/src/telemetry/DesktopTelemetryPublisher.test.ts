@@ -28,6 +28,7 @@ function makeElectronAppLayer(
     name: Effect.succeed("Erebus"),
     systemLocale: Effect.succeed("en-US"),
     whenReady: Effect.void,
+    flushStorageData: Effect.void,
     quit: Effect.void,
     exit: () => Effect.void,
     relaunch: () => Effect.void,

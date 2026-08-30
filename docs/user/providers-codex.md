@@ -22,7 +22,7 @@ After login, return to **Settings -> Providers -> Codex** and refresh the provid
 
 ## Proteus integration
 
-Erebus manages Proteus inside this isolated profile. It ships a tested fallback, checks official stable releases once per day when the Codex environment starts, and accepts an update only after its package digest and runtime layout pass validation. Erebus copies the selected plugin and skills, writes only its owned Codex configuration sections, and calls the selected CLI directly. A global Proteus install is not required and does not control the Erebus runtime.
+Erebus manages Proteus inside this isolated profile. It ships a tested fallback, checks official stable releases once per day when the Codex environment starts, and accepts an update only after its package digest and runtime layout pass validation. Erebus retains the active and one previous managed runtime and plugin copy. It writes only its owned Codex configuration sections and removes only version directories marked as Erebus-managed. A global Proteus install is not required and does not control the Erebus runtime.
 
 ## More than one account
 

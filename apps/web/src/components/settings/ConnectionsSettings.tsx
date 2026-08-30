@@ -1982,14 +1982,13 @@ export function ConnectionsSettings() {
         setIsDesktopServerExposureDialogOpen(false);
         setIsUpdatingDesktopServerExposure(false);
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Failed to update network exposure.";
+        const message = error instanceof Error ? error.message : "Failed to update LAN exposure.";
         setIsDesktopServerExposureDialogOpen(false);
         setDesktopServerExposureMutationError(message);
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not update network access",
+            title: "Could not update LAN access",
             description: message,
           }),
         );
@@ -2572,7 +2571,7 @@ export function ConnectionsSettings() {
         setPendingDesktopServerExposureMode(checked ? "network-accessible" : "local-only");
         setIsDesktopServerExposureDialogOpen(true);
       }}
-      aria-label="Enable network access"
+      aria-label="Expose the Erebus backend on the local network"
     />
   );
   const renderEndpointRows = (presentation: AccessSectionPresentation) =>
@@ -2952,7 +2951,7 @@ export function ConnectionsSettings() {
   );
   const renderNetworkAccessRow = () => (
     <SettingsRow
-      title="Network access"
+      title="LAN access"
       description={
         isLocalBackendNetworkAccessible ? (
           <NetworkAccessDescription
@@ -2969,7 +2968,7 @@ export function ConnectionsSettings() {
             }
           />
         ) : desktopServerExposureState ? (
-          "Limited to this machine."
+          "The Erebus backend is limited to this machine. This does not control Codex internet access."
         ) : (
           "Loading…"
         )
@@ -2984,10 +2983,10 @@ export function ConnectionsSettings() {
   );
   const renderDisabledNetworkAccessRow = () => (
     <SettingsRow
-      title="Network access"
+      title="LAN access"
       description={
         currentAuthPolicy === "remote-reachable"
-          ? "This backend is already configured for remote access. Network exposure changes must be made where the server is launched."
+          ? "This backend is already configured for remote access. LAN exposure changes must be made where the server is launched."
           : "This backend is only reachable on this machine. Restart it with a non-loopback host to enable remote pairing."
       }
       control={
@@ -2998,14 +2997,14 @@ export function ConnectionsSettings() {
                 <Switch
                   checked={isLocalBackendNetworkAccessible}
                   disabled
-                  aria-label="Enable network access"
+                  aria-label="Expose the Erebus backend on the local network"
                 />
               </span>
             }
           />
           <TooltipPopup side="top">
-            Network exposure changes restart the backend and must be controlled where the server
-            process is launched.
+            LAN exposure changes restart the backend and must be controlled where the server process
+            is launched.
           </TooltipPopup>
         </Tooltip>
       }
@@ -3110,12 +3109,12 @@ export function ConnectionsSettings() {
               <AlertDialogHeader>
                 <AlertDialogTitle>
                   {pendingDesktopServerExposureMode === "network-accessible"
-                    ? "Enable network access?"
-                    : "Disable network access?"}
+                    ? "Enable LAN access?"
+                    : "Disable LAN access?"}
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {pendingDesktopServerExposureMode === "network-accessible"
-                    ? "Erebus will restart to expose this environment over the network."
+                    ? "Erebus will restart to expose its backend on your local network. This does not change Codex internet access."
                     : "Erebus will restart and limit this environment back to this machine."}
                 </AlertDialogDescription>
               </AlertDialogHeader>

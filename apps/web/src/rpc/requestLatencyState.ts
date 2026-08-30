@@ -31,6 +31,7 @@ const pendingRpcAckRequests = new Map<string, PendingRpcAckRequest>();
 const untrackedRpcAckMethods = new Set<string>([WS_METHODS.previewAutomationConnect]);
 const longRunningRpcAckMethods = new Set<string>([
   WS_METHODS.serverUpdateProvider,
+  WS_METHODS.serverUpdateProteus,
   WS_METHODS.serverRefreshProviders,
   WS_METHODS.serverUpdateServer,
 ]);

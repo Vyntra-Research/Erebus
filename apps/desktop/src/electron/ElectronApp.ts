@@ -38,6 +38,15 @@ export class ElectronAppWhenReadyError extends Schema.TaggedErrorClass<ElectronA
   }
 }
 
+export class ElectronAppStorageFlushError extends Schema.TaggedErrorClass<ElectronAppStorageFlushError>()(
+  "ElectronAppStorageFlushError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to flush Electron renderer storage.";
+  }
+}
+
 export class ElectronApp extends Context.Service<
   ElectronApp,
   {
@@ -51,6 +60,7 @@ export class ElectronApp extends Context.Service<
      */
     readonly systemLocale: Effect.Effect<string>;
     readonly whenReady: Effect.Effect<void, ElectronAppWhenReadyError>;
+    readonly flushStorageData: Effect.Effect<void, ElectronAppStorageFlushError>;
     readonly quit: Effect.Effect<void>;
     readonly exit: (code: number) => Effect.Effect<void>;
     readonly relaunch: (options: Electron.RelaunchOptions) => Effect.Effect<void>;
@@ -136,6 +146,10 @@ export const make = ElectronApp.of({
       try: () => Electron.app.whenReady(),
       catch: (cause) => new ElectronAppWhenReadyError({ isPackaged, cause }),
     });
+  }),
+  flushStorageData: Effect.try({
+    try: () => Electron.session.defaultSession.flushStorageData(),
+    catch: (cause) => new ElectronAppStorageFlushError({ cause }),
   }),
   quit: Effect.sync(() => {
     Electron.app.quit();

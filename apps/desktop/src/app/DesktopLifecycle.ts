@@ -169,6 +169,7 @@ export const make = DesktopLifecycle.of({
       yield* Effect.yieldNow;
       yield* Ref.set(state.quitting, true);
       yield* requestDesktopShutdownAndWait();
+      yield* electronApp.flushStorageData;
       if (environment.isDevelopment) {
         yield* electronApp.exit(75);
         return;

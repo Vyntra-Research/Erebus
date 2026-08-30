@@ -30,7 +30,7 @@ Run it only if the in-app flow cannot start, then refresh the Codex provider sta
 
 ## Proteus
 
-Do not install Proteus separately. Erebus ships a tested Proteus fallback and installs its CLI, MCP server, plugin, and skills in the Erebus Codex profile. When a Codex environment starts, Erebus checks for a newer stable Proteus release at most once every 24 hours. It verifies the release package SHA-256 digest before installing it in versioned Erebus storage. A failed or unavailable update leaves the last verified runtime in place and does not stop Codex from starting.
+Do not install Proteus separately. Erebus ships a tested Proteus fallback and installs its CLI, MCP server, plugin, and skills in the Erebus Codex profile. When a Codex environment starts, Erebus checks for a newer stable Proteus release at most once every 24 hours. It verifies the release package SHA-256 digest before installing it in versioned Erebus storage. Erebus retains the active and one previous managed version and removes older owned copies. A failed or unavailable update leaves the last verified runtime in place and does not stop Codex from starting.
 
 ## Build from source
 

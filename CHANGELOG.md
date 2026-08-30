@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.7 - 2026-08-30
+
+### Added
+
+- Added the installed Proteus version and a manual update check to Settings.
+
+### Changed
+
+- Renamed the backend exposure setting to "LAN access" and clarified that it does not control Codex internet access.
+- Kept only the active and previous Erebus-managed Proteus versions.
+
+### Fixed
+
+- Fixed Proteus plugin installation from packaged Windows builds so Codex remains available after an Erebus update.
+- Preserved the selected theme across forced restarts and desktop updates.
+- Published the desktop update manifest with each release and now show update-check failures in the UI.
+
 ## 0.1.6 - 2026-08-29
 
 ### Added
