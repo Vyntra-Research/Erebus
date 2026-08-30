@@ -618,6 +618,31 @@ export class ServerProviderUpdateError extends Schema.TaggedErrorClass<ServerPro
   }
 }
 
+export const ServerProteusStatus = Schema.Struct({
+  version: TrimmedNonEmptyString,
+});
+export type ServerProteusStatus = typeof ServerProteusStatus.Type;
+
+export const ServerProteusUpdateResult = Schema.Struct({
+  previousVersion: TrimmedNonEmptyString,
+  version: TrimmedNonEmptyString,
+  updated: Schema.Boolean,
+});
+export type ServerProteusUpdateResult = typeof ServerProteusUpdateResult.Type;
+
+export class ServerProteusError extends Schema.TaggedErrorClass<ServerProteusError>()(
+  "ServerProteusError",
+  {
+    operation: Schema.Literals(["status", "update"]),
+    detail: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 export const ServerSelfUpdateInput = Schema.Struct({
   /** Exact npm version of the `t3` package to install (never a dist-tag, so
       the server and the acknowledging client agree on what was requested). */

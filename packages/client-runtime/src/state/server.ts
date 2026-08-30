@@ -759,6 +759,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
     }),
+    proteusStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:proteus-status",
+      tag: WS_METHODS.serverGetProteusStatus,
+      staleTimeMs: 5_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",
@@ -782,6 +787,14 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverUpdateProvider,
       scheduler: configScheduler,
       concurrency: configConcurrency,
+    }),
+    updateProteus: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:update-proteus",
+      tag: WS_METHODS.serverUpdateProteus,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId }) => environmentId,
+      },
     }),
     updateServer,
     upsertKeybinding: createEnvironmentRpcCommand(runtime, {

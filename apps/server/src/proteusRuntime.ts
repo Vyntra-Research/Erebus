@@ -77,6 +77,26 @@ export interface ManagedProteusOptions {
   readonly managedRuntimeRoot?: string;
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => number;
+  readonly forceUpdateCheck?: boolean;
+}
+
+async function copyFilesystemTree(source: string, destination: string): Promise<void> {
+  const sourceStat = await NodeFSP.stat(source);
+  if (sourceStat.isDirectory()) {
+    await NodeFSP.mkdir(destination, { recursive: true });
+    const entries = await NodeFSP.readdir(source, { withFileTypes: true });
+    for (const entry of entries) {
+      await copyFilesystemTree(
+        NodePath.join(source, entry.name),
+        NodePath.join(destination, entry.name),
+      );
+    }
+    return;
+  }
+
+  await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
+  await NodeFSP.writeFile(destination, await NodeFSP.readFile(source));
+  await NodeFSP.chmod(destination, sourceStat.mode).catch(() => undefined);
 }
 
 function parseVersion(value: string): readonly [number, number, number] | null {
@@ -323,6 +343,7 @@ async function refreshRuntime(
     .then((value) => JSON.parse(value) as ProteusUpdateState)
     .catch(() => null);
   if (
+    options.forceUpdateCheck !== true &&
     typeof state?.checkedAt === "number" &&
     Number.isFinite(state.checkedAt) &&
     now - state.checkedAt >= 0 &&
@@ -483,13 +504,9 @@ export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installFo
 
       if (!managedFilesExist) {
         await NodeFSP.mkdir(NodePath.dirname(installedPluginRoot), { recursive: true });
-        await NodeFSP.cp(runtime.pluginRoot, installedPluginRoot, {
-          recursive: true,
-          force: true,
-          dereference: true,
-        });
+        await copyFilesystemTree(runtime.pluginRoot, installedPluginRoot);
         await NodeFSP.mkdir(NodePath.dirname(marketplacePath), { recursive: true });
-        await NodeFSP.copyFile(sourceMarketplacePath, marketplacePath);
+        await copyFilesystemTree(sourceMarketplacePath, marketplacePath);
 
         // @effect-diagnostics-next-line preferSchemaOverJson:off
         const manifest = JSON.parse(await NodeFSP.readFile(manifestPath, "utf8")) as Record<

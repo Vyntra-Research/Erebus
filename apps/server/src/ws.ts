@@ -49,6 +49,7 @@ import {
   type RelayClientInstallProgressEvent,
   type ServerSelfUpdateError,
   type ServerSelfUpdateProgressEvent,
+  ServerProteusError,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
   AssetWorkspaceContextNotFoundError,
@@ -94,6 +95,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { getProteusStatus, updateProteus } from "./proteusMaintenance.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -1617,6 +1619,30 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "server",
             },
+          ),
+        [WS_METHODS.serverGetProteusStatus]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetProteusStatus, getProteusStatus(config.stateDir), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverUpdateProteus]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUpdateProteus,
+            Effect.gen(function* () {
+              const settings = yield* serverSettings.getSettings.pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ServerProteusError({
+                      operation: "update",
+                      detail: "Erebus could not read its settings before updating Proteus.",
+                      cause,
+                    }),
+                ),
+              );
+              const result = yield* updateProteus(config.stateDir, settings);
+              yield* providerRegistry.refresh();
+              return result;
+            }),
+            { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverUpdateServer]: (input) =>
           observeRpcEffect(WS_METHODS.serverUpdateServer, serverSelfUpdate.update(input), {

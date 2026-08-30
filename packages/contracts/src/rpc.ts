@@ -173,6 +173,9 @@ import {
   ServerRemoveKeybindingInput,
   ServerRemoveKeybindingResult,
   ServerProviderUpdatedPayload,
+  ServerProteusError,
+  ServerProteusStatus,
+  ServerProteusUpdateResult,
   ServerSelfUpdateError,
   ServerSelfUpdateInput,
   ServerSelfUpdateProgressEvent,
@@ -275,6 +278,8 @@ export const WS_METHODS = {
   serverRefreshProviders: "server.refreshProviders",
   serverLoginCodex: "server.loginCodex",
   serverUpdateProvider: "server.updateProvider",
+  serverGetProteusStatus: "server.getProteusStatus",
+  serverUpdateProteus: "server.updateProteus",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
   serverUpsertKeybinding: "server.upsertKeybinding",
@@ -409,6 +414,18 @@ export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvide
   payload: ServerProviderUpdateInput,
   success: ServerProviderUpdatedPayload,
   error: Schema.Union([ServerProviderUpdateError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerGetProteusStatusRpc = Rpc.make(WS_METHODS.serverGetProteusStatus, {
+  payload: Schema.Struct({}),
+  success: ServerProteusStatus,
+  error: Schema.Union([ServerProteusError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerUpdateProteusRpc = Rpc.make(WS_METHODS.serverUpdateProteus, {
+  payload: Schema.Struct({}),
+  success: ServerProteusUpdateResult,
+  error: Schema.Union([ServerProteusError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerUpdateServerRpc = Rpc.make(WS_METHODS.serverUpdateServer, {
@@ -1057,6 +1074,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRefreshProvidersRpc,
   WsServerLoginCodexRpc,
   WsServerUpdateProviderRpc,
+  WsServerGetProteusStatusRpc,
+  WsServerUpdateProteusRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
   WsServerUpsertKeybindingRpc,

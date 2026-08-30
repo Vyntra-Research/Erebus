@@ -10,7 +10,11 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Tar from "tar";
 
-import { installManagedProteusForCodex, resolveManagedProteusRuntime } from "./proteusRuntime.ts";
+import {
+  installManagedProteusForCodex,
+  refreshManagedProteusRuntime,
+  resolveManagedProteusRuntime,
+} from "./proteusRuntime.ts";
 
 const count = (value: string, needle: string): number => value.split(needle).length - 1;
 const tomlString = (value: string): string =>
@@ -195,10 +199,15 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
 
       const first = yield* installManagedProteusForCodex(codexHome, options);
       const second = yield* installManagedProteusForCodex(codexHome, options);
+      const forced = yield* refreshManagedProteusRuntime(managedRuntimeRoot, {
+        ...options,
+        forceUpdateCheck: true,
+      });
 
       expect(first.version).toBe(futureVersion);
       expect(second.version).toBe(futureVersion);
-      expect(requests).toBe(2);
+      expect(forced.version).toBe(futureVersion);
+      expect(requests).toBe(3);
       expect(first.packageRoot).toBe(path.join(managedRuntimeRoot, "packages", futureVersion));
       expect(yield* fileSystem.exists(path.join(first.packageRoot, "dist", "mcp.js"))).toBe(true);
     }),
