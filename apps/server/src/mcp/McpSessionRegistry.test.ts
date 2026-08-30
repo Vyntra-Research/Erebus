@@ -74,6 +74,24 @@ it.effect("builds MCP endpoints from the bound server host", () =>
   }),
 );
 
+it.effect("issues a separate research endpoint only for fallback credentials", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry(() => 1_000);
+    const issued = yield* registry.issue({
+      threadId: ThreadId.make("thread-research-fallback"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      capabilities: new Set(["researchFallback"]),
+    });
+    const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, "");
+    const resolved = yield* registry.resolve(token);
+
+    expect(issued.config.previewEnabled).toBe(false);
+    expect(issued.config.researchFallbackEndpoint).toBe("http://127.0.0.1:43123/research-mcp");
+    expect(resolved?.capabilities.has("researchFallback")).toBe(true);
+    expect(resolved?.capabilities.has("preview")).toBe(false);
+  }),
+);
+
 it.effect("expires credentials once their session stops showing signs of life", () =>
   Effect.gen(function* () {
     let timestamp = 1_000;

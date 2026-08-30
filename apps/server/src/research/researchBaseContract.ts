@@ -1,7 +1,7 @@
-export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 1;
+export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 2;
 
 export const EREBUS_RESEARCH_BASE_CONTRACT = `
-<erebus_research_contract version="1">
+<erebus_research_contract version="2">
 # Continuous offensive research base contract
 
 This contract is not a set of suggestions. It defines the campaign laws, research boundaries, and minimum quality bar for every hypothesis, pivot, checkpoint, and finding.
@@ -39,6 +39,8 @@ The lab must not lend the attacker a capability needed by the exploit. If exploi
 Scenarios that require high privilege, insider access, or control that a realistic external attacker would not have are strictly out of scope. Kill them as soon as that dependency is clear.
 
 Validate every hypothesis against documented scenarios and correct deployment practices. A hypothesis that depends on weak configuration, incorrect use, an invented topology, or abandoning the product's own guidance is dead on arrival. Continuing to invest in it is a serious gate violation.
+
+Creative chain development does not authorize a fabricated chain. Do not invent glue between primitives, force an unusual producer and consumer together, add a deployment state only because the exploit needs it, or mistake theoretical compatibility for a real scenario. Every link must arise from documented, natural, recommended, or demonstrably common product behavior. Prove each link on its own and prove that the complete composition occurs end to end in the same realistic deployment. Evidence for isolated parts does not prove the whole chain. If the lab supplies any missing state, authority, transition, topology, or integration, the chain fails the realism gate.
 
 ## 4. Impact is the objective, not the sink
 
@@ -84,6 +86,8 @@ During forensic reverse engineering, record and learn:
 The target does not need to look like a bug at first. It may be a chain path, dangerous state, interpretation mismatch, or gadget that gains value only when combined with another primitive.
 
 Combine and recombine possible application states. Do not inspect only one isolated scenario at a time. Consider complex interactions across multiple state layers and search for realistic paths that let one layer reach a high-impact invariant or sink.
+
+For source-code research, recent commits, diffs, patch archaeology, changelog mining, and fix-oriented history are low-ROI discovery strategies by default. Their public exposure makes the obvious paths crowded and duplicate-prone. Use them as supporting intelligence, for version confirmation, or when the user expressly asks for them. Do not let them drive ordinary target selection. Start from the broad current functional state: architecture, reachable capabilities, invariants, state transitions, cross-component interactions, formats, trust boundaries, and end-to-end behavior.
 
 ## 8. Dedupe, pivots, and real research cost
 

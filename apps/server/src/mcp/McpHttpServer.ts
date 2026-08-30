@@ -92,7 +92,7 @@ const makeMcpAuthMiddleware = McpSessionRegistry.McpSessionRegistry.pipe(
   Effect.withSpan("McpHttpServer.makeAuthMiddleware"),
 );
 
-const McpAuthMiddlewareLive = HttpRouter.middleware<{
+export const McpAuthMiddlewareLive = HttpRouter.middleware<{
   provides: McpInvocationContext.McpInvocationContext;
 }>()(makeMcpAuthMiddleware).layer;
 

@@ -166,6 +166,7 @@ export interface CodexSessionRuntimeOptions {
     params: EffectCodexSchema.DynamicToolCallParams,
     proteus: ResearchProteusHealth,
   ) => Effect.Effect<EffectCodexSchema.DynamicToolCallResponse>;
+  readonly onProteusHealth?: (health: ResearchProteusHealth) => void;
   readonly getAdditionalDeveloperInstructions?: () => Effect.Effect<string>;
 }
 
@@ -2113,8 +2114,13 @@ export const makeCodexSessionRuntime = (
       yield* client.request("initialize", buildCodexInitializeParams());
       yield* client.notify("initialized", undefined);
 
-      if (options.handleDynamicTool) {
+      if (options.handleDynamicTool || options.onProteusHealth) {
         yield* readCodexProteusHealth(client, options.cwd).pipe(
+          Effect.tap((health) =>
+            options.onProteusHealth
+              ? Effect.sync(() => options.onProteusHealth!(health))
+              : Effect.void,
+          ),
           Effect.flatMap((health) => Ref.set(proteusHealthRef, health)),
         );
       }

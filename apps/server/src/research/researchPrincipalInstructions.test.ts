@@ -14,7 +14,10 @@ it("instructs the principal to use durable research tools without activating ord
   assert.match(instructions, /Do not poll/);
   assert.match(instructions, /process provenance/);
   assert.match(instructions, /WSL descendant/);
-  assert.match(instructions, /without applying, restating, or citing it/);
+  assert.match(instructions, /do not acknowledge, reapply, restate, or cite it/);
+  assert.match(instructions, /transport fallback, not a second campaign/);
+  assert.match(instructions, /outside and after the compacted summary/);
+  assert.match(instructions, /broad current functional state first/);
   assert.match(instructions, /No Erebus campaign is linked/);
   assert.include(instructions, EREBUS_RESEARCH_BASE_CONTRACT);
   assert.match(instructions, /Gates are laws/);

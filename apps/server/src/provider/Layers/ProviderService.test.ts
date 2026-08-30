@@ -50,7 +50,7 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
-import { makeProviderServiceLive } from "./ProviderService.ts";
+import { makeProviderServiceLive, needsResearchMcpFallback } from "./ProviderService.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -62,6 +62,7 @@ import {
 import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
+import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
 
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
@@ -2144,9 +2145,40 @@ validation.layer("ProviderServiceLive validation", (it) => {
 describe("agent browser access", () => {
   const revokedThreads: Array<ThreadId> = [];
 
-  const startSessionWith = (enableAgentBrowserAccess: boolean, threadId: ThreadId) =>
+  it("uses fallback only when a resumed Codex rollout lacks native research tools", () => {
+    assert.equal(
+      needsResearchMcpFallback({
+        provider: CODEX_DRIVER,
+        resumeCursor: { threadId: "imported" },
+        hasNativeResearchTools: false,
+      }),
+      true,
+    );
+    assert.equal(
+      needsResearchMcpFallback({
+        provider: CODEX_DRIVER,
+        resumeCursor: { threadId: "erebus-native" },
+        hasNativeResearchTools: true,
+      }),
+      false,
+    );
+    assert.equal(
+      needsResearchMcpFallback({
+        provider: CODEX_DRIVER,
+        resumeCursor: undefined,
+        hasNativeResearchTools: false,
+      }),
+      false,
+    );
+  });
+
+  const startSessionWith = (
+    enableAgentBrowserAccess: boolean,
+    threadId: ThreadId,
+    resumeCursor?: { readonly threadId: string },
+  ) =>
     Effect.gen(function* () {
-      const issued: Array<ThreadId> = [];
+      const issued: Array<McpSessionRegistry.McpCredentialRequest> = [];
       const codex = makeFakeCodexAdapter();
       const providerAdapterLayer = Layer.succeed(
         ProviderAdapterRegistry.ProviderAdapterRegistry,
@@ -2161,7 +2193,7 @@ describe("agent browser access", () => {
       const providerLayer = makeProviderServiceLive({
         issueMcpCredential: (request) =>
           Effect.sync(() => {
-            issued.push(request.threadId);
+            issued.push(request);
             return undefined;
           }),
         revokeMcpCredential: (revoked) => Effect.sync(() => void revokedThreads.push(revoked)),
@@ -2186,6 +2218,7 @@ describe("agent browser access", () => {
           providerInstanceId: codexInstanceId,
           threadId,
           runtimeMode: "full-access",
+          ...(resumeCursor ? { resumeCursor } : {}),
         });
       }).pipe(Effect.provide(providerLayer));
 
@@ -2223,7 +2256,33 @@ describe("agent browser access", () => {
 
       const issued = yield* startSessionWith(true, threadId);
 
-      assert.deepEqual(issued, [threadId]);
+      assert.deepEqual(
+        issued.map((request) => request.threadId),
+        [threadId],
+      );
+      assert.deepEqual(Array.from(issued[0]?.capabilities ?? []), ["preview"]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("uses research MCP only as a resumed Codex fallback", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("thread-research-fallback");
+      const issued = yield* startSessionWith(false, threadId, {
+        threadId: "provider-thread-existing",
+      });
+
+      assert.equal(issued.length, 1);
+      assert.deepEqual(Array.from(issued[0]?.capabilities ?? []), ["researchFallback"]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps preview and research fallback as separate capabilities", () =>
+    Effect.gen(function* () {
+      const issued = yield* startSessionWith(true, asThreadId("thread-resume-with-browser"), {
+        threadId: "provider-thread-existing",
+      });
+
+      assert.deepEqual(Array.from(issued[0]?.capabilities ?? []), ["preview", "researchFallback"]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
