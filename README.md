@@ -6,7 +6,7 @@ The principal agent performs the research. Erebus keeps one active campaign per 
 
 ## Current release
 
-Erebus 0.1.5 currently ships as a Windows desktop app with Codex support. Other host and provider bindings are not enabled in this release.
+Erebus 0.1.6 currently ships as a Windows desktop app with Codex support. Other host and provider bindings are not enabled in this release.
 
 It includes:
 
@@ -22,7 +22,7 @@ It includes:
 - a Codex account
 - Git for repository projects
 
-Proteus needs no separate global install. Erebus pins a tested version and installs its runtime and Codex integration in Erebus-managed storage.
+Proteus needs no separate global install. Erebus ships a tested fallback, checks official stable Proteus releases, verifies the package digest, and installs updates in Erebus-managed storage.
 
 ## Development
 

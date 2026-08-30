@@ -463,8 +463,8 @@ importers:
         specifier: 'catalog:'
         version: 1.3.0-beta.10(patch_hash=7ef7cb0cbabb17c15cdb137554068b36f15f6f5265e73fb51452aa3380db91aa)(@shikijs/themes@4.3.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@vyntra-research/proteus':
-        specifier: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.7
-        version: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.7
+        specifier: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.8
+        version: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.8
       effect:
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(patch_hash=af36b7948b6f9c56623074662b51dade5699880c1a7c71245de73e13c3185fb6)
@@ -474,6 +474,9 @@ importers:
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
+      tar:
+        specifier: 7.5.16
+        version: 7.5.16
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -4624,9 +4627,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@vyntra-research/proteus@https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.7':
-    resolution: {integrity: sha512-Znw5YSu73BBmb1lU2o1ePLDgyBaXKqAS6xpjbT+eYjAUgS1+wpKu4DwYBVVJkIUWtJno0J7tJZgvtwZItQqOxQ==, tarball: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.7}
-    version: 2.1.7
+  '@vyntra-research/proteus@https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.8':
+    resolution: {integrity: sha512-azAn9FAhuy/O1534yttmWpUUT78RRYUO5UAezy/o9XbnnqjckwH5iQJV0nO/v+JQRm4cpKSPtIM14+s5Ow1/Zg==, tarball: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.8}
+    version: 2.1.8
     engines: {node: '>=24.0.0'}
     hasBin: true
 
@@ -13829,7 +13832,7 @@ snapshots:
   '@voidzero-dev/vite-plus-win32-x64-msvc@0.2.2':
     optional: true
 
-  '@vyntra-research/proteus@https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.7': {}
+  '@vyntra-research/proteus@https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.8': {}
 
   '@xmldom/xmldom@0.8.13': {}
 

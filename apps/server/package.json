@@ -1,6 +1,6 @@
 {
   "name": "erebus",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -30,10 +30,11 @@
     "@ff-labs/fff-node": "0.9.4",
     "@opencode-ai/sdk": "^1.3.15",
     "@pierre/diffs": "catalog:",
-    "@vyntra-research/proteus": "https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.7",
+    "@vyntra-research/proteus": "https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.8",
     "effect": "catalog:",
     "msgpackr-extract": "3.0.4",
     "node-pty": "^1.1.0",
+    "tar": "7.5.16",
     "yaml": "catalog:"
   },
   "devDependencies": {
