@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type {
+  DesktopUpdateActionResult,
+  DesktopUpdateCheckResult,
+  DesktopUpdateState,
+} from "@t3tools/contracts";
 
 import {
   canCheckForUpdate,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateCheckError,
   getDesktopUpdateInstallConfirmationMessage,
   getDesktopUpdateReleaseUrl,
   isDesktopUpdateButtonDisabled,
@@ -32,6 +37,43 @@ const baseState: DesktopUpdateState = {
   errorContext: null,
   canRetry: false,
 };
+
+describe("desktop update check errors", () => {
+  it("reports an updater failure that happened after the check started", () => {
+    const result: DesktopUpdateCheckResult = {
+      checked: true,
+      state: {
+        ...baseState,
+        status: "error",
+        message: "latest.yml returned 404",
+        errorContext: "check",
+        canRetry: true,
+      },
+    };
+
+    expect(getDesktopUpdateCheckError(result)).toBe("latest.yml returned 404");
+  });
+
+  it("reports a check that could not start", () => {
+    const result: DesktopUpdateCheckResult = {
+      checked: false,
+      state: { ...baseState, enabled: false, status: "disabled" },
+    };
+
+    expect(getDesktopUpdateCheckError(result)).toBe(
+      "Automatic updates are not available in this build.",
+    );
+  });
+
+  it("does not report a successful check", () => {
+    const result: DesktopUpdateCheckResult = {
+      checked: true,
+      state: { ...baseState, status: "up-to-date" },
+    };
+
+    expect(getDesktopUpdateCheckError(result)).toBeNull();
+  });
+});
 
 describe("desktop update button state", () => {
   it("shows a download action when an update is available", () => {

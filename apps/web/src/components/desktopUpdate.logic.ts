@@ -1,4 +1,8 @@
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type {
+  DesktopUpdateActionResult,
+  DesktopUpdateCheckResult,
+  DesktopUpdateState,
+} from "@t3tools/contracts";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
@@ -118,6 +122,15 @@ export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): 
 
 export function shouldToastDesktopUpdateActionResult(result: DesktopUpdateActionResult): boolean {
   return getDesktopUpdateActionError(result) !== null;
+}
+
+export function getDesktopUpdateCheckError(result: DesktopUpdateCheckResult): string | null {
+  const failedAfterStarting =
+    result.state.status === "error" && result.state.errorContext === "check";
+  if (result.checked && !failedAfterStarting) return null;
+
+  const message = result.state.message?.trim();
+  return message || "Automatic updates are not available in this build.";
 }
 
 export function shouldHighlightDesktopUpdateError(state: DesktopUpdateState | null): boolean {

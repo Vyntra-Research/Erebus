@@ -43,6 +43,7 @@ import * as Schema from "effect/Schema";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
 import {
   canCheckForUpdate,
+  getDesktopUpdateCheckError,
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
@@ -324,16 +325,15 @@ function AboutVersionSection() {
     void bridge
       .checkForUpdate()
       .then((result) => {
-        if (!result.checked) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Could not check for updates",
-              description:
-                result.state.message ?? "Automatic updates are not available in this build.",
-            }),
-          );
-        }
+        const checkError = getDesktopUpdateCheckError(result);
+        if (!checkError) return;
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not check for updates",
+            description: checkError,
+          }),
+        );
       })
       .catch((error: unknown) => {
         toastManager.add(

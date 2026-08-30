@@ -135,6 +135,7 @@ jobs:
           path: |
             release/Erebus-${{ steps.version.outputs.value }}-x64.exe
             release/Erebus-${{ steps.version.outputs.value }}-x64.exe.blockmap
+            release/latest.yml
           if-no-files-found: error
 
       - name: Create version tag and GitHub release
@@ -159,6 +160,7 @@ jobs:
             $env:TAG,
             "release/Erebus-$env:VERSION-x64.exe",
             "release/Erebus-$env:VERSION-x64.exe.blockmap",
+            "release/latest.yml",
             "--repo",
             $env:GITHUB_REPOSITORY,
             "--target",
