@@ -9,7 +9,7 @@
 - [Organizing threads](./user/thread-sidebar.md)
 - [Review usage](./user/usage.md)
 - [Customize a project icon](./user/project-settings.md)
-- Mobile and remote clients remain inherited development surfaces and are not enabled in `0.1.5`.
+- Mobile and remote clients remain inherited development surfaces and are not enabled in the current release.
 - [Keeping app and server in sync](./user/updating.md)
 - [Source control integrations](./user/source-control.md)
 - Provider: [Codex](./user/providers-codex.md)
@@ -31,7 +31,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Server updates](./internals/server-updates.md)
 - [Resource telemetry](./internals/resource-telemetry.md)
 - [Environment auth](./internals/environment-auth.md)
-- Inherited relay, mobile, and other provider code remains dormant in `0.1.5`.
+- Inherited relay, mobile, and other provider code remains dormant in the current release.
 - [CI gates](./internals/ci.md)
 - [Engineering work artifacts](./internals/work-artifacts.md)
 

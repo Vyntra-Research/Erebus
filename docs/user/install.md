@@ -1,6 +1,6 @@
 # Install Erebus
 
-Erebus `0.1.6` targets Windows 10 and newer. It runs locally and uses your Codex subscription. This is the current release scope, not a limit on future platforms or providers.
+The current Erebus release targets Windows 10 and newer. It runs locally and uses your Codex subscription. This is the current release scope, not a limit on future platforms or providers.
 
 ## Desktop release
 

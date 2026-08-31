@@ -1,6 +1,6 @@
 # Update Erebus
 
-Erebus `0.1.6` checks GitHub Releases when it starts and at regular intervals. It does not silently download or install an Erebus update while a research task is running.
+Erebus checks GitHub Releases when it starts and at regular intervals. It does not silently download or install an Erebus update while a research task is running.
 
 Before updating:
 
@@ -15,4 +15,4 @@ Proteus updates independently. Erebus checks the latest stable Proteus release a
 
 When a Codex home was copied or moved, Erebus repairs a stored rollout path only if the old path is missing and the matching rollout exists under the active home.
 
-The inherited Linux service, hosted web app, mobile client, and relay updater are not enabled in `0.1.6`.
+The inherited Linux service, hosted web app, mobile client, and relay updater are not enabled in the current release.

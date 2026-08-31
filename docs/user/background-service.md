@@ -1,6 +1,6 @@
 # Running Erebus in the Background
 
-> Inherited T3 Code documentation. The Linux background service is not enabled in Erebus `0.1.6`.
+> Inherited T3 Code documentation. The Linux background service is not enabled in the current Erebus release.
 
 On Linux and macOS, Erebus can run as a background service for your user, so it is ready without
 keeping a terminal open.
