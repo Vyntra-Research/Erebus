@@ -4,6 +4,7 @@ import {
   ApprovalRequestId,
   EventId,
   IsoDateTime,
+  MessageId,
   ProviderItemId,
   ProjectId,
   ThreadId,
@@ -77,6 +78,8 @@ export const ProviderSendTurnInput = Schema.Struct({
   ),
   modelSelection: Schema.optional(ModelSelection),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  clientUserMessageId: Schema.optional(MessageId),
+  delivery: Schema.optional(Schema.Literal("live-user-steer")),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
 

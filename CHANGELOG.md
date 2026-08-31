@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9 - 2026-08-31
+
+### Fixed
+
+- Prevented Codex from reapplying the last live user steer when it repeats that message after context compaction.
+
 ## 0.1.8 - 2026-08-30
 
 ### Fixed
