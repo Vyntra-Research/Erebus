@@ -94,6 +94,23 @@ it("builds native steering for the exact expected turn", () => {
   );
 });
 
+it("attaches a client id to hidden Erebus context steering", () => {
+  NodeAssert.deepStrictEqual(
+    buildTurnSteerParams(
+      "provider-thread-1",
+      TurnId.make("turn-1"),
+      "Historical marker",
+      "erebus-context:message-1",
+    ),
+    {
+      threadId: "provider-thread-1",
+      expectedTurnId: "turn-1",
+      clientUserMessageId: "erebus-context:message-1",
+      input: [{ type: "text", text: "Historical marker" }],
+    },
+  );
+});
+
 describe("CodexSessionRuntimeIdentifierGenerationError", () => {
   it("retains identifier purpose and the random source failure", () => {
     const cause = new Error("random source unavailable");
@@ -135,6 +152,19 @@ function makeThreadOpenResponse(
 }
 
 describe("buildTurnStartParams", () => {
+  it.effect("preserves the client id for a live user steer", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        clientUserMessageId: "message-1",
+        prompt: "Keep working",
+      });
+
+      NodeAssert.equal(params.clientUserMessageId, "message-1");
+    }),
+  );
+
   it("keeps invalid turn values only in the schema cause", () => {
     const secret = "codex-turn-input-secret-sentinel";
     const error = Effect.runSync(
@@ -548,6 +578,8 @@ describe("buildCodexDeveloperInstructions", () => {
     NodeAssert.ok(instructions.startsWith(codexDefaultModeDeveloperInstructions(true)));
     NodeAssert.match(instructions, /Erebus/);
     NodeAssert.match(instructions, /Codex harness/);
+    NodeAssert.match(instructions, /Erebus live user steering/);
+    NodeAssert.match(instructions, /stale_user_steer_id/);
     NodeAssert.match(instructions, /as gpt-5\.3-codex with high reasoning effort/);
   });
 

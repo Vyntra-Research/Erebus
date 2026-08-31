@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   DEFAULT_MODEL,
   EventId,
+  type MessageId,
   ProviderDriverKind,
   ProviderItemId,
   type ProviderInstanceId,
@@ -41,6 +42,17 @@ import { buildCodexInitializeParams, readCodexProteusHealth } from "./CodexProvi
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
+import {
+  buildCodexHistoricalUserSteerMarker,
+  buildCodexLiveUserSteerPrompt,
+  contextCompactionTurnId,
+  type CodexTrackedLiveUserSteer,
+  deliveredLiveUserSteerId,
+  erebusContextClientId,
+  erebusUserSteerClientId,
+  isHiddenErebusContextItem,
+  markTrackedUserSteerHistorical,
+} from "../codexUserSteering.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
 
 const PROVIDER = ProviderDriverKind.make("codex");
@@ -195,6 +207,8 @@ export function handleDynamicToolCallForProviderThread(input: {
 
 export interface CodexSessionRuntimeSendTurnInput {
   readonly input?: string;
+  readonly clientUserMessageId?: MessageId;
+  readonly delivery?: "live-user-steer";
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
     readonly url: string;
@@ -626,6 +640,7 @@ function buildCodexCollaborationMode(input: {
 export function buildTurnStartParams(input: {
   readonly threadId: string;
   readonly runtimeMode: RuntimeMode;
+  readonly clientUserMessageId?: string;
   readonly prompt?: string;
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
@@ -666,6 +681,7 @@ export function buildTurnStartParams(input: {
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
     threadId: input.threadId,
+    ...(input.clientUserMessageId ? { clientUserMessageId: input.clientUserMessageId } : {}),
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
     approvalsReviewer: config.approvalsReviewer,
@@ -773,10 +789,12 @@ export function buildTurnSteerParams(
   threadId: string,
   expectedTurnId: TurnId,
   text: string,
+  clientUserMessageId?: string,
 ): CodexRpc.ClientRequestParamsByMethod["turn/steer"] {
   return {
     threadId,
     expectedTurnId,
+    ...(clientUserMessageId ? { clientUserMessageId } : {}),
     input: [{ type: "text", text }],
   };
 }
@@ -1269,6 +1287,7 @@ export const makeCodexSessionRuntime = (
       updatedAt: sessionCreatedAt,
     } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
+    const lastLiveUserSteerRef = yield* Ref.make<CodexTrackedLiveUserSteer | null>(null);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
@@ -1288,6 +1307,39 @@ export const makeCodexSessionRuntime = (
         threadId: options.threadId,
         method,
         message,
+      });
+
+    const markLastLiveUserSteerHistorical = (compactedTurnId: TurnId) =>
+      Effect.gen(function* () {
+        const stale = yield* Ref.modify(lastLiveUserSteerRef, (current) => {
+          const marked = markTrackedUserSteerHistorical(current, compactedTurnId);
+          return [marked.stale, marked.next] as const;
+        });
+        if (stale === null) return;
+
+        const providerThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
+        if (!providerThreadId) return;
+        const clientUserMessageId = erebusContextClientId(stale.clientUserMessageId);
+        yield* client
+          .request(
+            "turn/steer",
+            buildTurnSteerParams(
+              providerThreadId,
+              compactedTurnId,
+              buildCodexHistoricalUserSteerMarker(stale.clientUserMessageId),
+              clientUserMessageId,
+            ),
+          )
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Failed to mark the last live user steer after compaction.", {
+                threadId: options.threadId,
+                turnId: compactedTurnId,
+                clientUserMessageId: stale.clientUserMessageId,
+                cause,
+              }),
+            ),
+          );
       });
 
     const settlePendingApprovals = (decision: ProviderApprovalDecision) =>
@@ -1674,6 +1726,33 @@ export const makeCodexSessionRuntime = (
           return;
         }
 
+        if (notification.method === "item/started" && route.turnId !== undefined) {
+          const deliveredSteerId = deliveredLiveUserSteerId(notification.params.item);
+          if (deliveredSteerId !== undefined) {
+            yield* Ref.set(lastLiveUserSteerRef, {
+              clientUserMessageId: deliveredSteerId,
+              turnId: route.turnId,
+              state: "fresh" as const,
+            });
+          }
+        }
+
+        if (
+          (notification.method === "item/started" || notification.method === "item/completed") &&
+          isHiddenErebusContextItem(notification.params.item)
+        ) {
+          return;
+        }
+
+        const compactedTurnId = contextCompactionTurnId(notification);
+        const notificationThreadId = readNotificationThreadId(notification);
+        if (
+          compactedTurnId !== undefined &&
+          (notificationThreadId === undefined || notificationThreadId === suppressRootId)
+        ) {
+          yield* markLastLiveUserSteerHistorical(compactedTurnId);
+        }
+
         let requestId: ApprovalRequestId | undefined;
         let requestKind: ProviderRequestKind | undefined;
         let turnId = childParentTurnId ?? route.turnId;
@@ -1737,10 +1816,25 @@ export const makeCodexSessionRuntime = (
           if (providerThreadId && payload.threadId !== providerThreadId) {
             return Effect.void;
           }
-          return updateSession(sessionRef, {
-            status: "running",
-            activeTurnId: TurnId.make(payload.turn.id),
-          });
+          const turnId = TurnId.make(payload.turn.id);
+          const deliveredSteerId = payload.turn.items
+            .map(deliveredLiveUserSteerId)
+            .findLast((candidate) => candidate !== undefined);
+          const rememberSteer = deliveredSteerId
+            ? Ref.set(lastLiveUserSteerRef, {
+                clientUserMessageId: deliveredSteerId,
+                turnId,
+                state: "fresh" as const,
+              })
+            : Effect.void;
+          return rememberSteer.pipe(
+            Effect.andThen(
+              updateSession(sessionRef, {
+                status: "running",
+                activeTurnId: turnId,
+              }),
+            ),
+          );
         }),
       ),
     );
@@ -1755,11 +1849,18 @@ export const makeCodexSessionRuntime = (
             payload.turn.status === "failed" && "error" in payload.turn && payload.turn.error
               ? payload.turn.error.message
               : undefined;
-          return updateSession(sessionRef, {
-            status: payload.turn.status === "failed" ? "error" : "ready",
-            activeTurnId: undefined,
-            ...(lastError ? { lastError } : {}),
-          });
+          const completedTurnId = TurnId.make(payload.turn.id);
+          return Ref.update(lastLiveUserSteerRef, (current) =>
+            current?.turnId === completedTurnId ? null : current,
+          ).pipe(
+            Effect.andThen(
+              updateSession(sessionRef, {
+                status: payload.turn.status === "failed" ? "error" : "ready",
+                activeTurnId: undefined,
+                ...(lastError ? { lastError } : {}),
+              }),
+            ),
+          );
         }),
       ),
     );
@@ -2204,10 +2305,24 @@ export const makeCodexSessionRuntime = (
           const additionalDeveloperInstructions = options.getAdditionalDeveloperInstructions
             ? yield* options.getAdditionalDeveloperInstructions()
             : "";
+          const isLiveUserSteer =
+            input.delivery === "live-user-steer" &&
+            input.clientUserMessageId !== undefined &&
+            input.input !== undefined;
+          const prompt = isLiveUserSteer
+            ? buildCodexLiveUserSteerPrompt(input.clientUserMessageId, input.input)
+            : input.input;
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
-            ...(input.input ? { prompt: input.input } : {}),
+            ...(input.clientUserMessageId
+              ? {
+                  clientUserMessageId: isLiveUserSteer
+                    ? erebusUserSteerClientId(input.clientUserMessageId)
+                    : input.clientUserMessageId,
+                }
+              : {}),
+            ...(prompt ? { prompt } : {}),
             ...(input.attachments ? { attachments: input.attachments } : {}),
             ...(normalizedModel ? { model: normalizedModel } : {}),
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
