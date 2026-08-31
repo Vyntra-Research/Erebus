@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.8 - 2026-08-30
+
+### Fixed
+
+- Fixed the managed Proteus MCP launch in packaged builds, repaired stale plugin manifests, and accepted displayed checkpoint ids such as `K74`.
+- Prevented `research.start` and `research.resume` from activating Erebus monitoring while the linked Proteus campaign is not active.
+
 ## 0.1.7 - 2026-08-30
 
 ### Added

@@ -449,6 +449,49 @@ function withManagedProteusConfig(source: string, marketplaceRoot: string): stri
   return `${withoutPlugin.trimEnd()}${withoutPlugin.trim().length > 0 ? "\n\n" : ""}${managed}\n`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function writeManagedProteusManifest(
+  manifestPath: string,
+  version: string,
+  mcpPath: string,
+  required: boolean,
+): Promise<void> {
+  const source = await NodeFSP.readFile(manifestPath, "utf8").catch((error: unknown) => {
+    if (
+      !required &&
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return null;
+    }
+    throw error;
+  });
+  if (source === null) return;
+
+  const manifest = JSON.parse(source) as Record<string, unknown>;
+  if (manifest.name !== "proteus" || manifest.version !== version) {
+    if (!required) return;
+    throw new Error("The managed Proteus plugin manifest is invalid.");
+  }
+  manifest.mcpServers = {
+    ...(isRecord(manifest.mcpServers) ? manifest.mcpServers : {}),
+    proteus: {
+      command: process.execPath,
+      args: [mcpPath],
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+    },
+  };
+  const next = `${JSON.stringify(manifest, null, 2)}\n`;
+  if (next !== source) await NodeFSP.writeFile(manifestPath, next, "utf8");
+}
+
 export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installForCodex")(function* (
   codexHome: string,
   options: ManagedProteusOptions = {},
@@ -507,20 +550,6 @@ export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installFo
         await copyFilesystemTree(runtime.pluginRoot, installedPluginRoot);
         await NodeFSP.mkdir(NodePath.dirname(marketplacePath), { recursive: true });
         await copyFilesystemTree(sourceMarketplacePath, marketplacePath);
-
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        const manifest = JSON.parse(await NodeFSP.readFile(manifestPath, "utf8")) as Record<
-          string,
-          unknown
-        >;
-        manifest.mcpServers = {
-          proteus: {
-            command: process.execPath,
-            args: [NodePath.join(installedPluginRoot, "dist", "mcp.js")],
-          },
-        };
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        await NodeFSP.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
         await NodeFSP.writeFile(
           markerPath,
           // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -528,6 +557,24 @@ export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installFo
           "utf8",
         );
       }
+
+      const mcpPath = NodePath.join(installedPluginRoot, "dist", "mcp.js");
+      await writeManagedProteusManifest(manifestPath, runtime.version, mcpPath, true);
+      await writeManagedProteusManifest(
+        NodePath.join(
+          codexHome,
+          "plugins",
+          "cache",
+          MARKETPLACE_NAME,
+          "proteus",
+          runtime.version,
+          ".codex-plugin",
+          "plugin.json",
+        ),
+        runtime.version,
+        mcpPath,
+        false,
+      );
 
       const configPath = NodePath.join(codexHome, "config.toml");
       const currentConfig = await NodeFSP.readFile(configPath, "utf8").catch((error: unknown) => {

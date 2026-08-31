@@ -15,6 +15,10 @@ import { ResearchEngineLive } from "./ResearchEngine.ts";
 import { ResearchToolControllerLive } from "./ResearchToolController.ts";
 
 const completedProteusCampaigns: string[] = [];
+const proteusCampaignStatuses = new Map<string, string>();
+const decodeResearchToolResult = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(ResearchToolResult),
+);
 
 const layer = it.layer(
   ResearchToolControllerLive.pipe(
@@ -38,7 +42,7 @@ const layer = it.layer(
           readCampaign: (_root, campaignId) =>
             Effect.succeed({
               id: Number(campaignId.replace(/^\D/, "")),
-              status: "active",
+              status: proteusCampaignStatuses.get(campaignId) ?? "active",
               campaignId: null,
               root: _root,
               activeRoundIds: [],
@@ -234,9 +238,7 @@ layer("ResearchToolController", (it) => {
       assert.isFalse(response.success);
       assert.equal(content?.type, "inputText");
       if (content?.type === "inputText") {
-        const result = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ResearchToolResult))(
-          content.text,
-        );
+        const result = yield* decodeResearchToolResult(content.text);
         assert.include(result.message, "SUBMISSION NOT RECORDED");
         assert.deepInclude(result.retry, {
           required: true,
@@ -423,6 +425,132 @@ layer("ResearchToolController", (it) => {
       assert.equal(oldProjection?.campaign?.status, "aborted");
       assert.equal(currentProjection?.campaign?.id, "campaign-replacement");
       assert.equal(currentProjection?.campaign?.proteusCampaignId, "C28");
+    }),
+  );
+
+  it.effect("rejects resume while the linked Proteus campaign is paused", () =>
+    Effect.gen(function* () {
+      const controller = yield* ResearchToolController;
+      const engine = yield* ResearchEngine;
+      assert.isDefined(controller);
+      const resumeContext = { ...context, threadId: ThreadId.make("thread-resume-integrity") };
+
+      yield* controller!.handle(resumeContext, {
+        namespace: "research",
+        tool: "create_campaign",
+        callId: "call-create-resume-integrity",
+        threadId: "provider-thread-resume-integrity",
+        turnId: "turn-1",
+        arguments: { campaignId: "campaign-resume-integrity", proteusCampaignId: "C130" },
+      });
+      yield* controller!.handle(resumeContext, {
+        namespace: "research",
+        tool: "register_contract",
+        callId: "call-register-resume-integrity",
+        threadId: "provider-thread-resume-integrity",
+        turnId: "turn-1",
+        arguments: {
+          campaignId: "campaign-resume-integrity",
+          contract: {
+            id: "contract-resume-integrity",
+            revision: 1,
+            objective: "Preserve campaign lifecycle integrity.",
+            target: "target",
+            authorization: "Authorized local research.",
+            attackerModel: "Unauthenticated external attacker.",
+            impactThreshold: "Practical confidentiality or integrity impact.",
+            scope: { included: ["target"], excluded: [], stopConditions: [] },
+            strategy: ["Trace the boundary."],
+            heuristics: ["Kill artificial scenarios."],
+            gates: [{ id: "G1", title: "Impact", requirement: "Prove impact.", required: true }],
+            duplicatePolicy: "Check prior findings.",
+            labPolicy: "Use documented defaults.",
+            reportPolicy: "Require reproducible evidence.",
+            proteusCampaignId: "C130",
+            createdAt: "2026-08-30T00:00:00.000Z",
+          },
+        },
+      });
+      proteusCampaignStatuses.set("C130", "paused");
+      const rejectedStart = yield* controller!.handle(resumeContext, {
+        namespace: "research",
+        tool: "start",
+        callId: "call-start-resume-integrity-rejected",
+        threadId: "provider-thread-resume-integrity",
+        turnId: "turn-1",
+        arguments: {
+          campaignId: "campaign-resume-integrity",
+          contractId: "contract-resume-integrity",
+          contractRevision: 1,
+        },
+      });
+      const beforeStart = yield* engine.findProjection(
+        ResearchCampaignId.make("campaign-resume-integrity"),
+      );
+      assert.isFalse(rejectedStart.success);
+      assert.equal(beforeStart?.campaign?.status, "draft");
+
+      proteusCampaignStatuses.set("C130", "active");
+      const started = yield* controller!.handle(resumeContext, {
+        namespace: "research",
+        tool: "start",
+        callId: "call-start-resume-integrity-accepted",
+        threadId: "provider-thread-resume-integrity",
+        turnId: "turn-1",
+        arguments: {
+          campaignId: "campaign-resume-integrity",
+          contractId: "contract-resume-integrity",
+          contractRevision: 1,
+        },
+      });
+      assert.isTrue(started.success);
+      yield* controller!.handle(resumeContext, {
+        namespace: "research",
+        tool: "pause",
+        callId: "call-pause-resume-integrity",
+        threadId: "provider-thread-resume-integrity",
+        turnId: "turn-2",
+        arguments: { campaignId: "campaign-resume-integrity" },
+      });
+
+      proteusCampaignStatuses.set("C130", "paused");
+      const rejected = yield* controller!.handle(resumeContext, {
+        namespace: "research",
+        tool: "resume",
+        callId: "call-resume-integrity-rejected",
+        threadId: "provider-thread-resume-integrity",
+        turnId: "turn-3",
+        arguments: { campaignId: "campaign-resume-integrity" },
+      });
+      let projection = yield* engine.findProjection(
+        ResearchCampaignId.make("campaign-resume-integrity"),
+      );
+      const rejectedContent = rejected.contentItems[0];
+
+      assert.isFalse(rejected.success);
+      assert.equal(rejectedContent?.type, "inputText");
+      if (rejectedContent?.type === "inputText") {
+        const result = yield* decodeResearchToolResult(rejectedContent.text);
+        assert.match(result.issues.join(" "), /Proteus campaign C130 is paused/);
+      }
+      assert.equal(projection?.campaign?.status, "paused");
+
+      proteusCampaignStatuses.set("C130", "active");
+      const resumed = yield* controller!.handle(resumeContext, {
+        namespace: "research",
+        tool: "resume",
+        callId: "call-resume-integrity-accepted",
+        threadId: "provider-thread-resume-integrity",
+        turnId: "turn-4",
+        arguments: { campaignId: "campaign-resume-integrity" },
+      });
+      projection = yield* engine.findProjection(
+        ResearchCampaignId.make("campaign-resume-integrity"),
+      );
+      proteusCampaignStatuses.delete("C130");
+
+      assert.isTrue(resumed.success);
+      assert.equal(projection?.campaign?.status, "active");
     }),
   );
 

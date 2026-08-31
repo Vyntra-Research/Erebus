@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - fixtures exercise filesystem package installation.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -27,6 +28,7 @@ const ProteusPluginManifest = Schema.Struct({
         Schema.Struct({
           command: Schema.optional(Schema.String),
           args: Schema.optional(Schema.Array(Schema.String)),
+          env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
         }),
       ),
     }),
@@ -49,12 +51,36 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
       );
 
       const first = yield* installManagedProteusForCodex(codexHome);
+      const manifestPath = path.join(first.installedPluginRoot, ".codex-plugin", "plugin.json");
+      const cachedManifestPath = path.join(
+        codexHome,
+        "plugins",
+        "cache",
+        "proteus-marketplace",
+        "proteus",
+        first.version,
+        ".codex-plugin",
+        "plugin.json",
+      );
+      const brokenManifest = yield* fileSystem.readFileString(manifestPath).pipe(
+        Effect.map((source) => {
+          const manifest = JSON.parse(source) as Record<string, unknown>;
+          manifest.mcpServers = { proteus: { command: "Erebus.exe", args: ["mcp.js"] } };
+          return `${JSON.stringify(manifest, null, 2)}\n`;
+        }),
+      );
+      yield* Effect.promise(async () => {
+        await NodeFSP.writeFile(manifestPath, brokenManifest, "utf8");
+        await NodeFSP.mkdir(NodePath.dirname(cachedManifestPath), { recursive: true });
+        await NodeFSP.writeFile(cachedManifestPath, brokenManifest, "utf8");
+      });
       const second = yield* installManagedProteusForCodex(codexHome);
       const config = yield* fileSystem.readFileString(configPath);
-      const manifestText = yield* fileSystem.readFileString(
-        path.join(first.installedPluginRoot, ".codex-plugin", "plugin.json"),
-      );
+      const manifestText = yield* fileSystem.readFileString(manifestPath);
       const manifest = yield* decodeProteusPluginManifest(manifestText);
+      const cachedManifest = yield* fileSystem
+        .readFileString(cachedManifestPath)
+        .pipe(Effect.flatMap(decodeProteusPluginManifest));
 
       expect(second.marketplaceRoot).toBe(first.marketplaceRoot);
       expect(config).toContain('[projects."C:/workspace"]');
@@ -67,6 +93,8 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
       expect(manifest.mcpServers?.proteus?.args).toEqual([
         path.join(first.installedPluginRoot, "dist", "mcp.js"),
       ]);
+      expect(manifest.mcpServers?.proteus?.env).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
+      expect(cachedManifest.mcpServers?.proteus).toEqual(manifest.mcpServers?.proteus);
       expect(yield* fileSystem.exists(path.join(first.installedPluginRoot, "skills"))).toBe(true);
       expect(
         yield* fileSystem.exists(path.join(first.marketplaceRoot, ".erebus-managed.json")),
@@ -164,6 +192,20 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
         packageJson.version = futureVersion;
         // @effect-diagnostics-next-line preferSchemaOverJson:off
         await NodeFSP.writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+        const pluginManifestPath = path.join(
+          packageRoot,
+          "plugins",
+          "proteus",
+          ".codex-plugin",
+          "plugin.json",
+        );
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        const pluginManifest = JSON.parse(
+          await NodeFSP.readFile(pluginManifestPath, "utf8"),
+        ) as Record<string, unknown>;
+        pluginManifest.version = futureVersion;
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        await NodeFSP.writeFile(pluginManifestPath, `${JSON.stringify(pluginManifest, null, 2)}\n`);
         await Tar.c({ cwd: packageParent, file: archivePath, gzip: true }, ["package"]);
         return NodeFSP.readFile(archivePath);
       });
