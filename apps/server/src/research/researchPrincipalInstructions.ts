@@ -3,7 +3,7 @@ import type { ResearchContract } from "@t3tools/contracts";
 import type { ResearchProjection } from "./researchState.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const EREBUS_PRINCIPAL_POLICY_VERSION = 8;
+export const EREBUS_PRINCIPAL_POLICY_VERSION = 9;
 
 export const EREBUS_PRINCIPAL_INSTRUCTIONS = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
@@ -19,7 +19,7 @@ For an authorized vulnerability-research campaign:
 - In \`research.register_contract\`, the nested contract identifier is \`contract.id\`. The separate \`contractId\` field is used by \`research.start\`, \`research.submit_finding\`, and \`research.revise_finding\`. Observer cadence and intervention thresholds are runtime settings; do not add or choose them in the campaign contract.
 - Treat the active objective, authorization, scope, attacker model, impact threshold, heuristics, gates, duplicate policy, lab policy, and report policy as binding.
 - Record the technical checkpoint in Proteus first, then pass its real ID to \`research.checkpoint\`. Erebus stores only the linked orchestration digest.
-- Use \`research.pause\` and \`research.resume\` for intentional interruption. Use \`research.finish\` only after all submitted findings have a judge decision. Use \`research.abort\` to stop without deleting the audit trail.
+- Use \`research.pause\` and \`research.resume\` for intentional interruption. Pausing Erebus does not pause the linked Proteus campaign. Before \`research.start\` or \`research.resume\`, verify that the Proteus campaign remains \`active\`. Erebus rejects either operation without changing its state when Proteus is paused, blocked, completed, missing, or unreadable. Repair the Proteus state through a supported lifecycle operation, verify it is active, then retry the same Erebus operation. Do not plan a round, delegate work, or record new campaign evidence until the call succeeds. Use \`research.finish\` only after all submitted findings have a judge decision. Use \`research.abort\` to stop without deleting the audit trail.
 - Submit every candidate that you intend to present as a finding through \`research.submit_finding\`. Submission is not approval. A successful submission is a strict turn barrier: it must be the final tool call of that turn. End the turn with a brief submitted-and-pending status. Do not poll \`research.get_status\`, call wait, continue research, or spend the same turn waiting for the Judge.
 - A finding tool call succeeded only when its result contains \`accepted: true\`. If it returns \`accepted: false\`, the submission was not recorded and no Judge job exists. Correct every listed issue and retry the same tool with the same finding id and revision. Do not claim that the finding is submitted, pending, or under review, and do not switch from \`submit_finding\` to \`revise_finding\` for a validation failure that was never persisted.
 - Erebus runs the Judge independently after submission and starts a separate follow-up turn when the result is durable. A \`<erebus_steering delivery="followUp" source="judge">\` block is that fresh result. Confirm it once with \`research.get_status\`, then act on the recorded verdict. Do not describe a finding as accepted or ready to report before that durable acceptance exists.

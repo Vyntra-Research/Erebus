@@ -122,6 +122,26 @@ const makeResearchToolController = Effect.gen(function* () {
     },
   );
 
+  const validateActiveProteusCampaign = Effect.fn(
+    "ResearchToolController.validateActiveProteusCampaign",
+  )(function* (
+    context: import("../Services/ResearchToolController.ts").ResearchToolContext,
+    campaign: import("@t3tools/contracts").ResearchCampaign,
+  ) {
+    const linked = yield* campaignProteusRoot(context, campaign);
+    if (!linked.root) return [...linked.issues];
+    if (!proteusBridge) return ["Proteus validation bridge is unavailable"];
+    const result = yield* Effect.result(
+      proteusBridge.readCampaign(linked.root, campaign.proteusCampaignId),
+    );
+    if (result._tag === "Failure") return [result.failure.detail];
+    return result.success.status === "active"
+      ? []
+      : [
+          `Proteus campaign ${campaign.proteusCampaignId} is ${result.success.status ?? "unknown"}; it must be active before Erebus can start or resume monitoring. Repair the Proteus campaign state, verify it is active, then retry the same Erebus operation. No Erebus campaign state was changed.`,
+        ];
+  });
+
   const campaignBelongsToContext = Effect.fn("ResearchToolController.campaignBelongsToContext")(
     function* (
       campaignId: import("@t3tools/contracts").ResearchCampaignId,
@@ -311,14 +331,9 @@ const makeResearchToolController = Effect.gen(function* () {
               .map(([key, value]) => `Proteus ${key} is ${String(value)}`);
             const projection = yield* engine.findProjection(input.campaignId);
             if (projection?.campaign) {
-              const linked = yield* campaignProteusRoot(context, projection.campaign);
-              dependencyIssues.push(...linked.issues);
-              if (linked.root && proteusBridge) {
-                const validated = yield* Effect.result(
-                  proteusBridge.readCampaign(linked.root, projection.campaign.proteusCampaignId),
-                );
-                if (validated._tag === "Failure") dependencyIssues.push(validated.failure.detail);
-              }
+              dependencyIssues.push(
+                ...(yield* validateActiveProteusCampaign(context, projection.campaign)),
+              );
             }
             const dispatched = yield* engine.dispatch({
               type: "campaign.start",
@@ -381,6 +396,9 @@ const makeResearchToolController = Effect.gen(function* () {
               .map(([key, value]) => `Proteus ${key} is ${String(value)}`);
             const projection = yield* engine.findProjection(input.campaignId);
             const campaign = projection?.campaign;
+            if (params.tool === "resume" && campaign) {
+              dependencyIssues.push(...(yield* validateActiveProteusCampaign(context, campaign)));
+            }
             const reason =
               "reason" in input && typeof input.reason === "string"
                 ? input.reason
