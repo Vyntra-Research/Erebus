@@ -45,10 +45,12 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /outside and after the compacted summary/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /recent commits, diffs, patch archaeology/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /never add lab glue/);
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /contract\.target.*required plain string/);
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /supply every required field/);
 });
 
 it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 9);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 10);
   assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 8);
   assert.equal(RESEARCH_INTERNAL_POLICY.version, 8);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");

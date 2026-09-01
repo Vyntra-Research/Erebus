@@ -86,6 +86,15 @@ it("publishes every required contract registration field", () => {
   assert.notInclude(serializedSchema, '"observerPolicy"');
   assert.include(registerContract.description, "contract.id");
   assert.include(registerContract.description, "contractId");
+  assert.include(registerContract.description, "target is a required plain string");
+  const inputSchema = registerContract.inputSchema as unknown as {
+    properties: { contract: { properties: Record<string, { description?: string }> } };
+  };
+  assert.include(inputSchema.properties.contract.properties.target?.description, "version/ref");
+  for (const field of Object.values(inputSchema.properties.contract.properties)) {
+    assert.isString(field.description);
+    assert.isAbove(field.description?.length ?? 0, 0);
+  }
 });
 
 it("publishes the complete finding gate-claim schema and turn barrier", () => {

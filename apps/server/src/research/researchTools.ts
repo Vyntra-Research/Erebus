@@ -19,48 +19,145 @@ const nonEmptyStringArraySchema = {
   items: nonEmptyStringSchema,
 } as const;
 
+const described = <Schema extends Readonly<Record<string, unknown>>>(
+  schema: Schema,
+  description: string,
+  examples?: ReadonlyArray<unknown>,
+) => ({
+  ...schema,
+  description,
+  ...(examples ? { examples } : {}),
+});
+
+const campaignIdSchema = described(
+  nonEmptyStringSchema,
+  "Required stable Erebus campaign id. Use the same value in every research.* call for this task.",
+  ["campaign-vercel-nextjs-2026-08"],
+);
+const contractIdSchema = described(
+  nonEmptyStringSchema,
+  "Required stable contract id. In register_contract this value is nested at contract.id; later calls name it contractId.",
+  ["nextjs-high-impact-contract"],
+);
+const contractRevisionSchema = described(
+  { type: "integer", minimum: 1 } as const,
+  "Required positive integer revision. Reuse the registered value until the contract changes, then increment it.",
+  [7],
+);
+const isoDateTimeSchema = described(
+  { type: "string", format: "date-time" } as const,
+  "Required RFC 3339 date-time string, normally UTC with a trailing Z.",
+  ["2026-08-31T22:03:34.000Z"],
+);
+const proteusCampaignIdSchema = described(
+  nonEmptyStringSchema,
+  "Required id of the existing linked Proteus campaign. A numeric id or Proteus display form such as C30 is accepted; do not use its title.",
+  ["C30"],
+);
+
 const findingInputSchema = objectSchema(
   {
-    findingId: nonEmptyStringSchema,
-    revision: { type: "integer", minimum: 1 },
+    findingId: described(
+      nonEmptyStringSchema,
+      "Required stable logical finding id. Keep it unchanged across revisions.",
+      ["C30-B306-filesystem-cache-casefold"],
+    ),
+    revision: described(
+      { type: "integer", minimum: 1 },
+      "Required positive integer finding revision. Start at 1 and increment only for a persisted Judge revision.",
+      [1],
+    ),
     supersedesEvaluationId: {
       anyOf: [nonEmptyStringSchema, { type: "null" }],
+      description:
+        "Required. Use null for the first submission, or the exact Judge evaluation id superseded by a later revision.",
     },
-    campaignId: nonEmptyStringSchema,
-    contractId: nonEmptyStringSchema,
-    contractRevision: { type: "integer", minimum: 1 },
-    title: nonEmptyStringSchema,
-    mechanism: nonEmptyStringSchema,
-    targetVersions: { type: "array", minItems: 1, items: nonEmptyStringSchema },
-    attacker: nonEmptyStringSchema,
-    preconditions: nonEmptyStringArraySchema,
-    impact: nonEmptyStringSchema,
+    campaignId: campaignIdSchema,
+    contractId: contractIdSchema,
+    contractRevision: contractRevisionSchema,
+    title: described(nonEmptyStringSchema, "Required concise finding title."),
+    mechanism: described(
+      nonEmptyStringSchema,
+      "Required technical root mechanism, not only the observed symptom.",
+    ),
+    targetVersions: described(
+      { type: "array", minItems: 1, items: nonEmptyStringSchema },
+      "Required non-empty array of exact affected versions, refs, or deployment variants.",
+      [["16.3.3"]],
+    ),
+    attacker: described(
+      nonEmptyStringSchema,
+      "Required attacker role and starting capability, consistent with the active contract.",
+    ),
+    preconditions: described(
+      nonEmptyStringArraySchema,
+      "Required array of real deployment and attacker preconditions. Use [] only when none exist.",
+    ),
+    impact: described(
+      nonEmptyStringSchema,
+      "Required practical security impact demonstrated by the evidence.",
+    ),
     cvssV31: objectSchema(
       {
-        vector: nonEmptyStringSchema,
-        score: { type: "number", minimum: 0, maximum: 10 },
-        severity: { enum: ["none", "low", "medium", "high", "critical"] },
+        vector: described(
+          nonEmptyStringSchema,
+          "Required canonical CVSS 3.1 vector beginning with CVSS:3.1/.",
+          ["CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"],
+        ),
+        score: described(
+          { type: "number", minimum: 0, maximum: 10 },
+          "Required numeric CVSS 3.1 score from 0 through 10 matching the vector.",
+        ),
+        severity: described(
+          { enum: ["none", "low", "medium", "high", "critical"] },
+          "Required lowercase CVSS severity matching the vector and score.",
+        ),
       },
       ["vector", "score", "severity"],
     ),
-    exploitPath: { type: "array", minItems: 1, items: nonEmptyStringSchema },
-    evidence: { type: "array", minItems: 1, items: nonEmptyStringSchema },
-    negativeControls: nonEmptyStringArraySchema,
-    duplicateCheck: nonEmptyStringSchema,
+    exploitPath: described(
+      { type: "array", minItems: 1, items: nonEmptyStringSchema },
+      "Required ordered, non-empty array describing the complete attacker-to-impact path.",
+    ),
+    evidence: described(
+      { type: "array", minItems: 1, items: nonEmptyStringSchema },
+      "Required non-empty array of readable evidence references or concrete observations available to the Judge.",
+    ),
+    negativeControls: described(
+      nonEmptyStringArraySchema,
+      "Required array of negative controls and their results. Use [] only when the contract permits no applicable control.",
+    ),
+    duplicateCheck: described(
+      nonEmptyStringSchema,
+      "Required summary of the Proteus and local findings/REPORTS duplicate check.",
+    ),
     gateClaims: {
       type: "array",
       minItems: 1,
       items: objectSchema(
         {
-          gateId: nonEmptyStringSchema,
-          status: { enum: ["pending", "pass", "fail", "unknown"] },
-          evidence: nonEmptyStringArraySchema,
+          gateId: described(
+            nonEmptyStringSchema,
+            "Required exact gate id from the active contract.",
+          ),
+          status: described(
+            { enum: ["pending", "pass", "fail", "unknown"] },
+            "Required lowercase gate status.",
+          ),
+          evidence: described(
+            nonEmptyStringArraySchema,
+            "Required array of evidence supporting this gate status.",
+          ),
         },
         ["gateId", "status", "evidence"],
       ),
     },
-    proteusBranchId: nonEmptyStringSchema,
-    submittedAt: { type: "string", format: "date-time" },
+    proteusBranchId: described(
+      nonEmptyStringSchema,
+      "Required id of the linked Proteus branch. A numeric id or display form such as B306 is accepted.",
+      ["B306"],
+    ),
+    submittedAt: isoDateTimeSchema,
   },
   [
     "findingId",
@@ -88,41 +185,93 @@ const findingInputSchema = objectSchema(
 
 const contractSchema = objectSchema(
   {
-    id: nonEmptyStringSchema,
-    revision: { type: "integer", minimum: 1 },
-    objective: nonEmptyStringSchema,
-    target: nonEmptyStringSchema,
-    authorization: nonEmptyStringSchema,
-    attackerModel: nonEmptyStringSchema,
-    impactThreshold: nonEmptyStringSchema,
-    scope: objectSchema(
-      {
-        included: nonEmptyStringArraySchema,
-        excluded: nonEmptyStringArraySchema,
-        stopConditions: nonEmptyStringArraySchema,
-      },
-      ["included", "excluded", "stopConditions"],
+    id: contractIdSchema,
+    revision: contractRevisionSchema,
+    objective: described(
+      nonEmptyStringSchema,
+      "Required research objective as one explicit outcome to pursue.",
     ),
-    strategy: nonEmptyStringArraySchema,
-    heuristics: nonEmptyStringArraySchema,
-    gates: {
-      type: "array",
-      minItems: 1,
-      items: objectSchema(
+    target: described(
+      nonEmptyStringSchema,
+      "Required plain string naming the exact product, repository or service plus the version/ref and deployment topology under test. This is contract.target, not a nested object.",
+      ["vercel/next.js 16.3.3, self-hosted Node.js deployment"],
+    ),
+    authorization: described(
+      nonEmptyStringSchema,
+      "Required authorization boundary: allowed targets, environments, accounts, and prohibited actions.",
+    ),
+    attackerModel: described(
+      nonEmptyStringSchema,
+      "Required attacker starting role, access, and capabilities without lab-only help.",
+    ),
+    impactThreshold: described(
+      nonEmptyStringSchema,
+      "Required minimum practical impact needed for promotion; CVSS alone is not a threshold.",
+    ),
+    scope: described(
+      objectSchema(
         {
-          id: nonEmptyStringSchema,
-          title: nonEmptyStringSchema,
-          requirement: nonEmptyStringSchema,
-          required: { type: "boolean" },
+          included: described(
+            nonEmptyStringArraySchema,
+            "Required array of in-scope surfaces and deployment conditions.",
+          ),
+          excluded: described(
+            nonEmptyStringArraySchema,
+            "Required array of excluded surfaces, impacts, and methods. Use [] only when none were defined.",
+          ),
+          stopConditions: described(
+            nonEmptyStringArraySchema,
+            "Required array of conditions that kill, pause, or pivot a branch.",
+          ),
         },
-        ["id", "title", "requirement", "required"],
+        ["included", "excluded", "stopConditions"],
       ),
-    },
-    duplicatePolicy: nonEmptyStringSchema,
-    labPolicy: nonEmptyStringSchema,
-    reportPolicy: nonEmptyStringSchema,
-    proteusCampaignId: nonEmptyStringSchema,
-    createdAt: { type: "string", format: "date-time" },
+      "Required scope object with included, excluded, and stopConditions string arrays.",
+    ),
+    strategy: described(
+      nonEmptyStringArraySchema,
+      "Required array of campaign-level research strategies in priority order.",
+    ),
+    heuristics: described(
+      nonEmptyStringArraySchema,
+      "Required array of concrete decision heuristics used to rank, kill, or deepen branches.",
+    ),
+    gates: described(
+      {
+        type: "array",
+        minItems: 1,
+        items: objectSchema(
+          {
+            id: described(nonEmptyStringSchema, "Required stable gate id."),
+            title: described(nonEmptyStringSchema, "Required short gate title."),
+            requirement: described(
+              nonEmptyStringSchema,
+              "Required testable evidence condition for this gate.",
+            ),
+            required: described(
+              { type: "boolean" },
+              "Required boolean. true means the finding cannot pass without this gate.",
+            ),
+          },
+          ["id", "title", "requirement", "required"],
+        ),
+      },
+      "Required non-empty array of promotion gates.",
+    ),
+    duplicatePolicy: described(
+      nonEmptyStringSchema,
+      "Required duplicate-search and same-root handling policy.",
+    ),
+    labPolicy: described(
+      nonEmptyStringSchema,
+      "Required realism, contamination, fixture, and negative-control policy for the lab.",
+    ),
+    reportPolicy: described(
+      nonEmptyStringSchema,
+      "Required finding and final-report policy, including the evidence needed before promotion.",
+    ),
+    proteusCampaignId: proteusCampaignIdSchema,
+    createdAt: isoDateTimeSchema,
   },
   [
     "id",
@@ -157,8 +306,8 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
         "Create a durable Erebus campaign linked to the existing Proteus campaign for this project and thread.",
       inputSchema: objectSchema(
         {
-          campaignId: { type: "string", minLength: 1 },
-          proteusCampaignId: { type: "string", minLength: 1 },
+          campaignId: campaignIdSchema,
+          proteusCampaignId: proteusCampaignIdSchema,
         },
         ["campaignId", "proteusCampaignId"],
       ),
@@ -170,7 +319,7 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
         "Read the durable campaign status, active contract revision, pending observer messages, findings, reviews, and queued steering.",
       inputSchema: objectSchema(
         {
-          campaignId: { type: "string", minLength: 1 },
+          campaignId: campaignIdSchema,
         },
         ["campaignId"],
       ),
@@ -179,11 +328,14 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
       type: "function",
       name: "register_contract",
       description:
-        "Register an immutable campaign contract revision before research starts or its scope changes. Exact identifier format: { campaignId, contract: { id, revision, ... } }. The nested field is contract.id; contractId belongs only to start and finding calls. Observer cadence and intervention thresholds are owned by the Erebus runtime and are not campaign fields.",
+        "Register an immutable campaign contract revision before research starts or its scope changes. Every field listed as required by the input schema must be present. Exact outer form: { campaignId: string, contract: { id: string, revision: positive integer, objective: string, target: string, authorization: string, attackerModel: string, impactThreshold: string, scope: { included: string[], excluded: string[], stopConditions: string[] }, strategy: string[], heuristics: string[], gates: [{ id: string, title: string, requirement: string, required: boolean }], duplicatePolicy: string, labPolicy: string, reportPolicy: string, proteusCampaignId: string, createdAt: RFC3339 date-time } }. target is a required plain string, not an object. The nested identifier is contract.id; contractId belongs only to start and finding calls. Observer cadence and intervention thresholds are runtime settings, not campaign fields.",
       inputSchema: objectSchema(
         {
-          campaignId: { type: "string", minLength: 1 },
-          contract: contractSchema,
+          campaignId: campaignIdSchema,
+          contract: described(
+            contractSchema,
+            "Required complete immutable contract object. Supply every nested field listed by this schema.",
+          ),
         },
         ["campaignId", "contract"],
       ),
@@ -195,9 +347,9 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
         "Start monitoring only after the exact registered contract revision and Proteus dependency gates are ready.",
       inputSchema: objectSchema(
         {
-          campaignId: { type: "string", minLength: 1 },
-          contractId: { type: "string", minLength: 1 },
-          contractRevision: { type: "integer", minimum: 1 },
+          campaignId: campaignIdSchema,
+          contractId: contractIdSchema,
+          contractRevision: contractRevisionSchema,
         },
         ["campaignId", "contractId", "contractRevision"],
       ),
@@ -209,13 +361,29 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
         "Link a real Proteus checkpoint to a compact Erebus orchestration digest with killed paths, open deviations, and the next move. The checkpoint id may be bare (74) or use the Proteus display form (K74).",
       inputSchema: objectSchema(
         {
-          campaignId: { type: "string", minLength: 1 },
-          proteusCheckpointId: { type: "string", minLength: 1 },
-          summary: { type: "string", minLength: 1 },
-          evidence: { type: "array", items: { type: "string", minLength: 1 } },
-          killedPaths: { type: "array", items: { type: "string", minLength: 1 } },
-          openDeviations: { type: "array", items: { type: "string", minLength: 1 } },
-          nextMove: { type: "string", minLength: 1 },
+          campaignId: campaignIdSchema,
+          proteusCheckpointId: described(
+            nonEmptyStringSchema,
+            "Required real Proteus checkpoint id, either numeric or display form such as K74.",
+            ["K74"],
+          ),
+          summary: described(
+            nonEmptyStringSchema,
+            "Required compact campaign state and contract-attestation summary.",
+          ),
+          evidence: described(
+            nonEmptyStringArraySchema,
+            "Required array of new evidence retained by this checkpoint.",
+          ),
+          killedPaths: described(
+            nonEmptyStringArraySchema,
+            "Required array of paths killed since the prior checkpoint. Use [] when none changed.",
+          ),
+          openDeviations: described(
+            nonEmptyStringArraySchema,
+            "Required array of unresolved contract deviations. Use [] when aligned.",
+          ),
+          nextMove: described(nonEmptyStringSchema, "Required single highest-ROI next move."),
         },
         [
           "campaignId",
@@ -232,14 +400,14 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
       type: "function",
       name: "pause",
       description: "Pause observer triggers and automatic steering while preserving durable state.",
-      inputSchema: objectSchema({ campaignId: { type: "string", minLength: 1 } }, ["campaignId"]),
+      inputSchema: objectSchema({ campaignId: campaignIdSchema }, ["campaignId"]),
     },
     {
       type: "function",
       name: "resume",
       description:
         "Resume a paused campaign after revalidating its active contract and Proteus dependencies.",
-      inputSchema: objectSchema({ campaignId: { type: "string", minLength: 1 } }, ["campaignId"]),
+      inputSchema: objectSchema({ campaignId: campaignIdSchema }, ["campaignId"]),
     },
     {
       type: "function",
@@ -247,8 +415,11 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
       description: "Complete a campaign only when no submitted finding is awaiting judge review.",
       inputSchema: objectSchema(
         {
-          campaignId: { type: "string", minLength: 1 },
-          reason: { type: "string", minLength: 1 },
+          campaignId: campaignIdSchema,
+          reason: described(
+            nonEmptyStringSchema,
+            "Required concise reason for completing the campaign.",
+          ),
         },
         ["campaignId", "reason"],
       ),
@@ -260,8 +431,11 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
         "Abort monitoring without deleting the campaign, findings, evaluations, or audit history.",
       inputSchema: objectSchema(
         {
-          campaignId: { type: "string", minLength: 1 },
-          reason: { type: "string", minLength: 1 },
+          campaignId: campaignIdSchema,
+          reason: described(
+            nonEmptyStringSchema,
+            "Required concise reason for aborting monitoring.",
+          ),
         },
         ["campaignId", "reason"],
       ),

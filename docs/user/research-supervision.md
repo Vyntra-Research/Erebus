@@ -15,3 +15,9 @@ Use **Settings -> Research** to set:
 - evaluator model and reasoning effort
 
 These are harness settings. A campaign agent cannot change the Observer cadence as a research decision.
+
+## Strict campaign payloads
+
+Research control tools reject incomplete payloads without changing campaign state. The agent must use every required field and the exact type shown by the tool before moving to the next step.
+
+Contract registration uses `{ campaignId, contract }`. Inside `contract`, `id` is the contract identifier and `target` is a required plain string. The target should name the product, repository, or service together with the version or ref and the deployment topology under test. Later lifecycle and finding calls refer to the registered identifier as `contractId`.
