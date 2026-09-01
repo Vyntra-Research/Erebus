@@ -154,4 +154,23 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       assert.equal(initialized.userAgent, "mock-codex-app-server");
     }),
   );
+  it.effect("drops thread resume history after validating session metadata", () =>
+    Effect.gen(function* () {
+      const handle = yield* makeHandle();
+      const scope = yield* Scope.make();
+      const clientLayer = CodexClient.layerChildProcess(handle);
+      const context = yield* Layer.buildWithScope(clientLayer, scope);
+
+      const resumed = yield* Effect.gen(function* () {
+        const client = yield* CodexClient.CodexAppServerClient;
+        return yield* client.request("thread/resume", { threadId: "thread-resumed" });
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      assert.equal(resumed.thread.id, "thread-resumed");
+      assert.equal(resumed.model, "gpt-test");
+      assert.isUndefined(
+        (resumed as unknown as { thread: { turns?: ReadonlyArray<unknown> } }).thread.turns,
+      );
+    }),
+  );
 });

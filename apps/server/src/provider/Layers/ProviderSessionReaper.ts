@@ -15,10 +15,12 @@ import { forkParked } from "../../serverActivation.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 
 const DEFAULT_INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000;
+const DEFAULT_CODEX_INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 export interface ProviderSessionReaperLiveOptions {
   readonly inactivityThresholdMs?: number;
+  readonly codexInactivityThresholdMs?: number;
   readonly sweepIntervalMs?: number;
 }
 
@@ -31,6 +33,12 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
     const inactivityThresholdMs = Math.max(
       1,
       options?.inactivityThresholdMs ?? DEFAULT_INACTIVITY_THRESHOLD_MS,
+    );
+    const codexInactivityThresholdMs = Math.max(
+      1,
+      options?.codexInactivityThresholdMs ??
+        options?.inactivityThresholdMs ??
+        DEFAULT_CODEX_INACTIVITY_THRESHOLD_MS,
     );
     const sweepIntervalMs = Math.max(1, options?.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS);
 
@@ -55,7 +63,13 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
         }
 
         const idleDurationMs = now - lastSeenMs;
-        if (idleDurationMs < inactivityThresholdMs) {
+        // Codex thread/resume returns the full historical turn list. Reopening
+        // a large research thread after the generic 30-minute timeout can
+        // allocate hundreds of megabytes and stall the local server. Keep
+        // Codex sessions warm for a workday while retaining bounded cleanup.
+        const bindingInactivityThresholdMs =
+          binding.provider === "codex" ? codexInactivityThresholdMs : inactivityThresholdMs;
+        if (idleDurationMs < bindingInactivityThresholdMs) {
           continue;
         }
 
@@ -137,6 +151,7 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
 
         yield* Effect.logInfo("provider.session.reaper.started", {
           inactivityThresholdMs,
+          codexInactivityThresholdMs,
           sweepIntervalMs,
         });
       });
