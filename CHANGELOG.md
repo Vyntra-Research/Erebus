@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10 - 2026-08-31
+
+### Changed
+
+- Replaced the desktop and web icon with a responsive vector ouroboros and native small-size renditions.
+- Documented every required research-control field in the tool schemas, including the exact `register_contract` shape and `contract.target` format.
+
 ## 0.1.9 - 2026-08-31
 
 ### Fixed
