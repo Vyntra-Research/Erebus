@@ -8,6 +8,8 @@ import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import type { ObserverTimelineMessage } from "../researchSupervision.ts";
+
 const Confidence = Schema.Number.check(Schema.isFinite()).pipe(
   Schema.decodeTo(
     Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1)),
@@ -116,6 +118,7 @@ export interface ResearchEvaluatorShape {
     readonly contract: ResearchContract;
     readonly campaignSnapshot: ObserverCampaignSnapshot;
     readonly messages: ReadonlyArray<{ readonly id: string; readonly text: string }>;
+    readonly timeline: ReadonlyArray<ObserverTimelineMessage>;
   }) => Effect.Effect<ObserverAssessment, ResearchEvaluatorError>;
   readonly evaluateJudge: (input: {
     readonly cwd: string;

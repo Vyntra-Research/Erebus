@@ -28,15 +28,23 @@ export function isCompletedAssistantMessage(
   return payload.role === "assistant" && !payload.streaming;
 }
 
-type ProjectedAssistantMessage = {
+type ProjectedConversationMessage = {
   readonly id: string;
   readonly role: string;
   readonly text: string;
+  readonly turnId?: string | null;
+};
+
+export type ObserverTimelineMessage = {
+  readonly id: string;
+  readonly source: "userPrompt" | "userSteer" | "principalAssistant";
+  readonly text: string;
+  readonly turnId: string | null;
 };
 
 export function resolveCompletedAssistantMessageText(
   payload: typeof ThreadMessageSentPayload.Type,
-  projectedMessages: ReadonlyArray<ProjectedAssistantMessage>,
+  projectedMessages: ReadonlyArray<ProjectedConversationMessage>,
 ): string | null {
   if (payload.text.trim().length > 0) return payload.text;
   const projected = projectedMessages.find(
@@ -49,7 +57,7 @@ export function hydratePrincipalMessageTexts<
   Message extends { readonly id: string; readonly text: string },
 >(
   messages: ReadonlyArray<Message>,
-  projectedMessages: ReadonlyArray<ProjectedAssistantMessage>,
+  projectedMessages: ReadonlyArray<ProjectedConversationMessage>,
 ): ReadonlyArray<Message> {
   const projectedById = new Map(
     projectedMessages
@@ -61,6 +69,81 @@ export function hydratePrincipalMessageTexts<
       ? message
       : { ...message, text: projectedById.get(message.id) ?? "" },
   );
+}
+
+function isErebusSupervisoryMessage(message: ProjectedConversationMessage): boolean {
+  const text = message.text.trimStart();
+  return (
+    message.id.startsWith("erebus:") ||
+    text.startsWith("<vigil_steering") ||
+    text.startsWith("<erebus_steering")
+  );
+}
+
+/**
+ * Build chronological Observer context without changing its assistant-only cadence.
+ */
+export function buildObserverTimeline(
+  assistantMessages: ReadonlyArray<{ readonly id: string; readonly text: string }>,
+  projectedMessages: ReadonlyArray<ProjectedConversationMessage>,
+): ReadonlyArray<ObserverTimelineMessage> {
+  if (assistantMessages.length === 0) return [];
+  const assistantById = new Map(assistantMessages.map((message) => [message.id, message] as const));
+  const indexedAssistants = projectedMessages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => assistantById.has(message.id));
+  if (indexedAssistants.length === 0) {
+    return assistantMessages.map((message) => ({
+      id: message.id,
+      source: "principalAssistant" as const,
+      text: message.text,
+      turnId: null,
+    }));
+  }
+
+  const firstWindowIndex = indexedAssistants[0]!.index;
+  const lastWindowIndex = indexedAssistants.at(-1)!.index;
+  const eligibleUsers = projectedMessages
+    .map((message, index) => ({ message, index }))
+    .filter(
+      ({ message, index }) =>
+        index <= lastWindowIndex &&
+        message.role === "user" &&
+        message.text.trim().length > 0 &&
+        !isErebusSupervisoryMessage(message),
+    );
+  const latestPrompt = eligibleUsers.findLast(({ message }) => message.turnId == null);
+  const steers = eligibleUsers.filter(({ message }) => message.turnId != null);
+  const lastPriorSteer = steers.findLast(({ index }) => index < firstWindowIndex);
+  const laterSteers = steers.filter(({ index }) => index >= firstWindowIndex);
+  const selectedUserIndexes = new Set(
+    [latestPrompt, lastPriorSteer, ...laterSteers]
+      .filter((item) => item !== undefined)
+      .map((item) => item.index),
+  );
+
+  return projectedMessages.flatMap<ObserverTimelineMessage>((message, index) => {
+    const assistant = assistantById.get(message.id);
+    if (assistant) {
+      return [
+        {
+          id: message.id,
+          source: "principalAssistant" as const,
+          text: assistant.text,
+          turnId: message.turnId ?? null,
+        },
+      ];
+    }
+    if (!selectedUserIndexes.has(index)) return [];
+    return [
+      {
+        id: message.id,
+        source: message.turnId == null ? ("userPrompt" as const) : ("userSteer" as const),
+        text: message.text,
+        turnId: message.turnId ?? null,
+      },
+    ];
+  });
 }
 
 export function pendingObserverWindowCount(

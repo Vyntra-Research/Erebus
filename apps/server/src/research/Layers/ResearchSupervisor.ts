@@ -30,6 +30,7 @@ import { ResearchEvaluator } from "../Services/ResearchEvaluator.ts";
 import {
   activeResearchContract,
   buildObserverCampaignSnapshot,
+  buildObserverTimeline,
   hydratePrincipalMessageTexts,
   isCompletedAssistantMessage,
   pendingJudgeFindings,
@@ -419,6 +420,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
       });
       return;
     }
+    const timeline = buildObserverTimeline(messages, context.thread.messages);
 
     const evaluatorModelSelection = buildResearchEvaluatorModelSelection(
       context.thread.modelSelection,
@@ -431,6 +433,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
         contract,
         campaignSnapshot,
         messages: messages.map((message) => ({ id: message.id, text: message.text })),
+        timeline,
       })
       .pipe(Effect.retry({ times: 2 }));
     const cvssMismatches = messages.flatMap((message) =>

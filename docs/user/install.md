@@ -16,14 +16,12 @@ Erebus keeps its Codex profile under its own application data. It does not reuse
 
 ## First login
 
-Open **Settings -> Providers -> Codex** after Erebus starts, then select **Sign in to Codex**. Erebus opens the ChatGPT device page, shows the one-time code, and refreshes the provider when authorization finishes. It writes the session to the isolated Erebus profile; no `auth.json` copy is required.
-
-If Codex says device authorization is disabled, enable device code authorization in the ChatGPT **Security** settings and try again.
+Open **Settings -> Providers -> Codex** after Erebus starts, then select **Sign in to Codex**. Erebus opens the standard Codex browser sign-in flow and refreshes the provider when authorization finishes. It writes the session to the isolated Erebus profile; no `auth.json` copy is required.
 
 The provider status also shows a PowerShell fallback with the exact profile path. The default packaged path uses this form:
 
 ```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.erebus\userdata\providers\codex"; codex login --device-auth
+$env:CODEX_HOME="$env:USERPROFILE\.erebus\userdata\providers\codex"; codex login
 ```
 
 Run it only if the in-app flow cannot start, then refresh the Codex provider status.

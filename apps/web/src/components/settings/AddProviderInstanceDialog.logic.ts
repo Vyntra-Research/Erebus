@@ -6,6 +6,29 @@ const IDENTITY_STEP = 1;
 
 export const ADD_PROVIDER_WIZARD_STEPS = ["Driver", "Identity", "Config"] as const;
 
+function slugifyProviderLabel(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+}
+
+export function deriveAvailableProviderInstanceId(
+  driver: string,
+  label: string,
+  existing: ReadonlySet<string>,
+): string {
+  const labelSlug = slugifyProviderLabel(label);
+  const base = labelSlug.length > 0 ? `${driver}_${labelSlug}` : `${driver}_account`;
+  if (!existing.has(base)) return base;
+
+  let suffix = 2;
+  while (existing.has(`${base}_${suffix}`)) suffix += 1;
+  return `${base}_${suffix}`;
+}
+
 /**
  * Resolve navigation within the add-provider wizard.
  *

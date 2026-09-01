@@ -14,6 +14,7 @@ Erebus is based on [T3 Code](https://github.com/pingdotgg/t3code). The current r
 - Runs an Observer after a configurable number of completed assistant messages. It sends a correction only when the run has materially departed from the contract.
 - Sends submitted findings to an independent Judge. The Judge checks the evidence and campaign gates in a separate turn before accepting the finding or requesting research changes.
 - Keeps the principal Codex session isolated from the Codex desktop app, including its home, session database, and configuration.
+- Supports multiple Codex accounts with separate sign-in state, shared task data, and quota-aware routing at turn boundaries.
 - Installs and updates the Proteus CLI, MCP server, plugin, and skills inside Erebus-managed storage.
 
 ## Supervision flow
@@ -37,7 +38,7 @@ You need:
 - a ChatGPT account with access to Codex
 - the Codex CLI available on `PATH`
 
-Open **Settings > Providers > Codex** after installation to sign in. Erebus uses device authorization and stores the session in its own profile. It does not copy or modify the Codex desktop app profile.
+Open **Settings > Providers > Codex** after installation to sign in. Erebus uses Codex's browser login and stores the session in its own profile. It does not copy or modify the Codex desktop app profile.
 
 Proteus needs no separate installation. Erebus ships a verified fallback, checks for stable Proteus releases, and retains the active and previous managed versions. If an update fails, the last verified runtime remains available.
 

@@ -3,6 +3,7 @@ import type {
   ModelCapabilities,
   ResearchProteusHealth,
   ServerProvider,
+  ServerProviderAccountUsage,
   ServerProviderAuth,
   ServerProviderSkill,
   ServerProviderSlashCommand,
@@ -51,6 +52,7 @@ export interface ProviderProbeResult {
   readonly status: Exclude<ServerProviderState, "disabled">;
   readonly auth: ServerProviderAuth;
   readonly message?: string;
+  readonly accountUsage?: ServerProviderAccountUsage;
 }
 
 export interface ServerProviderPresentation {
@@ -248,6 +250,7 @@ export function buildServerProvider(input: {
     auth: input.probe.auth,
     checkedAt: input.checkedAt,
     ...(input.probe.message ? { message: input.probe.message } : {}),
+    ...(input.probe.accountUsage ? { accountUsage: input.probe.accountUsage } : {}),
     models: input.models,
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],

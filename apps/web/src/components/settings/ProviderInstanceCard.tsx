@@ -371,6 +371,8 @@ interface ProviderInstanceCardProps {
   readonly isUpdating?: boolean | undefined;
   readonly onLogin?: (() => void) | undefined;
   readonly isLoggingIn?: boolean | undefined;
+  readonly isPrimaryAccount?: boolean | undefined;
+  readonly onSetPrimaryAccount?: (() => void) | undefined;
 }
 
 /**
@@ -414,6 +416,8 @@ export function ProviderInstanceCard({
   isUpdating = false,
   onLogin,
   isLoggingIn = false,
+  isPrimaryAccount = false,
+  onSetPrimaryAccount,
 }: ProviderInstanceCardProps) {
   const [activeTab, setActiveTab] = useState<"models" | "configuration">("configuration");
   const enabled = resolveProviderInstanceEnabled(instance);
@@ -560,11 +564,21 @@ export function ProviderInstanceCard({
           {driverOption.badgeLabel}
         </Badge>
       ) : null}
+      {instance.driver === "codex" && isPrimaryAccount ? (
+        <Badge variant="secondary" size="sm" className="shrink-0">
+          Primary
+        </Badge>
+      ) : null}
     </>
   );
 
   const titleTailNode = (
     <>
+      {instance.driver === "codex" && !isPrimaryAccount && onSetPrimaryAccount ? (
+        <Button type="button" size="xs" variant="outline" onClick={onSetPrimaryAccount}>
+          Set as primary
+        </Button>
+      ) : null}
       {headerAction ? (
         <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
           {headerAction}
@@ -620,10 +634,20 @@ export function ProviderInstanceCard({
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
               {versionCodeNode}
+              {instance.driver === "codex" && isPrimaryAccount ? (
+                <Badge variant="secondary" size="sm" className="shrink-0">
+                  Primary
+                </Badge>
+              ) : null}
             </span>
             <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <span className={cn("size-1.5 shrink-0 rounded-full", statusStyle.dot)} />
               <span className="truncate">{summary.headline}</span>
+              {liveProvider?.accountUsage ? (
+                <span className="shrink-0">
+                  · {Math.round(liveProvider.accountUsage.remainingPercent)}% left
+                </span>
+              ) : null}
             </span>
             {String(instanceId) !== String(instance.driver) ? (
               <code className="mt-0.5 block truncate text-[10px] text-muted-foreground/70">

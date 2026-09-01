@@ -1,11 +1,19 @@
 import * as NodeOS from "node:os";
 
-import { ProviderDriverKind, type CodexSettings } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  type CodexSettings,
+  type ProviderInstanceId,
+} from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as PlatformError from "effect/PlatformError";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import { expandHomePath } from "../../pathExpansion.ts";
 
@@ -14,6 +22,20 @@ export interface CodexHomeLayout {
   readonly sharedHomePath: string;
   readonly effectiveHomePath: string | undefined;
   readonly continuationKey: string;
+}
+
+export function withAutomaticCodexAccountOverlay(
+  config: CodexSettings,
+  options: {
+    readonly instanceId: ProviderInstanceId;
+    readonly defaultInstanceId: ProviderInstanceId;
+    readonly accountHomePath: string;
+  },
+): CodexSettings {
+  return options.instanceId !== options.defaultInstanceId &&
+    config.shadowHomePath.trim().length === 0
+    ? { ...config, shadowHomePath: options.accountHomePath }
+    : config;
 }
 
 const KNOWN_SHARED_DIRECTORIES = [
@@ -30,7 +52,7 @@ const KNOWN_SHARED_DIRECTORIES = [
 ] as const;
 
 const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
-const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
+const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "tmp"]);
 const REPLACEABLE_SHARED_RUNTIME_DIRECTORIES = new Set(["mcp-oauth-locks"]);
 
 function resolveHomePath(
@@ -81,7 +103,15 @@ export class CodexShadowHomeFileSystemError extends Schema.TaggedErrorClass<Code
   "CodexShadowHomeFileSystemError",
   {
     ...CodexShadowHomeContext,
-    operation: Schema.Literals(["readLink", "makeDirectory", "readDirectory", "remove", "symlink"]),
+    operation: Schema.Literals([
+      "readLink",
+      "makeDirectory",
+      "readDirectory",
+      "remove",
+      "stat",
+      "symlink",
+      "link",
+    ]),
     path: Schema.String,
     targetPath: Schema.optional(Schema.String),
     entryName: Schema.optional(Schema.String),
@@ -225,8 +255,14 @@ const ensureSymlink = Effect.fn("CodexHomeLayout.ensureSymlink")(function* (inpu
   readonly sharedHomePath: string;
   readonly effectiveHomePath: string;
   readonly entryName: string;
-}): Effect.fn.Return<void, CodexShadowHomeError, Path.Path> {
+  readonly replaceDetachedEntry: boolean;
+}): Effect.fn.Return<
+  void,
+  CodexShadowHomeError,
+  Path.Path | ChildProcessSpawner.ChildProcessSpawner
+> {
   const path = yield* Path.Path;
+  const hostPlatform = yield* HostProcessPlatform;
   const target = path.join(input.sharedHomePath, input.entryName);
   const link = path.join(input.effectiveHomePath, input.entryName);
   const state = yield* readLinkState({
@@ -234,23 +270,78 @@ const ensureSymlink = Effect.fn("CodexHomeLayout.ensureSymlink")(function* (inpu
     linkPath: link,
   });
 
-  const createLink = input.fileSystem.symlink(target, link).pipe(
-    Effect.catchTags({
-      PlatformError: (cause) =>
-        new CodexShadowHomeFileSystemError({
-          sharedHomePath: input.sharedHomePath,
-          effectiveHomePath: input.effectiveHomePath,
-          operation: "symlink",
-          path: link,
-          targetPath: target,
-          entryName: input.entryName,
-          cause,
+  const wrapFileSystemError = (operation: "stat" | "symlink" | "link", cause: unknown) =>
+    new CodexShadowHomeFileSystemError({
+      sharedHomePath: input.sharedHomePath,
+      effectiveHomePath: input.effectiveHomePath,
+      operation,
+      path: link,
+      targetPath: target,
+      entryName: input.entryName,
+      cause,
+    });
+  const createLink = Effect.gen(function* () {
+    if (hostPlatform !== "win32") {
+      return yield* input.fileSystem.symlink(target, link).pipe(
+        Effect.catchTags({
+          PlatformError: (cause) => wrapFileSystemError("symlink", cause),
         }),
-    }),
-  );
+      );
+    }
+
+    const targetInfo = yield* input.fileSystem.stat(target).pipe(
+      Effect.catchTags({
+        PlatformError: (cause) => wrapFileSystemError("stat", cause),
+      }),
+    );
+    if (targetInfo.type !== "Directory") {
+      return yield* input.fileSystem.link(target, link).pipe(
+        Effect.catchTags({
+          PlatformError: (cause) => wrapFileSystemError("link", cause),
+        }),
+      );
+    }
+
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const exitCode = yield* spawner
+      .exitCode(ChildProcess.make("cmd.exe", ["/d", "/s", "/c", "mklink", "/J", link, target]))
+      .pipe(
+        Effect.catchTags({
+          PlatformError: (cause) => wrapFileSystemError("link", cause),
+        }),
+      );
+    if (Number(exitCode) !== 0) {
+      return yield* wrapFileSystemError(
+        "link",
+        new Error(`mklink exited with code ${Number(exitCode)}`),
+      );
+    }
+  });
+
+  if (state._tag === "NotSymlink" && hostPlatform === "win32") {
+    const [targetInfo, linkInfo] = yield* Effect.all([
+      input.fileSystem.stat(target),
+      input.fileSystem.stat(link),
+    ]).pipe(
+      Effect.catchTags({
+        PlatformError: (cause) => wrapFileSystemError("stat", cause),
+      }),
+    );
+    const targetInode = Option.getOrUndefined(targetInfo.ino);
+    const isExpectedHardLink =
+      targetInfo.type === "File" &&
+      linkInfo.type === "File" &&
+      targetInode !== undefined &&
+      targetInfo.dev === linkInfo.dev &&
+      targetInode === Option.getOrUndefined(linkInfo.ino);
+    if (isExpectedHardLink) return;
+  }
 
   if (state._tag === "NotSymlink") {
-    if (!REPLACEABLE_SHARED_RUNTIME_DIRECTORIES.has(input.entryName)) {
+    if (
+      !input.replaceDetachedEntry &&
+      !REPLACEABLE_SHARED_RUNTIME_DIRECTORIES.has(input.entryName)
+    ) {
       return yield* new CodexShadowHomeEntryConflictError({
         sharedHomePath: input.sharedHomePath,
         effectiveHomePath: input.effectiveHomePath,
@@ -381,6 +472,7 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
         }),
     }),
   );
+  const establishedOverlay = yield* fileSystem.exists(path.join(effectiveHomePath, "auth.json"));
   const entries = new Set<string>(KNOWN_SHARED_DIRECTORIES);
   for (const entryName of sharedEntryNames) {
     if (!PRIVATE_ENTRY_NAMES.has(entryName) && !SHADOW_LOCAL_ENTRY_NAMES.has(entryName)) {
@@ -413,6 +505,7 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
         sharedHomePath: layout.sharedHomePath,
         effectiveHomePath,
         entryName,
+        replaceDetachedEntry: establishedOverlay,
       });
     },
     { discard: true },

@@ -159,6 +159,22 @@ export const ServerProviderUpdateState = Schema.Struct({
 });
 export type ServerProviderUpdateState = typeof ServerProviderUpdateState.Type;
 
+export const ServerProviderRateLimitWindow = Schema.Struct({
+  usedPercent: Schema.Number,
+  remainingPercent: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.Number),
+  windowDurationMins: Schema.NullOr(Schema.Number),
+});
+export type ServerProviderRateLimitWindow = typeof ServerProviderRateLimitWindow.Type;
+
+export const ServerProviderAccountUsage = Schema.Struct({
+  remainingPercent: Schema.Number,
+  primary: Schema.NullOr(ServerProviderRateLimitWindow),
+  secondary: Schema.NullOr(ServerProviderRateLimitWindow),
+  reached: Schema.Boolean,
+});
+export type ServerProviderAccountUsage = typeof ServerProviderAccountUsage.Type;
+
 export const ServerProvider = Schema.Struct({
   // Routing key for the configured instance this snapshot represents. This
   // is the only stable identity consumers may use for provider routing.
@@ -196,6 +212,7 @@ export const ServerProvider = Schema.Struct({
   proteus: Schema.optionalKey(ResearchProteusHealth),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
+  accountUsage: Schema.optionalKey(ServerProviderAccountUsage),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 

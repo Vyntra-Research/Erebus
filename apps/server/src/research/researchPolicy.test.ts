@@ -28,6 +28,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /Tool calls do not count/);
   assert.match(OBSERVER_POLICY, /Never queue, replay, or reapply an Observer correction/);
   assert.match(OBSERVER_POLICY, /replay the exact last Observer block literally after compaction/);
+  assert.match(OBSERVER_POLICY, /userPrompt, userSteer, and principalAssistant/);
+  assert.match(OBSERVER_POLICY, /user's prompt and later steers are binding/);
   assert.match(JUDGE_POLICY, /Your job is not to help the finding pass/);
   assert.match(JUDGE_POLICY, /maximum impact currently proved/);
   assert.match(JUDGE_POLICY, /CVSS is an ancillary classification, never a validity gate/);
@@ -51,8 +53,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 
 it("records a new policy revision and digest for persisted evaluations", () => {
   assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 10);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 8);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 8);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 9);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 9);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

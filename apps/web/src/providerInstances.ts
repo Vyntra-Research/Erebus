@@ -200,6 +200,26 @@ export function deriveProviderInstanceEntries(
   });
 }
 
+/** Present a routed Codex account pool as one logical model-picker provider. */
+export function collapseCodexAccountEntries(
+  entries: ReadonlyArray<ProviderInstanceEntry>,
+  primaryInstanceId: string | null,
+): ReadonlyArray<ProviderInstanceEntry> {
+  const codexEntries = entries.filter((entry) => entry.driverKind === "codex");
+  if (codexEntries.length <= 1) return entries;
+  const logicalEntry =
+    codexEntries.find((entry) => entry.instanceId === primaryInstanceId) ??
+    codexEntries.find((entry) => entry.isDefault) ??
+    codexEntries[0];
+  if (!logicalEntry) return entries;
+  const firstCodexIndex = entries.findIndex((entry) => entry.driverKind === "codex");
+  return entries.flatMap((entry, index) => {
+    if (entry.driverKind !== "codex") return [entry];
+    if (index !== firstCodexIndex) return [];
+    return [{ ...logicalEntry, displayName: "Codex", accentColor: undefined }];
+  });
+}
+
 /**
  * Project several environments' `ServerProvider[]` into a nested
  * `environmentId → instanceId → entry` lookup.

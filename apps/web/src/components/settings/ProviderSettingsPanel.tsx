@@ -83,6 +83,7 @@ import {
   NumberFieldInput,
 } from "../ui/number-field";
 import { ScrollArea } from "../ui/scroll-area";
+import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
@@ -165,6 +166,11 @@ type CodexLoginUiState =
   | { readonly instanceId: ProviderInstanceId; readonly status: "starting" }
   | {
       readonly instanceId: ProviderInstanceId;
+      readonly status: "browserAuth";
+      readonly authUrl: string;
+    }
+  | {
+      readonly instanceId: ProviderInstanceId;
       readonly status: "waiting";
       readonly userCode: string;
       readonly verificationUrl: string;
@@ -194,8 +200,14 @@ function CodexLoginDialog({
     toastManager.add({ type: "success", title: "Device code copied" });
   };
   const openVerification = () => {
-    if (state.status !== "waiting") return;
-    void readLocalApi()?.shell.openExternal(state.verificationUrl);
+    const url =
+      state.status === "browserAuth"
+        ? state.authUrl
+        : state.status === "waiting"
+          ? state.verificationUrl
+          : null;
+    if (!url) return;
+    void readLocalApi()?.shell.openExternal(url);
   };
 
   return (
@@ -212,7 +224,7 @@ function CodexLoginDialog({
         <DialogHeader>
           <DialogTitle>Sign in to Codex</DialogTitle>
           <DialogDescription>
-            Erebus uses Codex device authorization and stores the session only in this provider's
+            Erebus uses Codex's browser login and stores the session only in this provider's
             isolated profile.
           </DialogDescription>
         </DialogHeader>
@@ -221,7 +233,7 @@ function CodexLoginDialog({
           {state.status === "starting" ? (
             <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
               <LoaderIcon className="size-4 animate-spin" />
-              Requesting a device code from Codex…
+              Starting Codex sign-in…
             </div>
           ) : null}
           {state.status === "waiting" ? (
@@ -245,6 +257,21 @@ function CodexLoginDialog({
               <p className="text-xs text-muted-foreground">
                 Finish authorization in the browser. This window updates automatically.
               </p>
+            </>
+          ) : null}
+          {state.status === "browserAuth" ? (
+            <>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-sm">
+                <p className="font-medium text-foreground">Continue in your browser</p>
+                <p className="mt-1 text-muted-foreground">
+                  Sign in to the ChatGPT account for this provider. Erebus will finish setup when
+                  Codex receives the callback.
+                </p>
+              </div>
+              <Button type="button" onClick={openVerification}>
+                <ExternalLinkIcon />
+                Open ChatGPT
+              </Button>
             </>
           ) : null}
           {state.status === "failed" ? (
@@ -633,18 +660,23 @@ export function EnvironmentProviderSettings({
         environmentId,
         input: { instanceId },
         onProgress: (event) => {
-          if (event.type !== "deviceCode") return;
-          setCodexLoginState({
-            instanceId,
-            status: "waiting",
-            userCode: event.userCode,
-            verificationUrl: event.verificationUrl,
-          });
+          if (event.type === "complete") return;
+          const url = event.type === "browserAuth" ? event.authUrl : event.verificationUrl;
+          setCodexLoginState(
+            event.type === "browserAuth"
+              ? { instanceId, status: "browserAuth", authUrl: event.authUrl }
+              : {
+                  instanceId,
+                  status: "waiting",
+                  userCode: event.userCode,
+                  verificationUrl: event.verificationUrl,
+                },
+          );
           setCodexLoginDialogOpen(true);
           if (!openedCodexLoginIdsRef.current.has(event.loginId)) {
             openedCodexLoginIdsRef.current.add(event.loginId);
             void readLocalApi()
-              ?.shell.openExternal(event.verificationUrl)
+              ?.shell.openExternal(url)
               .catch((error) => console.warn("Could not open Codex login URL", error));
           }
         },
@@ -791,6 +823,13 @@ export function EnvironmentProviderSettings({
       rows.push({ instanceId: id, instance, driver: instance.driver, isDefault: false });
     }
   }
+  const codexRows = rows.filter((row) => row.driver === "codex");
+  const configuredPrimaryInstanceId = settings.codexAccountRouting.primaryInstanceId;
+  const primaryCodexInstanceId =
+    codexRows.find((row) => row.instanceId === configuredPrimaryInstanceId)?.instanceId ??
+    codexRows.find((row) => row.isDefault)?.instanceId ??
+    codexRows[0]?.instanceId ??
+    null;
   const selectedRow = rows.find((row) => row.instanceId === selectedInstanceId) ?? rows[0] ?? null;
 
   const updateProviderInstance = (
@@ -815,8 +854,28 @@ export function EnvironmentProviderSettings({
   };
 
   const deleteProviderInstance = (id: ProviderInstanceId) => {
+    const remainingCodexRows = codexRows.filter((row) => row.instanceId !== id);
+    const nextPrimaryInstanceId =
+      primaryCodexInstanceId === id
+        ? (remainingCodexRows.find((row) => row.isDefault)?.instanceId ??
+          remainingCodexRows[0]?.instanceId ??
+          null)
+        : settings.codexAccountRouting.primaryInstanceId;
     updateSettings({
       providerInstances: withoutProviderInstanceKey(settings.providerInstances, id),
+      codexAccountRouting: {
+        ...settings.codexAccountRouting,
+        primaryInstanceId: nextPrimaryInstanceId,
+      },
+    });
+  };
+
+  const setPrimaryCodexInstance = (instanceId: ProviderInstanceId) => {
+    updateSettings({
+      codexAccountRouting: {
+        ...settings.codexAccountRouting,
+        primaryInstanceId: instanceId,
+      },
     });
   };
 
@@ -982,6 +1041,12 @@ export function EnvironmentProviderSettings({
             : undefined
         }
         isLoggingIn={loggingInInstanceIds.has(row.instanceId)}
+        isPrimaryAccount={row.driver === "codex" && row.instanceId === primaryCodexInstanceId}
+        onSetPrimaryAccount={
+          mode === "editor" && row.driver === "codex" && row.instanceId !== primaryCodexInstanceId
+            ? () => setPrimaryCodexInstance(row.instanceId)
+            : undefined
+        }
       />
     );
   };
@@ -998,7 +1063,7 @@ export function EnvironmentProviderSettings({
               onClick={() => setIsAddInstanceDialogOpen(true)}
             >
               <PlusIcon className="size-3.5" />
-              Add provider
+              Add Codex account
             </Button>
           ) : null
         }
@@ -1129,6 +1194,92 @@ export function EnvironmentProviderSettings({
                         </NumberFieldGroup>
                       </NumberField>
                       <span className="text-xs text-muted-foreground">seconds</span>
+                    </div>
+                  }
+                />
+                <SettingsRow
+                  title="Automatic Codex account routing"
+                  description="Keep the primary account preferred and move new turns to another signed-in account when its quota runs low."
+                  control={
+                    <Switch
+                      checked={settings.codexAccountRouting.enabled}
+                      onCheckedChange={(enabled) =>
+                        updateSettings({
+                          codexAccountRouting: {
+                            ...settings.codexAccountRouting,
+                            enabled: Boolean(enabled),
+                          },
+                        })
+                      }
+                      aria-label="Enable automatic Codex account routing"
+                    />
+                  }
+                />
+                <SettingsRow
+                  title="Primary account switch point"
+                  description="Move to the next account when the primary account reaches this remaining quota."
+                  control={
+                    <div className="flex shrink-0 items-center gap-2">
+                      <NumberField
+                        value={settings.codexAccountRouting.primarySwitchRemainingPercent}
+                        min={0}
+                        max={100}
+                        step={1}
+                        size="sm"
+                        className="w-28"
+                        onValueChange={(value) =>
+                          updateSettings({
+                            codexAccountRouting: {
+                              ...settings.codexAccountRouting,
+                              primarySwitchRemainingPercent: Math.max(
+                                0,
+                                Math.min(100, Math.round(value ?? 0)),
+                              ),
+                            },
+                          })
+                        }
+                      >
+                        <NumberFieldGroup>
+                          <NumberFieldDecrement aria-label="Decrease primary switch point" />
+                          <NumberFieldInput aria-label="Primary account switch point" />
+                          <NumberFieldIncrement aria-label="Increase primary switch point" />
+                        </NumberFieldGroup>
+                      </NumberField>
+                      <span className="text-xs text-muted-foreground">% left</span>
+                    </div>
+                  }
+                />
+                <SettingsRow
+                  title="Fallback reserve"
+                  description="Recheck higher-priority accounts when the active fallback reaches this remaining quota."
+                  control={
+                    <div className="flex shrink-0 items-center gap-2">
+                      <NumberField
+                        value={settings.codexAccountRouting.fallbackReserveRemainingPercent}
+                        min={0}
+                        max={100}
+                        step={1}
+                        size="sm"
+                        className="w-28"
+                        onValueChange={(value) =>
+                          updateSettings({
+                            codexAccountRouting: {
+                              ...settings.codexAccountRouting,
+                              fallbackReserveRemainingPercent: Math.max(
+                                0,
+                                Math.min(100, Math.round(value ?? 0)),
+                              ),
+                            },
+                          })
+                        }
+                      >
+                        <NumberFieldGroup>
+                          <NumberFieldDecrement aria-label="Decrease fallback reserve" />
+                          <NumberFieldInput aria-label="Fallback reserve" />
+                          <NumberFieldIncrement aria-label="Increase fallback reserve" />
+                        </NumberFieldGroup>
+                      </NumberField>
+                      <span className="text-xs text-muted-foreground">% left</span>
                     </div>
                   }
                 />

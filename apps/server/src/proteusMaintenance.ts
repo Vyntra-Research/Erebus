@@ -60,8 +60,7 @@ export const updateProteus = Effect.fn("ProteusMaintenance.update")(function* (
     const home = yield* resolveCodexHomeLayout(config, {
       defaultHomePath: path.join(stateDir, "providers", "codex"),
     });
-    if (!home.effectiveHomePath) continue;
-    yield* installManagedProteusForCodex(home.effectiveHomePath, {
+    yield* installManagedProteusForCodex(home.sharedHomePath, {
       managedRuntimeRoot: runtimeRoot,
     }).pipe(
       Effect.mapError(

@@ -18,6 +18,7 @@ import type {
   ResearchDependencyState,
   ResearchProteusHealth,
   ServerProvider,
+  ServerProviderAccountUsage,
   ServerProviderState,
   ModelCapabilities,
   ProviderOptionDescriptor,
@@ -49,10 +50,54 @@ const CODEX_PRESENTATION = {
 
 export interface CodexAppServerProviderSnapshot {
   readonly account: CodexSchema.V2GetAccountResponse;
+  readonly accountUsage?: ServerProviderAccountUsage;
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly proteus: ResearchProteusHealth;
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function normalizeRateLimitWindow(
+  window: CodexSchema.V2GetAccountRateLimitsResponse__RateLimitWindow | null | undefined,
+) {
+  if (!window) return null;
+  const usedPercent = clampPercent(window.usedPercent);
+  return {
+    usedPercent,
+    remainingPercent: 100 - usedPercent,
+    resetsAt: window.resetsAt ?? null,
+    windowDurationMins: window.windowDurationMins ?? null,
+  };
+}
+
+export function normalizeCodexAccountUsage(
+  response: CodexSchema.V2GetAccountRateLimitsResponse | undefined,
+): ServerProviderAccountUsage | undefined {
+  if (!response) return undefined;
+  const primary = normalizeRateLimitWindow(response.rateLimits.primary);
+  const secondary = normalizeRateLimitWindow(response.rateLimits.secondary);
+  const remainingWindows = [primary, secondary]
+    .filter((window): window is NonNullable<typeof window> => window !== null)
+    .map((window) => window.remainingPercent);
+  const individualRemaining = response.rateLimits.individualLimit?.remainingPercent;
+  if (individualRemaining !== undefined) {
+    remainingWindows.push(clampPercent(individualRemaining));
+  }
+  if (remainingWindows.length === 0) return undefined;
+  const remainingPercent = Math.min(...remainingWindows);
+  return {
+    remainingPercent,
+    primary,
+    secondary,
+    reached:
+      remainingPercent <= 0 ||
+      response.rateLimits.rateLimitReachedType != null ||
+      response.rateLimits.spendControlReached === true,
+  };
 }
 
 const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
@@ -506,36 +551,43 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models, pluginListResult, mcpStatusResult] = yield* Effect.all(
-    [
-      client.request("skills/list", {
-        cwds: [input.cwd],
-      }),
-      requestAllCodexModels(client),
-      client
-        .request("plugin/list", {
+  const [skillsResponse, models, rateLimitsResult, pluginListResult, mcpStatusResult] =
+    yield* Effect.all(
+      [
+        client.request("skills/list", {
           cwds: [input.cwd],
-        })
-        .pipe(
-          Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
-          Effect.orElseSucceed(() => Option.none()),
+        }),
+        requestAllCodexModels(client),
+        client.request("account/rateLimits/read", undefined).pipe(
+          Effect.map((value) => value as CodexSchema.V2GetAccountRateLimitsResponse),
+          Effect.option,
         ),
-      client
-        .request("mcpServerStatus/list", {
-          detail: "toolsAndAuthOnly",
-          limit: 100,
-        })
-        .pipe(
-          Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
-          Effect.orElseSucceed(() => Option.none()),
-        ),
-    ],
-    { concurrency: "unbounded" },
-  );
+        client
+          .request("plugin/list", {
+            cwds: [input.cwd],
+          })
+          .pipe(
+            Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
+            Effect.orElseSucceed(() => Option.none()),
+          ),
+        client
+          .request("mcpServerStatus/list", {
+            detail: "toolsAndAuthOnly",
+            limit: 100,
+          })
+          .pipe(
+            Effect.timeoutOption(PROTEUS_STATUS_PROBE_TIMEOUT),
+            Effect.orElseSucceed(() => Option.none()),
+          ),
+      ],
+      { concurrency: "unbounded" },
+    );
   const skills = parseCodexSkillsListResponse(skillsResponse, input.cwd);
 
+  const accountUsage = normalizeCodexAccountUsage(Option.getOrUndefined(rateLimitsResult));
   return {
     account: accountResponse,
+    ...(accountUsage === undefined ? {} : { accountUsage }),
     version,
     models: applyPreferredCodexDefaultModel(
       appendCustomCodexModels(models, input.customModels ?? []),
@@ -610,15 +662,15 @@ export function codexLoginInstruction(
   homePath?: string,
   platform: NodeJS.Platform = "linux",
 ): string {
-  if (!homePath) return "codex login --device-auth";
+  if (!homePath) return "codex login";
 
   if (platform === "win32") {
     const escapedHomePath = homePath.replaceAll("'", "''");
-    return `$env:CODEX_HOME='${escapedHomePath}'; codex login --device-auth`;
+    return `$env:CODEX_HOME='${escapedHomePath}'; codex login`;
   }
 
   const escapedHomePath = homePath.replaceAll("'", `'"'"'`);
-  return `CODEX_HOME='${escapedHomePath}' codex login --device-auth`;
+  return `CODEX_HOME='${escapedHomePath}' codex login`;
 }
 
 function accountProbeStatus(
@@ -647,7 +699,7 @@ function accountProbeStatus(
     return {
       status: "error",
       auth: { status: "unauthenticated" },
-      message: `Codex is not authenticated in the Erebus profile. Use Sign in to Codex below. If device login is disabled, enable device code authorization in ChatGPT Security settings first. CLI fallback: \`${codexLoginInstruction(homePath, platform)}\`.`,
+      message: `Codex is not authenticated in the Erebus profile. Use Sign in to Codex below. CLI fallback: \`${codexLoginInstruction(homePath, platform)}\`.`,
     };
   }
 
@@ -770,6 +822,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       status: accountStatus.status,
       auth: accountStatus.auth,
       ...(accountStatus.message ? { message: accountStatus.message } : {}),
+      ...(snapshot.accountUsage ? { accountUsage: snapshot.accountUsage } : {}),
     },
   });
 });

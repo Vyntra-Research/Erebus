@@ -11,11 +11,11 @@ import {
 it("builds a login command for Erebus's isolated Codex profile", () => {
   assert.equal(
     codexLoginInstruction("C:\\Users\\researcher\\.erebus\\userdata\\providers\\codex", "win32"),
-    "$env:CODEX_HOME='C:\\Users\\researcher\\.erebus\\userdata\\providers\\codex'; codex login --device-auth",
+    "$env:CODEX_HOME='C:\\Users\\researcher\\.erebus\\userdata\\providers\\codex'; codex login",
   );
   assert.equal(
     codexLoginInstruction("/home/researcher/.erebus/userdata/providers/codex", "linux"),
-    "CODEX_HOME='/home/researcher/.erebus/userdata/providers/codex' codex login --device-auth",
+    "CODEX_HOME='/home/researcher/.erebus/userdata/providers/codex' codex login",
   );
 });
 
