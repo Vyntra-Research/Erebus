@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11 - 2026-09-01
+
+### Fixed
+
+- Prevented large Codex threads from stalling or exhausting the Erebus backend when the first message resumes an idle session.
+- Kept Codex sessions warm during long workdays while retaining bounded idle cleanup.
+
 ## 0.1.10 - 2026-08-31
 
 ### Changed

@@ -84,6 +84,21 @@ type ServerNotificationHandler = (
   payload: unknown,
 ) => Effect.Effect<void, CodexError.CodexAppServerError>;
 
+/**
+ * A resumed Codex thread includes every historical turn in the response. Large
+ * research threads can make that payload hundreds of megabytes, while the
+ * session-open path only needs the thread identity and active configuration.
+ * Decode only those fields so the historical response can be released as soon
+ * as the session opens.
+ */
+const ThreadResumeResponseSessionMetadata = Schema.Struct({
+  cwd: Schema.String,
+  model: Schema.String,
+  thread: Schema.Struct({
+    id: Schema.String,
+  }),
+});
+
 export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make")(function* (
   stdio: Stdio.Stdio,
   options: CodexAppServerClientOptions = {},
@@ -126,7 +141,10 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         CodexRpc.ClientRequestResponsesByMethod[M],
         CodexRpc.ClientRequestResponsesByMethod[M]
       >
-    | undefined => CodexRpc.CLIENT_REQUEST_RESPONSES[method] as never;
+    | undefined =>
+    (method === "thread/resume"
+      ? ThreadResumeResponseSessionMetadata
+      : CodexRpc.CLIENT_REQUEST_RESPONSES[method]) as never;
 
   const getClientNotificationParamSchema = <M extends CodexRpc.ClientNotificationMethod>(
     method: M,

@@ -103,6 +103,19 @@ const handleMethod = (message: Record<string, unknown>) => {
       });
       return;
     }
+    case "thread/resume": {
+      respond(message.id as number | string, {
+        cwd: process.cwd(),
+        model: "gpt-test",
+        thread: {
+          id: "thread-resumed",
+          // The client intentionally leaves historical turns opaque here. A
+          // malformed unused item proves this path does not deep-decode them.
+          turns: [{ items: [{ type: "futureItem", payload: { value: 1 } }] }],
+        },
+      });
+      return;
+    }
     default: {
       if (message.id !== undefined) {
         respondError(message.id as number | string, -32601, `Unhandled request: ${method}`);
