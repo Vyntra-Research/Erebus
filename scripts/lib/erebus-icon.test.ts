@@ -7,13 +7,13 @@ function alphaAt(image: ReturnType<typeof renderErebusIcon>, x: number, y: numbe
 }
 
 describe("Erebus icon renderer", () => {
-  it("renders a transparent, responsive monolith", () => {
+  it("renders a transparent, responsive ouroboros", () => {
     for (const size of [16, 24, 32, 48, 256, 1024]) {
       const image = renderErebusIcon(size);
       expect(image.width).toBe(size);
       expect(image.height).toBe(size);
       expect(alphaAt(image, 0, 0)).toBe(0);
-      expect(alphaAt(image, Math.floor(size / 2), Math.floor(size / 2))).toBeGreaterThan(0);
+      expect(alphaAt(image, Math.floor(size / 2), Math.floor(size * 0.8))).toBeGreaterThan(0);
     }
   });
 
@@ -26,9 +26,18 @@ describe("Erebus icon renderer", () => {
     expect(alphaAt(square, 127, 127)).toBe(255);
   });
 
+  it("uses the light ouroboros on dark app tiles", () => {
+    const rounded = renderErebusIcon(64, "rounded");
+    const tileOffset = (32 * rounded.width + 32) * 4;
+    const markOffset = (12 * rounded.width + 31) * 4;
+
+    expect(rounded.data[tileOffset]).toBeLessThan(32);
+    expect(rounded.data[markOffset]).toBeGreaterThan(220);
+  });
+
   it("keeps the light glyph transparent", () => {
     const light = renderIceWhiteErebusGlyph(64);
     expect(alphaAt(light, 0, 0)).toBe(0);
-    expect(alphaAt(light, 32, 32)).toBeGreaterThan(0);
+    expect(alphaAt(light, 32, 51)).toBeGreaterThan(0);
   });
 });

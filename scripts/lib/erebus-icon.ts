@@ -7,42 +7,122 @@ interface Point {
   readonly y: number;
 }
 
-interface Face {
-  readonly color: string;
-  readonly points: ReadonlyArray<Point>;
-}
-
 const MASTER_SIZE = 1024;
-const TILE_COLOR = "#f3eee6";
-const TILE_BORDER_COLOR = "#ded5c9";
+const DARK_GLYPH_COLOR = "#161313";
+const LIGHT_GLYPH_COLOR = "#f4f1eb";
+const TILE_COLOR = "#0b0a0a";
+const TILE_BORDER_COLOR = "#292424";
 
-const points = {
-  a: { x: 414, y: 56 },
-  b: { x: 673, y: 121 },
-  c: { x: 848, y: 351 },
-  d: { x: 889, y: 741 },
-  e: { x: 849, y: 872 },
-  f: { x: 660, y: 926 },
-  g: { x: 143, y: 888 },
-  h: { x: 82, y: 714 },
-  i: { x: 219, y: 270 },
-  p: { x: 496, y: 319 },
-  q: { x: 779, y: 423 },
-  r: { x: 674, y: 877 },
-  s: { x: 333, y: 630 },
-} as const satisfies Record<string, Point>;
-
-const faces = [
-  { color: "#573034", points: [points.i, points.a, points.p] },
-  { color: "#1c0e0e", points: [points.a, points.b, points.c, points.q, points.p] },
-  { color: "#3d2022", points: [points.i, points.p, points.s, points.h] },
-  { color: "#29191b", points: [points.p, points.q, points.r, points.s] },
-  { color: "#070304", points: [points.c, points.d, points.e, points.r, points.q] },
-  {
-    color: "#120709",
-    points: [points.h, points.s, points.r, points.e, points.f, points.g],
-  },
-] as const satisfies ReadonlyArray<Face>;
+// Responsive vector traced from the approved Erebus ouroboros artwork. The
+// single open silhouette keeps the inner counter connected to the background,
+// so it remains legible without a fill-rule exception at favicon sizes.
+const ouroborosPoints = [
+  { x: 869, y: 547 },
+  { x: 859, y: 617 },
+  { x: 834, y: 689 },
+  { x: 795, y: 753 },
+  { x: 747, y: 806 },
+  { x: 694, y: 845 },
+  { x: 630, y: 875 },
+  { x: 567, y: 892 },
+  { x: 498, y: 896 },
+  { x: 422, y: 884 },
+  { x: 355, y: 859 },
+  { x: 292, y: 819 },
+  { x: 246, y: 775 },
+  { x: 200, y: 711 },
+  { x: 171, y: 648 },
+  { x: 156, y: 581 },
+  { x: 154, y: 512 },
+  { x: 160, y: 464 },
+  { x: 173, y: 418 },
+  { x: 193, y: 375 },
+  { x: 212, y: 346 },
+  { x: 198, y: 421 },
+  { x: 197, y: 482 },
+  { x: 204, y: 542 },
+  { x: 218, y: 590 },
+  { x: 232, y: 623 },
+  { x: 258, y: 667 },
+  { x: 290, y: 706 },
+  { x: 323, y: 737 },
+  { x: 361, y: 764 },
+  { x: 396, y: 781 },
+  { x: 436, y: 795 },
+  { x: 475, y: 803 },
+  { x: 523, y: 804 },
+  { x: 568, y: 798 },
+  { x: 612, y: 783 },
+  { x: 551, y: 769 },
+  { x: 624, y: 739 },
+  { x: 655, y: 718 },
+  { x: 679, y: 693 },
+  { x: 699, y: 665 },
+  { x: 715, y: 630 },
+  { x: 731, y: 557 },
+  { x: 728, y: 496 },
+  { x: 710, y: 432 },
+  { x: 682, y: 381 },
+  { x: 642, y: 336 },
+  { x: 600, y: 307 },
+  { x: 554, y: 287 },
+  { x: 510, y: 279 },
+  { x: 447, y: 283 },
+  { x: 405, y: 294 },
+  { x: 372, y: 309 },
+  { x: 410, y: 323 },
+  { x: 375, y: 345 },
+  { x: 364, y: 367 },
+  { x: 336, y: 381 },
+  { x: 298, y: 407 },
+  { x: 274, y: 437 },
+  { x: 263, y: 465 },
+  { x: 238, y: 458 },
+  { x: 211, y: 422 },
+  { x: 228, y: 349 },
+  { x: 227, y: 294 },
+  { x: 258, y: 256 },
+  { x: 273, y: 220 },
+  { x: 294, y: 185 },
+  { x: 338, y: 141 },
+  { x: 371, y: 118 },
+  { x: 318, y: 193 },
+  { x: 305, y: 220 },
+  { x: 303, y: 241 },
+  { x: 345, y: 198 },
+  { x: 391, y: 162 },
+  { x: 442, y: 134 },
+  { x: 493, y: 116 },
+  { x: 441, y: 152 },
+  { x: 407, y: 181 },
+  { x: 381, y: 211 },
+  { x: 368, y: 240 },
+  { x: 405, y: 202 },
+  { x: 433, y: 190 },
+  { x: 496, y: 176 },
+  { x: 554, y: 177 },
+  { x: 600, y: 189 },
+  { x: 640, y: 208 },
+  { x: 688, y: 246 },
+  { x: 729, y: 287 },
+  { x: 692, y: 238 },
+  { x: 645, y: 198 },
+  { x: 666, y: 180 },
+  { x: 681, y: 158 },
+  { x: 728, y: 180 },
+  { x: 766, y: 209 },
+  { x: 799, y: 241 },
+  { x: 828, y: 276 },
+  { x: 850, y: 311 },
+  { x: 770, y: 265 },
+  { x: 740, y: 255 },
+  { x: 737, y: 261 },
+  { x: 774, y: 295 },
+  { x: 798, y: 323 },
+  { x: 839, y: 392 },
+  { x: 855, y: 435 },
+  { x: 864, y: 473 },
+] as const satisfies ReadonlyArray<Point>;
 
 function parseHexColor(color: string): readonly [number, number, number, number] {
   if (!/^#[0-9a-f]{6}$/iu.test(color)) {
@@ -176,7 +256,7 @@ export function resizeErebusIcon(source: PNG, width: number, height = width): PN
   return output;
 }
 
-export function renderErebusIcon(size: number, canvas: CanvasStyle = "transparent"): PNG {
+function renderOuroboros(size: number, canvas: CanvasStyle, color: string): PNG {
   if (!Number.isInteger(size) || size < 1) {
     throw new Error(`Erebus icon size must be a positive integer, got ${String(size)}.`);
   }
@@ -191,35 +271,27 @@ export function renderErebusIcon(size: number, canvas: CanvasStyle = "transparen
     fillRoundedTile(raster, rasterScale);
   }
 
-  const glyphScale = canvas === "transparent" ? 1 : 0.72;
-  const verticalOffset = canvas === "transparent" ? 0 : 12;
-  for (const face of faces) {
-    fillPolygon(
-      raster,
-      face.points.map((point) => ({
-        x: (512 + (point.x - 512) * glyphScale) * rasterScale,
-        y: (512 + (point.y - 512) * glyphScale + verticalOffset) * rasterScale,
-      })),
-      face.color,
-    );
-  }
+  const glyphScale = canvas === "transparent" ? 1 : 0.94;
+  fillPolygon(
+    raster,
+    ouroborosPoints.map((point) => ({
+      x: (512 + (point.x - 512) * glyphScale) * rasterScale,
+      y: (512 + (point.y - 512) * glyphScale) * rasterScale,
+    })),
+    color,
+  );
 
   return resizeErebusIcon(raster, size);
 }
 
+export function renderErebusIcon(size: number, canvas: CanvasStyle = "transparent"): PNG {
+  return renderOuroboros(
+    size,
+    canvas,
+    canvas === "transparent" ? DARK_GLYPH_COLOR : LIGHT_GLYPH_COLOR,
+  );
+}
+
 export function renderIceWhiteErebusGlyph(size: number): PNG {
-  const source = renderErebusIcon(size);
-  const output = new PNG({ width: source.width, height: source.height });
-  for (let offset = 0; offset < source.data.length; offset += 4) {
-    const luminance =
-      source.data[offset]! * 0.2126 +
-      source.data[offset + 1]! * 0.7152 +
-      source.data[offset + 2]! * 0.0722;
-    const value = Math.round(218 + (luminance / 255) * 34);
-    output.data[offset] = Math.min(255, value);
-    output.data[offset + 1] = Math.min(255, value + 3);
-    output.data[offset + 2] = Math.min(255, value + 7);
-    output.data[offset + 3] = source.data[offset + 3]!;
-  }
-  return output;
+  return renderOuroboros(size, "transparent", LIGHT_GLYPH_COLOR);
 }

@@ -75,10 +75,10 @@ const program = Effect.gen(function* () {
   const roundedTile = renderErebusIcon(OUTPUT_SIZE, "rounded");
   const squareTile = renderErebusIcon(OUTPUT_SIZE, "square");
   const appleTouchTile = renderErebusIcon(180, "square");
-  const favicon16 = renderErebusIcon(16);
-  const favicon32 = renderErebusIcon(32);
+  const favicon16 = renderErebusIcon(16, "rounded");
+  const favicon32 = renderErebusIcon(32, "rounded");
   const icoRenditions = new Map(
-    WINDOWS_ICON_SIZES.map((size) => [size, renderErebusIcon(size)] as const),
+    WINDOWS_ICON_SIZES.map((size) => [size, renderErebusIcon(size, "rounded")] as const),
   );
 
   assertTransparentCanvas(darkGlyph, "Erebus dark glyph");
@@ -87,7 +87,7 @@ const program = Effect.gen(function* () {
   yield* writePng(path.join(root, "assets", "erebus-glyph-source.png"), darkGlyph);
   yield* writePng(path.join(root, "assets", "erebus-glyph-dark.png"), darkGlyph);
   yield* writePng(path.join(root, "assets", "erebus-glyph-light.png"), lightGlyph);
-  yield* writePng(path.join(root, "assets", "erebus-desktop-1024.png"), darkGlyph);
+  yield* writePng(path.join(root, "assets", "erebus-desktop-1024.png"), roundedTile);
   yield* writePng(path.join(root, "assets", "erebus-icon.png"), roundedTile);
   yield* writePng(path.join(root, "apps", "web", "public", "erebus-glyph-dark.png"), darkGlyph);
   yield* writePng(path.join(root, "apps", "web", "public", "erebus-glyph-light.png"), lightGlyph);
@@ -101,7 +101,7 @@ const program = Effect.gen(function* () {
   for (const variant of variants) {
     yield* writePng(
       path.join(variant.directory, `${variant.prefix}-universal-1024.png`),
-      darkGlyph,
+      roundedTile,
     );
     yield* writePng(
       path.join(variant.directory, `${variant.prefix}-macos-1024.png`),
