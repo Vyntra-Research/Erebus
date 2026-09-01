@@ -157,7 +157,11 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
     const incomingRequests = yield* Queue.unbounded<CodexAppServerIncomingRequest>();
     const pending = yield* Ref.make(new Map<string, CodexAppServerPendingRequest>());
     const nextRequestId = yield* Ref.make(1);
-    const remainder = yield* Ref.make("");
+    // A thread/resume response can be hundreds of megabytes. Keep incomplete
+    // chunks separately and join them once when the newline arrives. Repeatedly
+    // appending to one string makes fragmented responses quadratic and can
+    // block the Erebus server long enough for the desktop client to reconnect.
+    const pendingLineChunks: Array<string> = [];
     const terminationHandled = yield* Ref.make(false);
 
     const logProtocol = (event: CodexAppServerProtocolLogEvent) => {
@@ -351,15 +355,43 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       );
     };
 
+    const takeCompleteLines = (chunk: string): ReadonlyArray<string> => {
+      const lines: Array<string> = [];
+      let segmentStart = 0;
+      let newlineIndex = chunk.indexOf("\n");
+
+      while (newlineIndex !== -1) {
+        const segment = chunk.slice(segmentStart, newlineIndex);
+        let line = segment;
+        if (pendingLineChunks.length > 0) {
+          pendingLineChunks.push(segment);
+          line = pendingLineChunks.join("");
+          pendingLineChunks.length = 0;
+        }
+        lines.push(line.replace(/\r$/, ""));
+        segmentStart = newlineIndex + 1;
+        newlineIndex = chunk.indexOf("\n", segmentStart);
+      }
+
+      if (segmentStart < chunk.length) {
+        pendingLineChunks.push(chunk.slice(segmentStart));
+      }
+
+      return lines;
+    };
+
+    const takeFinalLine = (): string => {
+      const line = pendingLineChunks.join("").replace(/\r$/, "");
+      pendingLineChunks.length = 0;
+      return line;
+    };
+
     yield* options.stdio.stdin.pipe(
       Stream.decodeText(),
       Stream.runForEach((chunk) =>
-        Ref.modify(remainder, (current) => {
-          const combined = current + chunk;
-          const lines = combined.split("\n");
-          const nextRemainder = lines.pop() ?? "";
-          return [lines.map((line) => line.replace(/\r$/, "")), nextRemainder] as const;
-        }).pipe(Effect.flatMap((lines) => Effect.forEach(lines, handleLine, { discard: true }))),
+        Effect.sync(() => takeCompleteLines(chunk)).pipe(
+          Effect.flatMap((lines) => Effect.forEach(lines, handleLine, { discard: true })),
+        ),
       ),
       Effect.matchEffect({
         onFailure: (error) =>
@@ -367,7 +399,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             Effect.succeed(normalizeIncomingError(error, "read-input-stream")),
           ),
         onSuccess: () =>
-          Ref.get(remainder).pipe(
+          Effect.sync(takeFinalLine).pipe(
             Effect.flatMap((line) => (line.trim().length === 0 ? Effect.void : handleLine(line))),
             Effect.matchEffect({
               onFailure: (error) => handleTermination(() => Effect.succeed(error)),
