@@ -364,6 +364,24 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
     }),
   );
 
+  it.effect("reassembles a large response from many input chunks", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({ stdio });
+      const response = yield* transport.request("x/large-response", {}).pipe(Effect.forkScoped);
+      yield* Queue.take(output);
+
+      const value = "x".repeat(5_000_000);
+      const encoded = encoder.encode(`${encodeUnknownJsonString({ id: 1, result: { value } })}\n`);
+      const chunkSize = 4_096;
+      for (let offset = 0; offset < encoded.length; offset += chunkSize) {
+        yield* Queue.offer(input, encoded.slice(offset, offset + chunkSize));
+      }
+
+      assert.deepEqual(yield* Fiber.join(response), { value });
+    }),
+  );
+
   it.effect("logs decode failures without copying the cause or wire payload", () =>
     Effect.gen(function* () {
       const secret = "codex-wire-secret-sentinel";

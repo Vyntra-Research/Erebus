@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12 - 2026-09-01
+
+### Fixed
+
+- Prevented fragmented Codex responses from blocking the Erebus server and briefly disconnecting the desktop interface when large threads resume.
+
 ## 0.1.11 - 2026-09-01
 
 ### Fixed
