@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 - 2026-09-01
+
+### Fixed
+
+- Restrict Observer steering to clear contract violations. The Observer no longer coordinates strategy, stops legitimate tests, kills valid sinks, or orders pivots based on cost or its own tactical preference.
+- Keep checkpoint plans and tentative stop conditions as research context rather than binding authority unless the active contract or user explicitly makes them binding.
+
 ## 0.2.1 - 2026-09-01
 
 ### Fixed
