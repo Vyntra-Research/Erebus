@@ -1135,52 +1135,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
-    case "thread.conversation.fork": {
-      const sourceThread = yield* requireThread({
-        readModel,
-        command,
-        threadId: command.threadId,
-      });
-      yield* requireThreadAbsent({
-        readModel,
-        command,
-        threadId: command.targetThreadId,
-      });
-      const sourceMessage = sourceThread.messages.find(
-        (message) => message.id === command.sourceMessageId,
-      );
-      if (!sourceMessage || sourceMessage.role !== "user") {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `User message '${command.sourceMessageId}' does not exist on thread '${command.threadId}'.`,
-        });
-      }
-      if (
-        sourceThread.session?.status === "starting" ||
-        sourceThread.session?.status === "running"
-      ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `thread ${command.threadId} is active and cannot be forked`,
-        });
-      }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
-        type: "thread.conversation-fork-requested",
-        payload: {
-          threadId: command.threadId,
-          targetThreadId: command.targetThreadId,
-          sourceMessageId: command.sourceMessageId,
-          createdAt: command.createdAt,
-        },
-      };
-    }
-
     case "thread.session.stop": {
       const thread = yield* requireThread({
         readModel,
@@ -1324,34 +1278,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           streaming: false,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
-        },
-      };
-    }
-
-    case "thread.message.import": {
-      yield* requireThread({
-        readModel,
-        command,
-        threadId: command.threadId,
-      });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
-        type: "thread.message-sent",
-        payload: {
-          threadId: command.threadId,
-          messageId: command.messageId,
-          role: command.role,
-          text: command.text,
-          ...(command.attachments !== undefined ? { attachments: command.attachments } : {}),
-          turnId: command.turnId,
-          streaming: false,
-          createdAt: command.createdAt,
-          updatedAt: command.updatedAt,
         },
       };
     }

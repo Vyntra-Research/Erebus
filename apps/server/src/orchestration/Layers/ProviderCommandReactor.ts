@@ -2,7 +2,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
-  MessageId,
+  type MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   ProviderDriverKind,
@@ -62,7 +62,6 @@ type ProviderIntentEvent = Extract<
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
-      | "thread.conversation-fork-requested"
       | "thread.session-stop-requested";
   }
 >;
@@ -1451,165 +1450,6 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const processConversationForkRequested = Effect.fn("processConversationForkRequested")(function* (
-    event: Extract<ProviderIntentEvent, { type: "thread.conversation-fork-requested" }>,
-  ) {
-    const source = yield* resolveThread(event.payload.threadId);
-    if (!source) return;
-    const sourceMessageIndex = source.messages.findIndex(
-      (message) => message.id === event.payload.sourceMessageId && message.role === "user",
-    );
-    if (sourceMessageIndex < 0) return;
-
-    const history = source.messages.slice(0, sourceMessageIndex);
-    // User steering messages can belong to an already-running provider turn.
-    // Count completed assistant turn ids so the native fork boundary cannot
-    // drift past the message the user chose to edit.
-    const throughTurnCount = new Set(
-      history.flatMap((message) =>
-        message.role === "assistant" && message.turnId !== null ? [message.turnId] : [],
-      ),
-    ).size;
-    const project = yield* resolveProject(source.projectId);
-    const cwd =
-      resolveThreadWorkspaceCwd({
-        thread: source,
-        projects: project ? [project] : [],
-      }) ?? process.cwd();
-
-    const forkResult =
-      throughTurnCount === 0
-        ? null
-        : yield* providerService.forkConversation
-            ? providerService.forkConversation({
-                threadId: source.id,
-                throughTurnCount,
-              })
-            : Effect.fail(
-                new ProviderAdapterRequestError({
-                  provider: providerErrorLabel(source.session?.providerName ?? "unknown"),
-                  method: "thread/fork",
-                  detail: "The active provider does not support conversation forks.",
-                }),
-              );
-
-    yield* orchestrationEngine.dispatch({
-      type: "thread.create",
-      commandId: yield* serverCommandId("conversation-fork-create"),
-      threadId: event.payload.targetThreadId,
-      projectId: source.projectId,
-      title: source.title,
-      modelSelection: source.modelSelection,
-      runtimeMode: source.runtimeMode,
-      interactionMode: source.interactionMode,
-      branch: source.branch,
-      worktreePath: source.worktreePath,
-      createdAt: event.payload.createdAt,
-    });
-
-    for (const message of history) {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.message.import",
-        commandId: yield* serverCommandId("conversation-fork-message"),
-        threadId: event.payload.targetThreadId,
-        messageId: MessageId.make(
-          `fork:${event.payload.targetThreadId}:${yield* crypto.randomUUIDv4}`,
-        ),
-        role: message.role,
-        text: message.text,
-        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-        turnId: message.turnId,
-        createdAt: message.createdAt,
-        updatedAt: message.updatedAt,
-      });
-    }
-
-    const existingParentRelation = source.activities
-      .filter((activity) => activity.kind === "conversation.branch.created")
-      .map((activity) => activity.payload)
-      .find(
-        (payload): payload is Record<string, unknown> =>
-          typeof payload === "object" &&
-          payload !== null &&
-          "childThreadId" in payload &&
-          "rootThreadId" in payload &&
-          payload.childThreadId === source.id &&
-          typeof payload.rootThreadId === "string",
-      );
-    const relation = {
-      rootThreadId:
-        existingParentRelation === undefined
-          ? source.id
-          : ThreadId.make(existingParentRelation.rootThreadId as string),
-      parentThreadId: source.id,
-      childThreadId: event.payload.targetThreadId,
-      sourceMessageId: event.payload.sourceMessageId,
-    } as const;
-    for (const targetThreadId of [source.id, event.payload.targetThreadId] as const) {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.activity.append",
-        commandId: yield* serverCommandId("conversation-fork-link"),
-        threadId: targetThreadId,
-        activity: {
-          id: yield* serverEventId(),
-          tone: "info",
-          kind: "conversation.branch.created",
-          summary: "Conversation branch created",
-          payload: relation,
-          turnId: null,
-          createdAt: event.payload.createdAt,
-        },
-        createdAt: event.payload.createdAt,
-      });
-    }
-
-    // Create the local branch before starting its provider session. Dynamic
-    // tools and developer instructions resolve their thread metadata from the
-    // durable projection during provider startup.
-    const targetSession = yield* providerService.startSession(event.payload.targetThreadId, {
-      threadId: event.payload.targetThreadId,
-      projectId: source.projectId,
-      providerInstanceId: source.modelSelection.instanceId,
-      cwd,
-      title: source.title,
-      modelSelection: source.modelSelection,
-      ...(forkResult === null ? {} : { resumeCursor: forkResult.resumeCursor }),
-      runtimeMode: source.runtimeMode,
-    });
-
-    yield* setThreadSession({
-      threadId: event.payload.targetThreadId,
-      session: {
-        threadId: event.payload.targetThreadId,
-        status: mapProviderSessionStatusToOrchestrationStatus(targetSession.status),
-        providerName: targetSession.provider,
-        ...(targetSession.providerInstanceId !== undefined
-          ? { providerInstanceId: targetSession.providerInstanceId }
-          : {}),
-        runtimeMode: targetSession.runtimeMode,
-        activeTurnId: targetSession.activeTurnId ?? null,
-        lastError: targetSession.lastError ?? null,
-        updatedAt: targetSession.updatedAt,
-      },
-      createdAt: event.payload.createdAt,
-    });
-    yield* orchestrationEngine.dispatch({
-      type: "thread.activity.append",
-      commandId: yield* serverCommandId("conversation-fork-ready"),
-      threadId: event.payload.targetThreadId,
-      activity: {
-        id: yield* serverEventId(),
-        tone: "info",
-        kind: "conversation.branch.ready",
-        summary: "Conversation branch ready",
-        payload: relation,
-        turnId: null,
-        createdAt: event.payload.createdAt,
-      },
-      createdAt: event.payload.createdAt,
-    });
-  });
-
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -1649,32 +1489,6 @@ const make = Effect.gen(function* () {
         return;
       case "thread.user-input-response-requested":
         yield* processUserInputResponseRequested(event);
-        return;
-      case "thread.conversation-fork-requested":
-        yield* processConversationForkRequested(event).pipe(
-          Effect.catchCause((cause) =>
-            Effect.gen(function* () {
-              yield* orchestrationEngine.dispatch({
-                type: "thread.activity.append",
-                commandId: yield* serverCommandId("conversation-fork-failed"),
-                threadId: event.payload.threadId,
-                activity: {
-                  id: yield* serverEventId(),
-                  tone: "error",
-                  kind: "conversation.branch.failed",
-                  summary: "Conversation branch failed",
-                  payload: {
-                    targetThreadId: event.payload.targetThreadId,
-                    detail: formatFailureDetail(cause),
-                  },
-                  turnId: null,
-                  createdAt: event.payload.createdAt,
-                },
-                createdAt: event.payload.createdAt,
-              });
-            }),
-          ),
-        );
         return;
       case "thread.session-stop-requested":
         yield* processSessionStopRequested(event);
@@ -1717,7 +1531,6 @@ const make = Effect.gen(function* () {
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
-        event.type === "thread.conversation-fork-requested" ||
         event.type === "thread.session-stop-requested"
       ) {
         return yield* worker.enqueue(event);

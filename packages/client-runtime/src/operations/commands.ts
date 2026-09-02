@@ -50,7 +50,6 @@ export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
-export type ForkThreadConversationInput = CommandInput<"thread.conversation.fork">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
 type DispatchTag = typeof ORCHESTRATION_WS_METHODS.dispatchCommand;
@@ -316,17 +315,6 @@ export const revertThreadCheckpoint: (input: RevertThreadCheckpointInput) => Com
     return yield* dispatch({
       ...input,
       type: "thread.checkpoint.revert",
-      commandId: metadata.commandId,
-      createdAt: metadata.createdAt,
-    });
-  });
-
-export const forkThreadConversation: (input: ForkThreadConversationInput) => CommandEffect =
-  Effect.fn("EnvironmentCommands.forkThreadConversation")(function* (input) {
-    const metadata = yield* timestampedCommandMetadata(input);
-    return yield* dispatch({
-      ...input,
-      type: "thread.conversation.fork",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });

@@ -45,11 +45,6 @@ export interface ProviderThreadSnapshot {
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
 }
 
-export interface ProviderConversationForkResult {
-  readonly resumeCursor: unknown;
-  readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
-}
-
 export interface ProviderAdapterShape<TError> {
   /**
    * Provider kind implemented by this adapter.
@@ -124,15 +119,6 @@ export interface ProviderAdapterShape<TError> {
     threadId: ThreadId,
     numTurns: number,
   ) => Effect.Effect<ProviderThreadSnapshot, TError>;
-
-  /**
-   * Fork provider conversation state through a completed turn count.
-   * This never changes the source conversation or the workspace.
-   */
-  readonly forkThread?: (
-    threadId: ThreadId,
-    throughTurnCount: number,
-  ) => Effect.Effect<ProviderConversationForkResult, TError>;
 
   /**
    * Upload a thread to the provider when the adapter supports feedback.

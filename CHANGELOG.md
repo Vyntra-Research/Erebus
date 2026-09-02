@@ -5,7 +5,7 @@
 ### Fixed
 
 - Show context compaction while it runs and keep a marker at its place in conversation history after it finishes.
-- Remove the checkpoint-backed message edit action because chat branches and workspace restoration are separate operations.
+- Removed message editing because the provider could produce incomplete conversation branches.
 
 ## 0.2.3 - 2026-09-02
 
@@ -13,7 +13,6 @@
 
 - Added co-agent tasks for parallel coverage. A principal task can create blank or forked tasks, inspect progress, send follow-up instructions, wait for results, interrupt work, and release completed slots.
 - Added independent Observer windows for co-agent tasks while keeping campaign control with the principal task.
-- Added message editing and resend from conversation history.
 - Added an option to keep Erebus running in the system tray when its window closes.
 
 ### Changed

@@ -240,13 +240,6 @@ describe("ProviderCommandReactor", () => {
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
-    const forkConversation = vi.fn<NonNullable<ProviderServiceShape["forkConversation"]>>(
-      ({ throughTurnCount }) =>
-        Effect.succeed({
-          resumeCursor: { threadId: `provider-fork-through-${throughTurnCount}` },
-          turns: [],
-        }),
-    );
     const stopSession = vi.fn((stopInput: unknown) =>
       (input?.stopSessionEffect?.() ?? Effect.void).pipe(
         Effect.tap(() =>
@@ -359,7 +352,6 @@ describe("ProviderCommandReactor", () => {
         });
       },
       rollbackConversation: () => unsupported(),
-      forkConversation,
       uploadFeedback: () => unsupported(),
       get streamEvents() {
         return Stream.fromPubSub(runtimeEventPubSub);
@@ -520,7 +512,6 @@ describe("ProviderCommandReactor", () => {
       interruptTurn,
       respondToRequest,
       respondToUserInput,
-      forkConversation,
       stopSession,
       renameBranch,
       pruneWorktrees,
@@ -537,137 +528,6 @@ describe("ProviderCommandReactor", () => {
       },
     };
   }
-
-  it("forks conversation history without reverting the source thread or workspace", async () => {
-    const harness = await createHarness();
-    const sourceThreadId = ThreadId.make("thread-1");
-    const targetThreadId = ThreadId.make("thread-conversation-branch");
-    const messages = [
-      {
-        messageId: asMessageId("fork-user-1"),
-        role: "user" as const,
-        text: "first request",
-        turnId: null,
-        createdAt: "2026-01-01T00:00:01.000Z",
-      },
-      {
-        messageId: asMessageId("fork-assistant-1"),
-        role: "assistant" as const,
-        text: "first response",
-        turnId: asTurnId("fork-turn-1"),
-        createdAt: "2026-01-01T00:00:02.000Z",
-      },
-      {
-        messageId: asMessageId("fork-user-2"),
-        role: "user" as const,
-        text: "message to edit",
-        turnId: null,
-        createdAt: "2026-01-01T00:00:03.000Z",
-      },
-      {
-        messageId: asMessageId("fork-assistant-2"),
-        role: "assistant" as const,
-        text: "response that stays on the original",
-        turnId: asTurnId("fork-turn-2"),
-        createdAt: "2026-01-01T00:00:04.000Z",
-      },
-    ];
-    for (const [index, message] of messages.entries()) {
-      await harness.runEffect(
-        harness.engine.dispatch({
-          type: "thread.message.import",
-          commandId: CommandId.make(`cmd-fork-seed-${index}`),
-          threadId: sourceThreadId,
-          ...message,
-          attachments: [],
-          updatedAt: message.createdAt,
-        }),
-      );
-    }
-
-    await harness.runEffect(
-      harness.engine.dispatch({
-        type: "thread.conversation.fork",
-        commandId: CommandId.make("cmd-conversation-fork"),
-        threadId: sourceThreadId,
-        targetThreadId,
-        sourceMessageId: asMessageId("fork-user-2"),
-        createdAt: "2026-01-01T00:00:05.000Z",
-      }),
-    );
-    await harness.drain();
-
-    expect(harness.forkConversation).toHaveBeenCalledWith({
-      threadId: sourceThreadId,
-      throughTurnCount: 1,
-    });
-    expect(harness.startSession).toHaveBeenCalledWith(
-      targetThreadId,
-      expect.objectContaining({
-        threadId: targetThreadId,
-        resumeCursor: { threadId: "provider-fork-through-1" },
-      }),
-    );
-    const readModel = await harness.readModel();
-    const source = readModel.threads.find((thread) => thread.id === sourceThreadId);
-    const target = readModel.threads.find((thread) => thread.id === targetThreadId);
-    expect(source?.messages.map((message) => message.text)).toEqual(messages.map((m) => m.text));
-    expect(target?.messages.map((message) => message.text)).toEqual([
-      "first request",
-      "first response",
-    ]);
-    expect(source?.activities).toEqual(
-      expect.arrayContaining([expect.objectContaining({ kind: "conversation.branch.created" })]),
-    );
-    expect(target?.activities).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: "conversation.branch.created" }),
-        expect.objectContaining({ kind: "conversation.branch.ready" }),
-      ]),
-    );
-  });
-
-  it("starts a clean provider branch when editing the first user message", async () => {
-    const harness = await createHarness();
-    const sourceThreadId = ThreadId.make("thread-1");
-    const targetThreadId = ThreadId.make("thread-first-message-branch");
-    await harness.runEffect(
-      harness.engine.dispatch({
-        type: "thread.message.import",
-        commandId: CommandId.make("cmd-first-message-seed"),
-        threadId: sourceThreadId,
-        messageId: asMessageId("first-user-message"),
-        role: "user",
-        text: "edit this first message",
-        attachments: [],
-        turnId: null,
-        createdAt: "2026-01-01T00:00:01.000Z",
-        updatedAt: "2026-01-01T00:00:01.000Z",
-      }),
-    );
-
-    await harness.runEffect(
-      harness.engine.dispatch({
-        type: "thread.conversation.fork",
-        commandId: CommandId.make("cmd-first-message-fork"),
-        threadId: sourceThreadId,
-        targetThreadId,
-        sourceMessageId: asMessageId("first-user-message"),
-        createdAt: "2026-01-01T00:00:02.000Z",
-      }),
-    );
-    await harness.drain();
-
-    expect(harness.forkConversation).not.toHaveBeenCalled();
-    expect(harness.startSession).toHaveBeenCalledWith(
-      targetThreadId,
-      expect.not.objectContaining({ resumeCursor: expect.anything() }),
-    );
-    const target = (await harness.readModel()).threads.find(
-      (thread) => thread.id === targetThreadId,
-    );
-    expect(target?.messages).toEqual([]);
-  });
 
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();

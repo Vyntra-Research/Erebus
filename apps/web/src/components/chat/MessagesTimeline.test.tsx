@@ -186,7 +186,6 @@ function buildProps() {
     onOpenTurnDiff: () => {},
     revertTurnCountByUserMessageId: new Map(),
     onRevertUserMessage: () => {},
-    onEditUserMessage: () => {},
     isRevertingCheckpoint: false,
     onImageExpand: () => {},
     activeThreadEnvironmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
@@ -881,7 +880,6 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain('aria-label="Copy link"');
-    expect(markup).toContain('aria-label="Edit message in a new conversation branch"');
     expect(markup).toContain('data-user-message-collapsed="true"');
     expect(markup).toContain('data-user-message-footer="true"');
   });
