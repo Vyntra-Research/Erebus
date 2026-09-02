@@ -2,6 +2,7 @@ import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3
 import { describe, expect, it } from "vite-plus/test";
 import {
   applyProviderInstanceSettings,
+  collapseCodexAccountEntries,
   deriveProviderEntriesByEnvironment,
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
@@ -68,6 +69,25 @@ describe("isProviderInstancePickerReady", () => {
     ]);
 
     expect(entry && isProviderInstancePickerReady(entry)).toBe(true);
+  });
+});
+
+describe("collapseCodexAccountEntries", () => {
+  it("shows one logical Codex entry backed by the configured primary account", () => {
+    const entries = deriveProviderInstanceEntries([
+      provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
+      provider({
+        provider: ProviderDriverKind.make("codex"),
+        instanceId: "codex_account",
+        accentColor: "#4455ff",
+      }),
+      provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "claudeAgent" }),
+    ]);
+
+    const collapsed = collapseCodexAccountEntries(entries, "codex_account");
+    expect(collapsed.map((entry) => entry.instanceId)).toEqual(["codex_account", "claudeAgent"]);
+    expect(collapsed[0]?.displayName).toBe("Codex");
+    expect(collapsed[0]?.accentColor).toBeUndefined();
   });
 });
 

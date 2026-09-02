@@ -1,6 +1,30 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveWizardNavigation } from "./AddProviderInstanceDialog.logic";
+import {
+  deriveAvailableProviderInstanceId,
+  resolveWizardNavigation,
+} from "./AddProviderInstanceDialog.logic";
+
+describe("deriveAvailableProviderInstanceId", () => {
+  it("derives a stable account id from the label", () => {
+    expect(deriveAvailableProviderInstanceId("codex", "Work Account", new Set(["codex"]))).toBe(
+      "codex_work_account",
+    );
+  });
+
+  it("generates and increments an id when the label is empty or duplicated", () => {
+    expect(deriveAvailableProviderInstanceId("codex", "", new Set(["codex"]))).toBe(
+      "codex_account",
+    );
+    expect(
+      deriveAvailableProviderInstanceId(
+        "codex",
+        "Work",
+        new Set(["codex", "codex_work", "codex_work_2"]),
+      ),
+    ).toBe("codex_work_3");
+  });
+});
 
 describe("resolveWizardNavigation", () => {
   const invalidId = { instanceIdError: "Instance ID is required." };

@@ -73,6 +73,26 @@ describe("ServerProvider", () => {
     expect(parsed.versionAdvisory?.canUpdate).toBe(false);
   });
 
+  it("decodes account quota snapshots", () => {
+    const parsed = decodeServerProvider({
+      ...baseProviderSnapshot,
+      accountUsage: {
+        remainingPercent: 4,
+        primary: {
+          usedPercent: 96,
+          remainingPercent: 4,
+          resetsAt: 1_788_000_000,
+          windowDurationMins: 300,
+        },
+        secondary: null,
+        reached: false,
+      },
+    });
+
+    expect(parsed.accountUsage?.remainingPercent).toBe(4);
+    expect(parsed.accountUsage?.primary?.usedPercent).toBe(96);
+  });
+
   it("decodes continuation group metadata", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex_personal",

@@ -1,5 +1,5 @@
 import {
-  type CodexDeviceLoginEvent,
+  type CodexLoginEvent,
   type EnvironmentId,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -70,7 +70,7 @@ export interface ServerUpdateTarget {
 export interface CodexDeviceLoginTarget {
   readonly environmentId: EnvironmentId;
   readonly input: EnvironmentRpcInput<typeof WS_METHODS.serverLoginCodex>;
-  readonly onProgress?: (event: CodexDeviceLoginEvent) => void;
+  readonly onProgress?: (event: CodexLoginEvent) => void;
 }
 
 const IDLE_SERVER_UPDATE_STATE: ServerUpdateState = { status: "idle" };

@@ -90,7 +90,7 @@ import {
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
-import { loginCodexWithDeviceCode } from "./provider/CodexDeviceLogin.ts";
+import { loginCodexWithChatGpt } from "./provider/CodexDeviceLogin.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -1593,11 +1593,9 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverLoginCodex]: (input) =>
-          observeRpcStream(
-            WS_METHODS.serverLoginCodex,
-            loginCodexWithDeviceCode(input.instanceId),
-            { "rpc.aggregate": "server" },
-          ),
+          observeRpcStream(WS_METHODS.serverLoginCodex, loginCodexWithChatGpt(input.instanceId), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.providerUploadFeedback]: (input) =>
           observeRpcEffect(
             WS_METHODS.providerUploadFeedback,

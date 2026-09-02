@@ -293,6 +293,43 @@ describe("ServerSettings worktree defaults", () => {
   });
 });
 
+describe("ServerSettings Codex account routing", () => {
+  it("uses primary-first routing defaults for legacy settings", () => {
+    expect(decodeServerSettings({}).codexAccountRouting).toEqual({
+      enabled: true,
+      primaryInstanceId: null,
+      primarySwitchRemainingPercent: 5,
+      fallbackReserveRemainingPercent: 1,
+    });
+  });
+
+  it("accepts a primary account and bounded quota thresholds", () => {
+    expect(
+      decodeServerSettingsPatch({
+        codexAccountRouting: {
+          enabled: true,
+          primaryInstanceId: "codex_work",
+          primarySwitchRemainingPercent: 8,
+          fallbackReserveRemainingPercent: 2,
+        },
+      }).codexAccountRouting,
+    ).toEqual({
+      enabled: true,
+      primaryInstanceId: "codex_work",
+      primarySwitchRemainingPercent: 8,
+      fallbackReserveRemainingPercent: 2,
+    });
+  });
+
+  it.each([-1, 101, 4.5])("rejects an invalid Codex quota threshold: %s", (value) => {
+    expect(() =>
+      decodeServerSettingsPatch({
+        codexAccountRouting: { primarySwitchRemainingPercent: value },
+      }),
+    ).toThrow();
+  });
+});
+
 describe("ServerSettings research supervision", () => {
   it("provides conservative Observer and Judge defaults for legacy settings", () => {
     expect(decodeServerSettings({}).researchSupervision).toEqual({

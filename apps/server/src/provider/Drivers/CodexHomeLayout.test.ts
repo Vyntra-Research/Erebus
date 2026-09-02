@@ -12,7 +12,9 @@ import {
   CodexShadowHomePathConflictError,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
+  withAutomaticCodexAccountOverlay,
 } from "./CodexHomeLayout.ts";
+import { ProviderInstanceId } from "@t3tools/contracts";
 const decodeCodexSettingsValue = Schema.decodeSync(CodexSettings);
 
 const decodeCodexSettings = (input: {
@@ -40,6 +42,26 @@ const writeTextFile = Effect.fn("CodexHomeLayout.test.writeTextFile")(function* 
 
 it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
   describe("resolveCodexHomeLayout", () => {
+    it("adds an auth overlay only to additional Codex accounts", () => {
+      const config = decodeCodexSettings({});
+      const defaultInstanceId = ProviderInstanceId.make("codex");
+
+      expect(
+        withAutomaticCodexAccountOverlay(config, {
+          instanceId: defaultInstanceId,
+          defaultInstanceId,
+          accountHomePath: "C:\\state\\accounts\\codex",
+        }).shadowHomePath,
+      ).toBe("");
+      expect(
+        withAutomaticCodexAccountOverlay(config, {
+          instanceId: ProviderInstanceId.make("codex_secondary"),
+          defaultInstanceId,
+          accountHomePath: "C:\\state\\accounts\\codex_secondary",
+        }).shadowHomePath,
+      ).toBe("C:\\state\\accounts\\codex_secondary");
+    });
+
     it.effect("uses direct CODEX_HOME when no shadow home is configured", () =>
       Effect.gen(function* () {
         const homePath = yield* makeTempDir("t3code-codex-home-");
@@ -120,9 +142,9 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
         yield* writeTextFile(path.join(sharedHome, "auth.json"), '{"shared":true}\n');
         yield* fileSystem.makeDirectory(shadowHome, { recursive: true });
         yield* writeTextFile(path.join(shadowHome, "auth.json"), '{"shadow":true}\n');
-        yield* fileSystem.symlink(
-          path.join(sharedHome, "models_cache.json"),
+        yield* writeTextFile(
           path.join(shadowHome, "models_cache.json"),
+          '{"models":["private"]}\n',
         );
 
         const layout = yield* resolveCodexHomeLayout(
@@ -135,7 +157,13 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
         yield* materializeCodexShadowHome(layout);
 
         const sessionsTarget = yield* fileSystem.readLink(path.join(shadowHome, "sessions"));
-        const configTarget = yield* fileSystem.readLink(path.join(shadowHome, "config.toml"));
+        yield* fileSystem.writeFileString(
+          path.join(sharedHome, "config.toml"),
+          'model = "gpt-5.6"\n',
+        );
+        const sharedConfigContents = yield* fileSystem.readFileString(
+          path.join(shadowHome, "config.toml"),
+        );
         const mcpOauthLocksTarget = yield* fileSystem.readLink(
           path.join(shadowHome, "mcp-oauth-locks"),
         );
@@ -148,9 +176,9 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
         const authContents = yield* fileSystem.readFileString(path.join(shadowHome, "auth.json"));
 
         expect(sessionsTarget).toBe(path.join(sharedHome, "sessions"));
-        expect(configTarget).toBe(path.join(sharedHome, "config.toml"));
+        expect(sharedConfigContents).toContain("gpt-5.6");
         expect(mcpOauthLocksTarget).toBe(path.join(sharedHome, "mcp-oauth-locks"));
-        expect(modelsCacheExists).toBe(false);
+        expect(modelsCacheExists).toBe(true);
         expect(authLinkResult._tag).toBe("Failure");
         expect(authContents).toContain("shadow");
       }),
@@ -188,7 +216,32 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
       }),
     );
 
-    it.effect("accepts Codex-created shadow-local runtime directories", () =>
+    it.effect("repairs shared files atomically replaced by Codex in an established overlay", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+        const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+        const shadowHome = path.join(shadowRoot, "shadow");
+        const sharedMigration = path.join(sharedHome, ".sandbox_migration");
+        const shadowMigration = path.join(shadowHome, ".sandbox_migration");
+        yield* writeTextFile(sharedMigration, "shared\n");
+        yield* writeTextFile(path.join(shadowHome, "auth.json"), '{"account":true}\n');
+
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+        yield* materializeCodexShadowHome(layout);
+        yield* fileSystem.remove(shadowMigration);
+        yield* writeTextFile(shadowMigration, "detached\n");
+
+        yield* materializeCodexShadowHome(layout);
+
+        expect(yield* fileSystem.readFileString(shadowMigration)).toBe("shared\n");
+      }),
+    );
+
+    it.effect("keeps only transient runtime directories local to the account overlay", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -202,7 +255,6 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
         yield* writeTextFile(path.join(sharedHome, "config.toml"), 'model = "gpt-5-codex"\n');
         yield* writeTextFile(path.join(shadowHome, "auth.json"), '{"shadow":true}\n');
         yield* fileSystem.makeDirectory(path.join(shadowHome, "log"), { recursive: true });
-        yield* fileSystem.makeDirectory(path.join(shadowHome, "memories"), { recursive: true });
         yield* fileSystem.makeDirectory(path.join(shadowHome, "tmp"), { recursive: true });
 
         const layout = yield* resolveCodexHomeLayout(
@@ -214,7 +266,13 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
 
         yield* materializeCodexShadowHome(layout);
 
-        const configTarget = yield* fileSystem.readLink(path.join(shadowHome, "config.toml"));
+        yield* fileSystem.writeFileString(
+          path.join(sharedHome, "config.toml"),
+          'model = "gpt-5.6"\n',
+        );
+        const sharedConfigContents = yield* fileSystem.readFileString(
+          path.join(shadowHome, "config.toml"),
+        );
         const logLinkResult = yield* fileSystem
           .readLink(path.join(shadowHome, "log"))
           .pipe(Effect.result);
@@ -225,9 +283,9 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
           .readLink(path.join(shadowHome, "tmp"))
           .pipe(Effect.result);
 
-        expect(configTarget).toBe(path.join(sharedHome, "config.toml"));
+        expect(sharedConfigContents).toContain("gpt-5.6");
         expect(logLinkResult._tag).toBe("Failure");
-        expect(memoriesLinkResult._tag).toBe("Failure");
+        expect(memoriesLinkResult._tag).toBe("Success");
         expect(tmpLinkResult._tag).toBe("Failure");
       }),
     );

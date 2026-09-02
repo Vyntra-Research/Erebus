@@ -10,6 +10,7 @@ import {
 import { emptyResearchProjection, type ResearchProjection } from "./researchState.ts";
 import {
   buildObserverCampaignSnapshot,
+  buildObserverTimeline,
   hydratePrincipalMessageTexts,
   isCompletedAssistantMessage,
   pendingJudgeFindings,
@@ -113,6 +114,46 @@ it("hydrates persisted empty observer messages after restart", () => {
     { id: "message-1", text: "Recovered", turnId: "turn-1" },
     { id: "message-2", text: "Persisted", turnId: "turn-1" },
   ]);
+});
+
+it("gives Observer the latest prompt and steers in chronological context", () => {
+  const messages = [
+    { id: "prompt-old", role: "user", text: "Old prompt", turnId: null },
+    { id: "steer-old", role: "user", text: "Old steer", turnId: "turn-0" },
+    { id: "before", role: "assistant", text: "Before window", turnId: "turn-0" },
+    { id: "prompt-latest", role: "user", text: "Current objective", turnId: null },
+    { id: "steer-prior", role: "user", text: "Preserve this route", turnId: "turn-1" },
+    { id: "a1", role: "assistant", text: "One", turnId: "turn-1" },
+    { id: "a2", role: "assistant", text: "Two", turnId: "turn-1" },
+    { id: "steer-live", role: "user", text: "User correction", turnId: "turn-2" },
+    {
+      id: "erebus:observer:1",
+      role: "user",
+      text: "<erebus_steering>internal</erebus_steering>",
+      turnId: "turn-2",
+    },
+    { id: "a3", role: "assistant", text: "Three", turnId: "turn-2" },
+  ];
+  const timeline = buildObserverTimeline(
+    [
+      { id: "a1", text: "One" },
+      { id: "a2", text: "Two" },
+      { id: "a3", text: "Three" },
+    ],
+    messages,
+  );
+
+  assert.deepStrictEqual(
+    timeline.map(({ id, source }) => ({ id, source })),
+    [
+      { id: "prompt-latest", source: "userPrompt" },
+      { id: "steer-prior", source: "userSteer" },
+      { id: "a1", source: "principalAssistant" },
+      { id: "a2", source: "principalAssistant" },
+      { id: "steer-live", source: "userSteer" },
+      { id: "a3", source: "principalAssistant" },
+    ],
+  );
 });
 
 it("schedules exact five-message observer windows, including after restart", () => {

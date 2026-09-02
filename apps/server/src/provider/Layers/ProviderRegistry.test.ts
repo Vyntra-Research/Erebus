@@ -433,7 +433,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "unauthenticated");
           assert.strictEqual(
             status.message,
-            "Codex is not authenticated in the Erebus profile. Use Sign in to Codex below. If device login is disabled, enable device code authorization in ChatGPT Security settings first. CLI fallback: `codex login --device-auth`.",
+            "Codex is not authenticated in the Erebus profile. Use Sign in to Codex below. CLI fallback: `codex login`.",
           );
         }),
       );

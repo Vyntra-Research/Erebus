@@ -8,10 +8,10 @@
  *   - `textGeneration` — commit/PR/branch/title generation via `codex exec`.
  *
  * Each call to `create()` captures the `codexConfig` argument in closures
- * owned by the returned instance. Two instances created with different
- * `homePath`s (e.g. `codex_personal` + `codex_work`) therefore run with
- * fully independent Codex app-server processes and `CODEX_HOME`
- * environments — no shared mutable state.
+ * owned by the returned instance. Extra Codex instances receive an automatic
+ * auth overlay: app-server processes and credentials stay separate while the
+ * canonical Codex home keeps sessions, configuration, skills, and plugins
+ * shared.
  *
  * Resource lifecycle: `create()` runs in a scope handed in by the registry.
  * Closing that scope releases the adapter's child processes, the managed
@@ -21,7 +21,12 @@
  *
  * @module provider/Drivers/CodexDriver
  */
-import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import {
+  CodexSettings,
+  defaultInstanceIdForDriver,
+  ProviderDriverKind,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -58,6 +63,7 @@ import {
   codexContinuationIdentity,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
+  withAutomaticCodexAccountOverlay,
 } from "./CodexHomeLayout.ts";
 import { reconcileCodexRolloutPaths } from "./CodexRolloutPathRepair.ts";
 import { installManagedProteusForCodex } from "../../proteusRuntime.ts";
@@ -129,7 +135,19 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const modelManifest = yield* ModelManifest.ModelManifest;
       const researchToolController = yield* ResearchToolController;
       const processEnv = mergeProviderInstanceEnvironment(environment);
-      const homeLayout = yield* resolveCodexHomeLayout(config, {
+      const defaultInstanceId = defaultInstanceIdForDriver(DRIVER_KIND);
+      const accountConfig = withAutomaticCodexAccountOverlay(config, {
+        instanceId,
+        defaultInstanceId,
+        accountHomePath: path.join(
+          serverConfig.stateDir,
+          "providers",
+          "codex",
+          "accounts",
+          instanceId,
+        ),
+      });
+      const homeLayout = yield* resolveCodexHomeLayout(accountConfig, {
         defaultHomePath: path.join(serverConfig.stateDir, "providers", "codex"),
       });
       const continuationIdentity = codexContinuationIdentity(homeLayout);
@@ -140,6 +158,22 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       if (enabled) {
+        // Proteus is shared by every account. Install it before materializing
+        // the overlay so config.toml and managed plugin entries already exist
+        // in the shared home and are linked into the account home.
+        yield* installManagedProteusForCodex(homeLayout.sharedHomePath, {
+          managedRuntimeRoot: path.join(serverConfig.stateDir, "managed", "proteus-runtime"),
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: cause.detail,
+                cause,
+              }),
+          ),
+        );
         yield* materializeCodexShadowHome(homeLayout).pipe(
           Effect.mapError(
             (cause) =>
@@ -163,23 +197,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
           ),
         );
       }
-      if (enabled && homeLayout.effectiveHomePath) {
-        yield* installManagedProteusForCodex(homeLayout.effectiveHomePath, {
-          managedRuntimeRoot: path.join(serverConfig.stateDir, "managed", "proteus-runtime"),
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ProviderDriverError({
-                driver: DRIVER_KIND,
-                instanceId,
-                detail: cause.detail,
-                cause,
-              }),
-          ),
-        );
-      }
       const effectiveConfig = {
-        ...config,
+        ...accountConfig,
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;

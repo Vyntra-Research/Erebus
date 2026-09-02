@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0 - 2026-09-01
+
+### Added
+
+- Added multiple Codex accounts with separate authentication and shared sessions, configuration, skills, plugins, MCP servers, and memories.
+- Added quota-aware account routing with a configurable primary account, switch threshold, fallback reserve, and turn-boundary handoff.
+- Added a sidebar account menu with quota bars for every Codex account and quick links to provider settings and usage.
+
+### Changed
+
+- Replaced device-code-only authentication with the standard Codex browser sign-in flow.
+- Present the Codex account pool as one logical provider in the model selector; manual account choice now lives in provider settings.
+- Give the Observer the latest user prompt and relevant user steers in chronological order so it can check whether the principal follows current instructions.
+
+### Fixed
+
+- Made Codex account overlays recover safely when Codex atomically replaces shared runtime files during login or startup.
+- Kept account switching global and atomic so active turns wait for routing to finish instead of mixing account state.
+
 ## 0.1.12 - 2026-09-01
 
 ### Fixed

@@ -1,15 +1,17 @@
 import {
-  ArrowLeftIcon,
+  ChevronUpIcon,
   ChartNoAxesColumnIcon,
   GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
-import { memo, useCallback } from "react";
-import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
+import { memo, useCallback, useMemo } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useAtomValue } from "@effect/atom-react";
 
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
+import { primaryServerProvidersAtom, primaryServerSettingsAtom } from "../../state/server";
+import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { APP_BASE_NAME } from "../../branding";
 import {
   SidebarFooter,
@@ -20,7 +22,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
@@ -54,46 +56,25 @@ function SidebarBrand() {
   );
 }
 
-function SidebarUtilityItem({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <SidebarMenuItem className="shrink-0">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
-              {icon}
-            </SidebarMenuButton>
-          }
-        />
-        <TooltipPopup side="top">{label}</TooltipPopup>
-      </Tooltip>
-    </SidebarMenuItem>
-  );
-}
-
-export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
+export const SidebarAccountMenu = memo(function SidebarAccountMenu() {
   const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
-  const currentFooterPage = useLocation({
-    select: (location) =>
-      /^\/settings(?:\/|$)/.test(location.pathname)
-        ? "settings"
-        : location.pathname === "/usage"
-          ? "usage"
-          : location.pathname === "/pull-requests"
-            ? "pull-requests"
-            : null,
-  });
+  const providers = useAtomValue(primaryServerProvidersAtom);
+  const settings = useAtomValue(primaryServerSettingsAtom);
   const { environments } = useEnvironments();
+  const codexAccounts = useMemo(
+    () =>
+      deriveProviderInstanceEntries(providers)
+        .filter((entry) => entry.driverKind === "codex")
+        .map((entry) => ({
+          ...entry,
+          isPrimary: entry.instanceId === settings.codexAccountRouting.primaryInstanceId,
+          remainingPercent: entry.snapshot.accountUsage?.remainingPercent ?? null,
+        }))
+        .toSorted((a, b) => Number(b.isPrimary) - Number(a.isPrimary)),
+    [providers, settings.codexAccountRouting.primaryInstanceId],
+  );
+  const primaryAccount = codexAccounts.find((account) => account.isPrimary) ?? codexAccounts[0];
   // The page reads every connected server, so one of them offering pull requests is enough for
   // the link to lead somewhere.
   const pullRequestsSupported = environments.some(
@@ -110,7 +91,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [closeMobileSidebar, navigate]);
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
-    void navigate({ to: "/settings" });
+    void navigate({ to: "/settings/providers" });
   }, [closeMobileSidebar, navigate]);
 
   const handleUsageClick = useCallback(() => {
@@ -120,45 +101,96 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
 
-  const handleBackClick = useCallback(() => {
-    closeMobileSidebar();
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, closeMobileSidebar, navigate]);
-
   return (
-    <SidebarMenu className="flex-row items-center">
-      {currentFooterPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton onClick={handleBackClick}>
-            <ArrowLeftIcon />
-            <span>Back</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ) : (
-        <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <Popover>
+          <PopoverTrigger
+            render={
+              <SidebarMenuButton className="bg-sidebar-row-hover text-sidebar-foreground">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-semibold">
+                  {primaryAccount?.displayName.charAt(0).toUpperCase() ?? "C"}
+                </span>
+                <span className="min-w-0 flex-1 truncate">
+                  {primaryAccount?.displayName ?? "Codex accounts"}
+                </span>
+                {codexAccounts.length > 1 ? (
+                  <span className="text-[10px] tabular-nums text-muted-foreground">
+                    {codexAccounts.length}
+                  </span>
+                ) : null}
+                <ChevronUpIcon className="size-3.5 text-muted-foreground" />
+              </SidebarMenuButton>
+            }
           />
-          {pullRequestsSupported ? (
-            <SidebarUtilityItem
-              icon={<GitPullRequestIcon />}
-              label="Pull Requests"
-              onClick={handlePullRequestsClick}
-            />
-          ) : null}
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-          />
-        </>
-      )}
+          <PopoverPopup align="start" className="w-72" side="top" sideOffset={6}>
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-semibold">Codex accounts</p>
+                <p className="text-xs text-muted-foreground">The primary account is used first.</p>
+              </div>
+              <div className="space-y-3">
+                {codexAccounts.map((account) => {
+                  const remaining = account.remainingPercent;
+                  return (
+                    <div className="space-y-1.5" key={account.instanceId}>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span
+                          className="size-2 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: account.accentColor ?? "var(--muted-foreground)",
+                          }}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{account.displayName}</span>
+                        {account.isPrimary ? (
+                          <span className="text-muted-foreground">Primary</span>
+                        ) : null}
+                        <span className="tabular-nums text-muted-foreground">
+                          {remaining === null ? "—" : `${Math.round(remaining)}%`}
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-foreground/75 transition-[width]"
+                          style={{ width: `${Math.max(0, Math.min(100, remaining ?? 0))}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                {codexAccounts.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No Codex account is configured.</p>
+                ) : null}
+              </div>
+              <div className="border-t border-border pt-2">
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                  onClick={handleSettingsClick}
+                  type="button"
+                >
+                  <SettingsIcon className="size-4" /> Provider settings
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                  onClick={handleUsageClick}
+                  type="button"
+                >
+                  <ChartNoAxesColumnIcon className="size-4" /> Usage
+                </button>
+                {pullRequestsSupported ? (
+                  <button
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                    onClick={handlePullRequestsClick}
+                    type="button"
+                  >
+                    <GitPullRequestIcon className="size-4" /> Pull requests
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </PopoverPopup>
+        </Popover>
+      </SidebarMenuItem>
       <SidebarUpdatePill />
     </SidebarMenu>
   );
@@ -169,7 +201,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarUtilityMenu />
+      <SidebarAccountMenu />
     </SidebarFooter>
   );
 });

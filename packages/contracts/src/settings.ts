@@ -374,6 +374,37 @@ export const CodexSettings = makeProviderSettingsSchema(
 );
 export type CodexSettings = typeof CodexSettings.Type;
 
+export const MIN_CODEX_ACCOUNT_SWITCH_PERCENT = 0;
+export const MAX_CODEX_ACCOUNT_SWITCH_PERCENT = 100;
+export const CodexAccountSwitchPercent = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_CODEX_ACCOUNT_SWITCH_PERCENT,
+    maximum: MAX_CODEX_ACCOUNT_SWITCH_PERCENT,
+  }),
+);
+export type CodexAccountSwitchPercent = typeof CodexAccountSwitchPercent.Type;
+
+export const DEFAULT_CODEX_PRIMARY_SWITCH_PERCENT: CodexAccountSwitchPercent = 5;
+export const DEFAULT_CODEX_FALLBACK_RESERVE_PERCENT: CodexAccountSwitchPercent = 1;
+
+/**
+ * Global routing policy for Codex account instances. The first configured
+ * Codex instance remains the primary when `primaryInstanceId` is null.
+ */
+export const CodexAccountRoutingSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  primaryInstanceId: Schema.NullOr(ProviderInstanceId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  primarySwitchRemainingPercent: CodexAccountSwitchPercent.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CODEX_PRIMARY_SWITCH_PERCENT)),
+  ),
+  fallbackReserveRemainingPercent: CodexAccountSwitchPercent.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CODEX_FALLBACK_RESERVE_PERCENT)),
+  ),
+});
+export type CodexAccountRoutingSettings = typeof CodexAccountRoutingSettings.Type;
+
 // Empty, or an integer from 100,000 to 1,000,000. Shared by the full
 // Claude settings schema and its patch so an out-of-range value fails at
 // the update that introduced it.
@@ -778,6 +809,9 @@ export const ServerSettings = Schema.Struct({
   providerInstances: Schema.Record(ProviderInstanceId, ProviderInstanceConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  codexAccountRouting: CodexAccountRoutingSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
@@ -982,6 +1016,14 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // The web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
+  codexAccountRouting: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      primaryInstanceId: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
+      primarySwitchRemainingPercent: Schema.optionalKey(CodexAccountSwitchPercent),
+      fallbackReserveRemainingPercent: Schema.optionalKey(CodexAccountSwitchPercent),
+    }),
+  ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
