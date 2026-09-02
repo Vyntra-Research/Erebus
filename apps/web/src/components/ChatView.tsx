@@ -2721,24 +2721,10 @@ function ChatViewContent(props: ChatViewProps) {
   }, [turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
     const byUserMessageId = new Map<MessageId, number>();
-    const checkpointTurnCountByTurnId = new Map(
-      turnDiffSummaries.map((summary) => [
-        summary.turnId,
-        summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId],
-      ]),
-    );
     for (let index = 0; index < timelineEntries.length; index += 1) {
       const entry = timelineEntries[index];
       if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
         continue;
-      }
-
-      if (entry.message.turnId) {
-        const directTurnCount = checkpointTurnCountByTurnId.get(entry.message.turnId);
-        if (typeof directTurnCount === "number") {
-          byUserMessageId.set(entry.message.id, Math.max(0, directTurnCount - 1));
-          continue;
-        }
       }
 
       for (let nextIndex = index + 1; nextIndex < timelineEntries.length; nextIndex += 1) {
@@ -2764,12 +2750,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     return byUserMessageId;
-  }, [
-    inferredCheckpointTurnCountByTurnId,
-    timelineEntries,
-    turnDiffSummaries,
-    turnDiffSummaryByAssistantMessageId,
-  ]);
+  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
 
   const gitCwd = activeProject
     ? projectScriptCwd({
@@ -6686,39 +6667,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
-  const onEditUserMessage = useCallback(
-    async (messageId: MessageId, text: string) => {
-      const targetTurnCount = revertTurnCountRef.current.get(messageId);
-      if (typeof targetTurnCount !== "number") {
-        return;
-      }
-      const reverted = await revertToTurnCount(targetTurnCount, [
-        "Edit and resend this message?",
-        "Newer messages, turn diffs, and the current unsent draft will be replaced.",
-        "The selected text will return to the composer before anything is sent.",
-      ]);
-      if (!reverted) {
-        return;
-      }
-      clearComposerDraftContent(composerDraftTarget);
-      promptRef.current = text;
-      setComposerDraftPrompt(composerDraftTarget, text);
-      composerRef.current?.resetCursorState({
-        cursor: collapseExpandedComposerCursor(text, text.length),
-        prompt: text,
-        detectTrigger: true,
-      });
-      scheduleComposerFocus();
-    },
-    [
-      clearComposerDraftContent,
-      composerDraftTarget,
-      revertToTurnCount,
-      scheduleComposerFocus,
-      setComposerDraftPrompt,
-    ],
-  );
-
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -6986,7 +6934,6 @@ function ChatViewContent(props: ChatViewProps) {
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-                onEditUserMessage={onEditUserMessage}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}

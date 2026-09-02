@@ -884,21 +884,6 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
-  it("offers edit-and-resend only when the user message has a revert checkpoint", () => {
-    const entry = buildUserTimelineEntry("Please revise this request.");
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[entry]}
-        revertTurnCountByUserMessageId={new Map([[entry.message.id, 0]])}
-        onEditUserMessage={() => {}}
-      />,
-    );
-
-    expect(markup).toContain('aria-label="Edit and resend this message"');
-    expect(markup).toContain("Edit and resend");
-  });
-
   it("renders a completed context compaction as a persistent timeline marker", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

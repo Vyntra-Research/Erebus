@@ -14,7 +14,6 @@ import {
 
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
-const NOOP_EDIT_USER_MESSAGE = () => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   createContext,
@@ -58,7 +57,6 @@ import {
   MessageCircleIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
-  PencilIcon,
   SearchIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -144,7 +142,6 @@ interface TimelineRowSharedState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
-  onEditUserMessage: (messageId: MessageId, text: string) => void;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -222,7 +219,6 @@ interface MessagesTimelineProps {
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
-  onEditUserMessage?: (messageId: MessageId, text: string) => void;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -268,7 +264,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   routeThreadKey,
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
-  onEditUserMessage = NOOP_EDIT_USER_MESSAGE,
   onRevertUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
@@ -528,7 +523,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
-      onEditUserMessage,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -545,7 +539,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
-      onEditUserMessage,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -1108,12 +1101,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {canRevertAgentWork && displayedUserMessage.copyText ? (
-              <EditUserMessageButton
-                messageId={row.message.id}
-                text={displayedUserMessage.copyText}
-              />
-            ) : null}
             {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
@@ -1122,31 +1109,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         </div>
       </div>
     </div>
-  );
-}
-
-function EditUserMessageButton({ messageId, text }: { messageId: MessageId; text: string }) {
-  const ctx = use(TimelineRowCtx);
-  const activity = use(TimelineRowActivityCtx);
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
-            onClick={() => ctx.onEditUserMessage(messageId, text)}
-            aria-label="Edit and resend this message"
-          />
-        }
-      >
-        <PencilIcon className="size-3" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Edit and resend</TooltipPopup>
-    </Tooltip>
   );
 }
 

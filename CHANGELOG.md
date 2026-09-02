@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Show message editing for completed turns even when they did not change files.
 - Show context compaction while it runs and keep a marker at its place in conversation history after it finishes.
+- Remove the checkpoint-backed message edit action because chat branches and workspace restoration are separate operations.
 
 ## 0.2.3 - 2026-09-02
 
