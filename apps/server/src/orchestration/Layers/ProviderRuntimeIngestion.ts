@@ -825,6 +825,9 @@ export function runtimeEventToActivities(
     }
 
     case "item.completed": {
+      if (event.payload.itemType === "context_compaction") {
+        return [];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
@@ -853,6 +856,23 @@ export function runtimeEventToActivities(
     }
 
     case "item.started": {
+      if (event.payload.itemType === "context_compaction") {
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "context-compaction.started",
+            summary: "Compacting context",
+            payload: {
+              status: "inProgress",
+              ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4 - 2026-09-02
+
+### Fixed
+
+- Show message editing for completed turns even when they did not change files.
+- Show context compaction while it runs and keep a marker at its place in conversation history after it finishes.
+
 ## 0.2.3 - 2026-09-02
 
 ### Added

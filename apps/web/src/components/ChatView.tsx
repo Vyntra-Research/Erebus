@@ -2721,10 +2721,24 @@ function ChatViewContent(props: ChatViewProps) {
   }, [turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
     const byUserMessageId = new Map<MessageId, number>();
+    const checkpointTurnCountByTurnId = new Map(
+      turnDiffSummaries.map((summary) => [
+        summary.turnId,
+        summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId],
+      ]),
+    );
     for (let index = 0; index < timelineEntries.length; index += 1) {
       const entry = timelineEntries[index];
       if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
         continue;
+      }
+
+      if (entry.message.turnId) {
+        const directTurnCount = checkpointTurnCountByTurnId.get(entry.message.turnId);
+        if (typeof directTurnCount === "number") {
+          byUserMessageId.set(entry.message.id, Math.max(0, directTurnCount - 1));
+          continue;
+        }
       }
 
       for (let nextIndex = index + 1; nextIndex < timelineEntries.length; nextIndex += 1) {
@@ -2750,7 +2764,12 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     return byUserMessageId;
-  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  }, [
+    inferredCheckpointTurnCountByTurnId,
+    timelineEntries,
+    turnDiffSummaries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
 
   const gitCwd = activeProject
     ? projectScriptCwd({

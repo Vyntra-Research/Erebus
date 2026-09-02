@@ -1832,6 +1832,65 @@ describe("deriveWorkLogEntries", () => {
 });
 
 describe("deriveTimelineEntries", () => {
+  it("promotes compaction activity into a visible timeline marker", () => {
+    const entries = deriveTimelineEntries(
+      [],
+      [],
+      [
+        {
+          id: "compaction-1",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          turnId: TurnId.make("turn-1"),
+          label: "Context compacted",
+          tone: "info",
+          sourceActivityKind: "context-compaction",
+        },
+      ],
+    );
+
+    expect(entries).toEqual([
+      {
+        id: "compaction-1",
+        kind: "compaction",
+        createdAt: "2026-03-17T19:12:28.000Z",
+        status: "completed",
+        turnId: TurnId.make("turn-1"),
+      },
+    ]);
+  });
+
+  it("replaces the live compaction marker once completion arrives", () => {
+    const entries = deriveTimelineEntries(
+      [],
+      [],
+      [
+        {
+          id: "compaction-started",
+          createdAt: "2026-03-17T19:12:27.000Z",
+          turnId: TurnId.make("turn-1"),
+          label: "Compacting context",
+          tone: "info",
+          sourceActivityKind: "context-compaction.started",
+        },
+        {
+          id: "compaction-completed",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          turnId: TurnId.make("turn-1"),
+          label: "Context compacted",
+          tone: "info",
+          sourceActivityKind: "context-compaction",
+        },
+      ],
+    );
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "compaction-completed",
+      kind: "compaction",
+      status: "completed",
+    });
+  });
+
   it("includes proposed plans alongside messages and work entries in chronological order", () => {
     const entries = deriveTimelineEntries(
       [

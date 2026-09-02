@@ -54,6 +54,7 @@ import {
   EyeIcon,
   GlobeIcon,
   HammerIcon,
+  LoaderCircleIcon,
   MessageCircleIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
@@ -989,9 +990,30 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "turn-plan" ? <TurnPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
+      {row.kind === "compaction" ? <CompactionTimelineRow row={row} /> : null}
     </div>
   );
 });
+
+function CompactionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "compaction" }> }) {
+  const running = row.status === "running";
+  return (
+    <div
+      className="flex items-center gap-2 py-1 text-secondary-label text-xs"
+      aria-live={running ? "polite" : undefined}
+      data-context-compaction={row.status}
+    >
+      <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
+      {running ? (
+        <LoaderCircleIcon className="size-3 animate-spin" aria-hidden="true" />
+      ) : (
+        <CheckIcon className="size-3" aria-hidden="true" />
+      )}
+      <span>{running ? "Compacting context…" : "Context compacted"}</span>
+      <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
+    </div>
+  );
+}
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
