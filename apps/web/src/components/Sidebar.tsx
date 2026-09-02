@@ -35,6 +35,7 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
+  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
@@ -96,7 +97,11 @@ import {
   buildSidebarProjectSnapshots,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import {
+  legacyProjectCwdPreferenceKey,
+  resolveProjectExpanded,
+  useUiStateStore,
+} from "../uiStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
@@ -131,6 +136,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  orderThreadsWithCoagents,
   planPinnedReorder,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
@@ -251,6 +257,14 @@ function WorkingDuration(props: { startedAt: string | null }) {
 }
 
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map();
+
+function projectExpansionPreferenceKeys(project: SidebarProjectSnapshot): string[] {
+  return [
+    project.projectKey,
+    ...project.memberProjects.map((member) => member.physicalProjectKey),
+    ...project.memberProjects.map((member) => legacyProjectCwdPreferenceKey(member.workspaceRoot)),
+  ];
+}
 
 function terminalProcessLabel(count: number): string {
   return `${count} terminal ${count === 1 ? "process" : "processes"} running`;
@@ -1122,6 +1136,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       !props.isActive &&
       !isSelected &&
       "opacity-70 transition-opacity hover:opacity-100",
+    thread.coagent && "ml-3 w-[calc(100%-0.75rem)] border-l border-sidebar-border/70",
   );
 
   const title = isRenaming ? (
@@ -1268,6 +1283,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 fallbackIcon={MessageSquareIcon}
               />
             </span>
+            {thread.coagent ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      aria-label={`Co-agent (${thread.coagent.creationMode})`}
+                      className="inline-flex shrink-0 items-center text-red-500/80"
+                    />
+                  }
+                >
+                  <BotIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">Co-agent · {thread.coagent.creationMode}</TooltipPopup>
+              </Tooltip>
+            ) : null}
             {title}
             {pinIndicator}
             {terminalStatusIcon}
@@ -1392,7 +1422,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_72px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1412,31 +1442,28 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div className="relative z-10 h-[3.625rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                faviconPath={props.projectFaviconPath}
-                className="size-4 shrink-0"
-              />
-              {props.projectTitle ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
-                  )}
-                >
-                  {props.projectTitle}
-                </span>
-              ) : (
-                <span className="flex-1" />
-              )}
+              {thread.coagent ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        aria-label={`Co-agent (${thread.coagent.creationMode})`}
+                        className="inline-flex shrink-0 items-center text-red-500/80"
+                      />
+                    }
+                  >
+                    <BotIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Co-agent · {thread.coagent.creationMode}</TooltipPopup>
+                </Tooltip>
+              ) : null}
+              {title}
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
-                  the hidden state out of flow lets the project label reclaim
-                  space without either state overlapping it. */}
+                  the hidden state out of flow leaves the title unobstructed. */}
               <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
                 {/* Read-only status labels yield to the hover actions. Woke is
                     itself an action, so it stays pointer-enabled and visible
@@ -1540,15 +1567,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
-              {title}
-              {isRegeneratingTitle ? (
-                <span role="status" className="sr-only">
-                  Regenerating title
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+            {isRegeneratingTitle ? (
+              <span role="status" className="sr-only">
+                Regenerating title
+              </span>
+            ) : null}
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
@@ -1723,6 +1747,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
+  const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
   const threads = useThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -2096,7 +2122,7 @@ export default function Sidebar() {
           )
           .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
       ),
-      activeThreads: sortThreadsForSidebar(active),
+      activeThreads: orderThreadsWithCoagents(sortThreadsForSidebar(active)),
       // Soonest wake first: "what comes back next" is the shelf's question.
       snoozedThreads: snoozed.toSorted(
         (left, right) =>
@@ -2116,6 +2142,39 @@ export default function Sidebar() {
     snoozeWakeTick,
     threads,
   ]);
+
+  const { activeProjectSections, ungroupedActiveThreads } = useMemo(() => {
+    const projectGroupKeyByMember = new Map<string, string>();
+    for (const projectGroup of projectGroups) {
+      for (const member of projectGroup.memberProjectRefs) {
+        projectGroupKeyByMember.set(
+          `${member.environmentId}:${member.projectId}`,
+          projectGroup.projectKey,
+        );
+      }
+    }
+
+    const threadsByProjectGroup = new Map<string, EnvironmentThreadShell[]>();
+    const ungrouped: EnvironmentThreadShell[] = [];
+    for (const thread of activeThreads) {
+      const groupKey = projectGroupKeyByMember.get(`${thread.environmentId}:${thread.projectId}`);
+      if (groupKey === undefined) {
+        ungrouped.push(thread);
+        continue;
+      }
+      const groupedThreads = threadsByProjectGroup.get(groupKey) ?? [];
+      groupedThreads.push(thread);
+      threadsByProjectGroup.set(groupKey, groupedThreads);
+    }
+
+    return {
+      activeProjectSections: projectGroups.flatMap((project) => {
+        const projectThreads = threadsByProjectGroup.get(project.projectKey) ?? [];
+        return projectThreads.length > 0 ? [{ project, threads: projectThreads }] : [];
+      }),
+      ungroupedActiveThreads: ungrouped,
+    };
+  }, [activeThreads, projectGroups]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3832,7 +3891,58 @@ export default function Sidebar() {
                       />,
                     );
                   }
-                  for (const thread of activeThreads) {
+                  for (const { project, threads: projectThreads } of activeProjectSections) {
+                    const preferenceKeys = projectExpansionPreferenceKeys(project);
+                    const projectExpanded = resolveProjectExpanded(
+                      projectExpandedById,
+                      preferenceKeys,
+                    );
+                    const projectThreadListId = `sidebar-project-threads-${project.projectKey}`;
+                    items.push(
+                      <li
+                        key={`project-folder:${project.projectKey}`}
+                        data-thread-selection-safe
+                        className="list-none"
+                      >
+                        <button
+                          type="button"
+                          aria-expanded={projectExpanded}
+                          aria-controls={projectThreadListId}
+                          onClick={() => setProjectExpanded(preferenceKeys, !projectExpanded)}
+                          className="mb-0.5 flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                        >
+                          <ChevronDownIcon
+                            aria-hidden
+                            className={cn(
+                              "size-3.5 shrink-0 transition-transform",
+                              !projectExpanded && "-rotate-90",
+                            )}
+                          />
+                          <ProjectFavicon
+                            environmentId={project.environmentId}
+                            cwd={project.workspaceRoot}
+                            faviconPath={project.faviconPath}
+                            className="size-4 shrink-0"
+                          />
+                          <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
+                          <span className="shrink-0 text-[10px] font-normal tabular-nums text-sidebar-muted-foreground/60">
+                            {projectThreads.length}
+                          </span>
+                        </button>
+                        {projectExpanded ? (
+                          <ul
+                            id={projectThreadListId}
+                            role="list"
+                            aria-label={`${project.displayName} threads`}
+                            className="ml-2 flex flex-col gap-px border-l border-sidebar-border/60 pl-1.5"
+                          >
+                            {projectThreads.map((thread) => renderThreadRow(thread, "active"))}
+                          </ul>
+                        ) : null}
+                      </li>,
+                    );
+                  }
+                  for (const thread of ungroupedActiveThreads) {
                     items.push(renderThreadRow(thread, "active"));
                   }
                   // Snoozed shelf: between the inbox and Settled — out of the

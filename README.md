@@ -15,6 +15,7 @@ Erebus is based on [T3 Code](https://github.com/pingdotgg/t3code). The current r
 - Sends submitted findings to an independent Judge. The Judge checks the evidence and campaign gates in a separate turn before accepting the finding or requesting research changes.
 - Keeps the principal Codex session isolated from the Codex desktop app, including its home, session database, and configuration.
 - Supports multiple Codex accounts with separate sign-in state, shared task data, and quota-aware routing at turn boundaries.
+- Coordinates up to four direct co-agent tasks for parallel coverage, with blank or forked context, progress checks, handbacks, and independent Observer supervision.
 - Installs and updates the Proteus CLI, MCP server, plugin, and skills inside Erebus-managed storage.
 
 ## Supervision flow

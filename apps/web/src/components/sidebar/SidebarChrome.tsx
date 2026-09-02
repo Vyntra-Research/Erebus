@@ -23,6 +23,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
@@ -89,11 +90,6 @@ export const SidebarAccountMenu = memo(function SidebarAccountMenu() {
     closeMobileSidebar();
     void navigate({ to: "/pull-requests", search: { involvement: "all", state: "open" } });
   }, [closeMobileSidebar, navigate]);
-  const handleSettingsClick = useCallback(() => {
-    closeMobileSidebar();
-    void navigate({ to: "/settings/providers" });
-  }, [closeMobileSidebar, navigate]);
-
   const handleUsageClick = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -165,13 +161,6 @@ export const SidebarAccountMenu = memo(function SidebarAccountMenu() {
               <div className="border-t border-border pt-2">
                 <button
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
-                  onClick={handleSettingsClick}
-                  type="button"
-                >
-                  <SettingsIcon className="size-4" /> Provider settings
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
                   onClick={handleUsageClick}
                   type="button"
                 >
@@ -191,6 +180,39 @@ export const SidebarAccountMenu = memo(function SidebarAccountMenu() {
           </PopoverPopup>
         </Popover>
       </SidebarMenuItem>
+    </SidebarMenu>
+  );
+});
+
+const SidebarFooterActions = memo(function SidebarFooterActions() {
+  const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const openSettings = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void navigate({ to: "/settings/general" });
+  }, [isMobile, navigate, setOpenMobile]);
+
+  return (
+    <SidebarMenu className="flex-row items-center">
+      <SidebarMenuItem className="shrink-0">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="Open settings"
+                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full text-[var(--sidebar-icon-color)] outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2"
+                onClick={openSettings}
+              >
+                <SettingsIcon className="size-4" />
+              </button>
+            }
+          />
+          <TooltipPopup side="top">Settings</TooltipPopup>
+        </Tooltip>
+      </SidebarMenuItem>
       <SidebarUpdatePill />
     </SidebarMenu>
   );
@@ -202,6 +224,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarAccountMenu />
+      <SidebarFooterActions />
     </SidebarFooter>
   );
 });

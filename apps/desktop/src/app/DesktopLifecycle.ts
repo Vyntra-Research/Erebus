@@ -190,11 +190,13 @@ export const make = DesktopLifecycle.of({
   }),
   register: Effect.gen(function* () {
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    const desktopState = yield* DesktopState.DesktopState;
     const electronApp = yield* ElectronApp.ElectronApp;
     const electronTheme = yield* ElectronTheme.ElectronTheme;
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const context = yield* Effect.context<DesktopLifecycleRegistrationServices>();
     const runEffect = Effect.runPromiseWith(context);
+    const runSync = Effect.runSyncWith(context);
     let quitAllowed = false;
     let updaterQuitAllowed = false;
     yield* electronTheme.onUpdated(() => {
@@ -214,6 +216,10 @@ export const make = DesktopLifecycle.of({
       );
     });
     yield* electronApp.on("before-quit", (event: Electron.Event) => {
+      runSync(Ref.set(desktopState.quitting, true));
+      if (desktopWindow.prepareForQuit) {
+        runSync(desktopWindow.prepareForQuit);
+      }
       handleBeforeQuit(
         event,
         runEffect,

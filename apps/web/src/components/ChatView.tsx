@@ -5267,32 +5267,30 @@ function ChatViewContent(props: ChatViewProps) {
     composerRef,
   ]);
 
-  const onRevertToTurnCount = useCallback(
-    async (turnCount: number) => {
+  const revertToTurnCount = useCallback(
+    async (
+      turnCount: number,
+      confirmation: readonly [string, string, string],
+    ): Promise<boolean> => {
       const localApi = readLocalApi();
-      if (!localApi || !activeThread || isRevertingCheckpoint) return;
+      if (!localApi || !activeThread || isRevertingCheckpoint) return false;
 
       if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
         setThreadError(
           activeThread.id,
           `Reconnect ${activeEnvironmentUnavailableLabel} before reverting checkpoints.`,
         );
-        return;
+        return false;
       }
       if (phase === "running" || isSendBusy || isConnecting) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
-        return;
+        return false;
       }
-      const confirmed = await localApi.dialogs.confirm(
-        [
-          `Revert this thread to checkpoint ${turnCount}?`,
-          "This will discard newer messages and turn diffs in this thread.",
-          "This action cannot be undone.",
-        ].join("\n"),
-        { variant: "destructive" },
-      );
+      const confirmed = await localApi.dialogs.confirm(confirmation.join("\n"), {
+        variant: "destructive",
+      });
       if (!confirmed) {
-        return;
+        return false;
       }
 
       setIsRevertingCheckpoint(true);
@@ -5312,6 +5310,7 @@ function ChatViewContent(props: ChatViewProps) {
         );
       }
       setIsRevertingCheckpoint(false);
+      return result._tag === "Success";
     },
     [
       activeThread,
@@ -5325,6 +5324,16 @@ function ChatViewContent(props: ChatViewProps) {
       revertThreadCheckpoint,
       setThreadError,
     ],
+  );
+
+  const onRevertToTurnCount = useCallback(
+    (turnCount: number) =>
+      revertToTurnCount(turnCount, [
+        `Revert this thread to checkpoint ${turnCount}?`,
+        "This will discard newer messages and turn diffs in this thread.",
+        "This action cannot be undone.",
+      ]),
+    [revertToTurnCount],
   );
 
   const onSend = async (
@@ -6658,6 +6667,38 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+  const onEditUserMessage = useCallback(
+    async (messageId: MessageId, text: string) => {
+      const targetTurnCount = revertTurnCountRef.current.get(messageId);
+      if (typeof targetTurnCount !== "number") {
+        return;
+      }
+      const reverted = await revertToTurnCount(targetTurnCount, [
+        "Edit and resend this message?",
+        "Newer messages, turn diffs, and the current unsent draft will be replaced.",
+        "The selected text will return to the composer before anything is sent.",
+      ]);
+      if (!reverted) {
+        return;
+      }
+      clearComposerDraftContent(composerDraftTarget);
+      promptRef.current = text;
+      setComposerDraftPrompt(composerDraftTarget, text);
+      composerRef.current?.resetCursorState({
+        cursor: collapseExpandedComposerCursor(text, text.length),
+        prompt: text,
+        detectTrigger: true,
+      });
+      scheduleComposerFocus();
+    },
+    [
+      clearComposerDraftContent,
+      composerDraftTarget,
+      revertToTurnCount,
+      scheduleComposerFocus,
+      setComposerDraftPrompt,
+    ],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -6926,6 +6967,7 @@ function ChatViewContent(props: ChatViewProps) {
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                onEditUserMessage={onEditUserMessage}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}

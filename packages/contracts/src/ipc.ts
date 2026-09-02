@@ -430,6 +430,11 @@ export const DesktopServerExposureStateSchema = Schema.Struct({
   tailscaleServePort: Schema.Number,
 });
 
+export const DesktopWindowBehaviorStateSchema = Schema.Struct({
+  closeToTray: Schema.Boolean,
+});
+export type DesktopWindowBehaviorState = typeof DesktopWindowBehaviorStateSchema.Type;
+
 export interface PickFolderOptions {
   initialPath?: string | null;
   // When set, the desktop dialog opens against the named backend's
@@ -1104,6 +1109,10 @@ export interface DesktopBridge {
     readonly enabled: boolean;
     readonly port?: number;
   }) => Promise<DesktopServerExposureState>;
+  /** Optional while older desktop shells can host a newer web client. */
+  getWindowBehaviorState?: () => Promise<DesktopWindowBehaviorState>;
+  /** Optional while older desktop shells can host a newer web client. */
+  setCloseToTray?: (enabled: boolean) => Promise<DesktopWindowBehaviorState>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
   getWslState: () => Promise<DesktopWslState>;
   setWslBackendEnabled: (enabled: boolean) => Promise<DesktopWslState>;

@@ -171,9 +171,13 @@ function applyResearchEvent(
       ) {
         return "The observer evaluated a stale or inactive contract revision.";
       }
+      const observesPrincipal =
+        event.evaluation.observedThreadId === undefined ||
+        event.evaluation.observedThreadId === campaign.principalThreadId;
       if (
-        event.windowEndMessageCount > campaign.eligibleMessageCount ||
-        event.windowEndMessageCount <= campaign.lastObservedMessageCount
+        observesPrincipal &&
+        (event.windowEndMessageCount > campaign.eligibleMessageCount ||
+          event.windowEndMessageCount <= campaign.lastObservedMessageCount)
       ) {
         return "The observer window is outside the unreconciled principal message range.";
       }
@@ -181,7 +185,9 @@ function applyResearchEvent(
         ...state,
         campaign: {
           ...campaign,
-          lastObservedMessageCount: event.windowEndMessageCount,
+          lastObservedMessageCount: observesPrincipal
+            ? event.windowEndMessageCount
+            : campaign.lastObservedMessageCount,
           updatedAt: event.recordedAt,
         },
         observerEvaluations: [...state.observerEvaluations, event.evaluation],

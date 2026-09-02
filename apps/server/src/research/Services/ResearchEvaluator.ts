@@ -56,6 +56,12 @@ export const JudgeAssessment = Schema.Struct({
 export type JudgeAssessment = typeof JudgeAssessment.Type;
 
 export interface ObserverCampaignSnapshot {
+  readonly observedTask?: {
+    readonly threadId: string;
+    readonly role: "coagent";
+    readonly parentThreadId: string;
+    readonly assignment: string;
+  };
   readonly campaign: {
     readonly id: string;
     readonly status: string;

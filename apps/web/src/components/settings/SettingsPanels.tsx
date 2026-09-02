@@ -1926,6 +1926,80 @@ function LegacyFeaturesSection() {
   );
 }
 
+function CloseToTraySetting() {
+  const bridge = window.desktopBridge;
+  const supported =
+    isElectron &&
+    bridge?.getWindowBehaviorState !== undefined &&
+    bridge.setCloseToTray !== undefined;
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(supported);
+
+  useEffect(() => {
+    if (!supported || !bridge?.getWindowBehaviorState) {
+      return;
+    }
+    let active = true;
+    void bridge
+      .getWindowBehaviorState()
+      .then((state) => {
+        if (active) setEnabled(state.closeToTray);
+      })
+      .catch((error) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not read window behavior",
+            description:
+              error instanceof Error ? error.message : "Desktop settings are unavailable.",
+          }),
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [bridge, supported]);
+
+  if (!supported || !bridge?.setCloseToTray) {
+    return null;
+  }
+  const setCloseToTray = bridge.setCloseToTray;
+
+  return (
+    <SettingsRow
+      title="Close to system tray"
+      description="Keep Erebus and active tasks running in the notification area when the window closes."
+      control={
+        <Switch
+          checked={enabled}
+          disabled={loading}
+          onCheckedChange={(checked) => {
+            const next = Boolean(checked);
+            setLoading(true);
+            void setCloseToTray(next)
+              .then((state) => setEnabled(state.closeToTray))
+              .catch((error) => {
+                toastManager.add(
+                  stackedThreadToast({
+                    type: "error",
+                    title: "Could not change window behavior",
+                    description:
+                      error instanceof Error ? error.message : "Desktop settings were not changed.",
+                  }),
+                );
+              })
+              .finally(() => setLoading(false));
+          }}
+          aria-label="Close to system tray"
+        />
+      }
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -1982,6 +2056,7 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="General">
+        <CloseToTraySetting />
         <SettingsRow
           {...searchableSetting("project-grouping")}
           description="Combine matching repositories across environments."

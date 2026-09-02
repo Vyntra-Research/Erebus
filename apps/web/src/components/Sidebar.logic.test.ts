@@ -17,6 +17,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  orderThreadsWithCoagents,
   resolveProjectStatusIndicator,
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
@@ -54,6 +55,33 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("orderThreadsWithCoagents", () => {
+  it("places managed children directly below their parent without hiding orphans", () => {
+    const ordered = orderThreadsWithCoagents([
+      {
+        id: ThreadId.make("child"),
+        coagent: {
+          parentThreadId: ThreadId.make("parent"),
+          creationMode: "blank",
+          status: "ready",
+        },
+      },
+      { id: ThreadId.make("other"), coagent: null },
+      { id: ThreadId.make("parent"), coagent: null },
+      {
+        id: ThreadId.make("orphan"),
+        coagent: {
+          parentThreadId: ThreadId.make("missing"),
+          creationMode: "fork",
+          status: "ready",
+        },
+      },
+    ]);
+
+    expect(ordered.map((thread) => thread.id)).toEqual(["other", "parent", "child", "orphan"]);
+  });
+});
 
 describe("animatePinnedLayoutChanges", () => {
   const baseArgs: Parameters<AnimateLayoutChanges>[0] = {

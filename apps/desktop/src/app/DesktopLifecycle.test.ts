@@ -86,6 +86,7 @@ function makeDesktopWindowLayer(
   input: {
     readonly activate?: Effect.Effect<void>;
     readonly flushMainWindowBounds?: Effect.Effect<void>;
+    readonly prepareForQuit?: Effect.Effect<void>;
   } = {},
 ) {
   return Layer.succeed(DesktopWindow.DesktopWindow, {
@@ -101,6 +102,7 @@ function makeDesktopWindowLayer(
     dispatchMenuAction: () => Effect.void,
     zoomMain: () => Effect.void,
     syncAppearance: Effect.void,
+    prepareForQuit: input.prepareForQuit ?? Effect.void,
   });
 }
 
@@ -108,6 +110,7 @@ describe("DesktopLifecycle", () => {
   for (const platform of ["darwin", "win32", "linux"] satisfies ReadonlyArray<NodeJS.Platform>) {
     it.effect(`lets the updater's quit event proceed on ${platform}`, () => {
       const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+      let preparedForQuit = false;
       const environmentLayer = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
         platform,
         isDevelopment: false,
@@ -117,7 +120,13 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(makeElectronAppLayer(appListeners)),
         Layer.provideMerge(electronThemeLayer),
         Layer.provideMerge(makeElectronWindowLayer()),
-        Layer.provideMerge(makeDesktopWindowLayer()),
+        Layer.provideMerge(
+          makeDesktopWindowLayer({
+            prepareForQuit: Effect.sync(() => {
+              preparedForQuit = true;
+            }),
+          }),
+        ),
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(DesktopShutdown.layer),
         Layer.provideMerge(DesktopState.layer),
@@ -145,6 +154,10 @@ describe("DesktopLifecycle", () => {
 
           const state = yield* DesktopState.DesktopState;
           assert.isTrue(yield* Ref.get(state.quitting));
+          assert.isTrue(
+            preparedForQuit,
+            "close-to-tray interception must be disabled synchronously",
+          );
         }),
       ).pipe(Effect.provide(layer));
     });

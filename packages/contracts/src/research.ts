@@ -194,6 +194,7 @@ export type ResearchObserverVerdict = typeof ResearchObserverVerdict.Type;
 export const ResearchObserverEvaluation = Schema.Struct({
   evaluationId: ResearchEvaluationId,
   campaignId: ResearchCampaignId,
+  observedThreadId: Schema.optionalKey(ThreadId),
   contractId: ResearchContractId,
   contractRevision: PositiveInt,
   messageItemIds: Schema.Array(MessageId).check(Schema.isMinLength(1)),
@@ -272,6 +273,7 @@ export const ResearchIntervention = Schema.Struct({
   id: ResearchInterventionId,
   campaignId: ResearchCampaignId,
   evaluationId: ResearchEvaluationId,
+  targetThreadId: Schema.optionalKey(ThreadId),
   source: ResearchInterventionSource,
   delivery: ResearchInterventionDelivery,
   status: ResearchInterventionStatus,

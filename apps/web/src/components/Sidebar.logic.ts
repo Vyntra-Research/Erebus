@@ -25,6 +25,24 @@ export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 200;
 // it small; cold opens still render instantly from the cached snapshot.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 
+export function orderThreadsWithCoagents<T extends Pick<SidebarThreadSummary, "id" | "coagent">>(
+  threads: ReadonlyArray<T>,
+): T[] {
+  const byParent = new Map<string, T[]>();
+  const ids = new Set(threads.map((thread) => thread.id));
+  for (const thread of threads) {
+    const parentId = thread.coagent?.parentThreadId;
+    if (!parentId || !ids.has(parentId)) continue;
+    const children = byParent.get(parentId) ?? [];
+    children.push(thread);
+    byParent.set(parentId, children);
+  }
+  const nested = new Set([...byParent.values()].flat().map((thread) => thread.id));
+  return threads.flatMap((thread) =>
+    nested.has(thread.id) ? [] : [thread, ...(byParent.get(thread.id) ?? [])],
+  );
+}
+
 // The list already reaches its destination through sortable transforms while
 // the pointer is down. dnd-kit's default also animates the committed DOM order
 // after release, replaying the same movement across every affected row.

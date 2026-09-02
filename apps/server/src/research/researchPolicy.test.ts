@@ -59,7 +59,7 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 });
 
 it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 10);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 11);
   assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 10);
   assert.equal(RESEARCH_INTERNAL_POLICY.version, 10);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");

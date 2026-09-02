@@ -1,11 +1,20 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { ProjectId, ResearchCampaignId, ResearchToolResult, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  IsoDateTime,
+  ProjectId,
+  ResearchCampaignId,
+  ResearchToolResult,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { CoagentRegistryLive } from "../../coagents/Layers/CoagentRegistry.ts";
+import { CoagentRegistry } from "../../coagents/Services/CoagentRegistry.ts";
 import { layerTest as ServerSettingsLayerTest } from "../../serverSettings.ts";
 import { ResearchEngine } from "../Services/ResearchEngine.ts";
 import { ResearchToolController } from "../Services/ResearchToolController.ts";
@@ -27,6 +36,7 @@ const layer = it.layer(
   ResearchToolControllerLive.pipe(
     Layer.provideMerge(ResearchEngineLive),
     Layer.provideMerge(ResearchCampaignStoreLive),
+    Layer.provideMerge(CoagentRegistryLive),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(ServerSettingsLayerTest()),
@@ -120,6 +130,81 @@ it("does not block research when only the Proteus plugin probe is unknown", () =
 });
 
 layer("ResearchToolController", (it) => {
+  it.effect("gives co-agents read-only parent context and rejects campaign control", () =>
+    Effect.gen(function* () {
+      const controller = yield* ResearchToolController;
+      const engine = yield* ResearchEngine;
+      const registry = yield* CoagentRegistry;
+      assert(controller);
+      const childThreadId = ThreadId.make("thread-read-only-coagent");
+      const parentThreadId = ThreadId.make("thread-read-only-parent");
+      const timestamp = IsoDateTime.make("2026-09-02T12:00:00.000Z");
+      yield* engine.dispatch({
+        type: "campaign.create",
+        commandId: CommandId.make("create-read-only-parent-campaign"),
+        campaignId: ResearchCampaignId.make("campaign-read-only-parent"),
+        projectId: context.projectId,
+        principalThreadId: parentThreadId,
+        proteusCampaignId: "C999",
+        proteusRoot: context.cwd,
+      });
+      yield* registry.upsert({
+        childThreadId,
+        parentThreadId,
+        projectId: context.projectId,
+        assignment: "Inspect only the parser boundary.",
+        creationMode: "blank",
+        status: "ready",
+        error: null,
+        observerCampaignId: null,
+        observerMessageCount: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+
+      const instructions = yield* controller.principalInstructions({
+        projectId: context.projectId,
+        threadId: childThreadId,
+        cwd: context.cwd,
+      });
+      assert.match(instructions, /role="coagent"/);
+      assert.match(instructions, /research\.get_status/);
+      assert.match(instructions, /Inspect only the parser boundary/);
+
+      const statusResponse = yield* controller.handle(
+        { ...context, threadId: childThreadId },
+        {
+          namespace: "research",
+          tool: "get_status",
+          callId: "coagent-read-status",
+          threadId: childThreadId,
+          turnId: "turn-1",
+          arguments: { campaignId: "campaign-read-only-parent" },
+        },
+      );
+      assert.isTrue(statusResponse.success);
+
+      const response = yield* controller.handle(
+        { ...context, threadId: childThreadId },
+        {
+          namespace: "research",
+          tool: "create_campaign",
+          callId: "coagent-campaign-control",
+          threadId: childThreadId,
+          turnId: "turn-1",
+          arguments: { campaignId: "forbidden", proteusCampaignId: "C1" },
+        },
+      );
+      assert.isFalse(response.success);
+      const content = response.contentItems[0];
+      assert.equal(content?.type, "inputText");
+      if (content?.type === "inputText") {
+        const result = yield* decodeResearchToolResult(content.text);
+        assert.match(result.message, /cannot manage the research campaign/i);
+      }
+    }),
+  );
+
   it.effect("injects harness-owned Observer policy into a registered contract", () =>
     Effect.gen(function* () {
       const controller = yield* ResearchToolController;

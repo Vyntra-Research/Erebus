@@ -107,6 +107,45 @@ it("treats a repeated event id as an idempotent delivery", () => {
   assert.equal(replayed.state.lastSequence, 3);
 });
 
+it("records a co-agent Observer evaluation without moving the principal cursor", () => {
+  const evaluation = {
+    eventId: "event-4",
+    campaignId: "campaign-1",
+    sequence: 4,
+    recordedAt: at,
+    type: "observer.evaluationRecorded",
+    windowEndMessageCount: 5,
+    evaluation: {
+      evaluationId: "evaluation-coagent",
+      campaignId: "campaign-1",
+      observedThreadId: "thread-child",
+      contractId: "contract-1",
+      contractRevision: 1,
+      messageItemIds: ["child-message-1"],
+      verdict: "aligned",
+      confidence: 1,
+      contractClauses: [],
+      evidence: [],
+      risk: null,
+      recommendedSteering: null,
+      runtime: {
+        policyVersion: 1,
+        policyDigest: "digest",
+        model: "observer",
+        reasoningEffort: "xhigh",
+      },
+      evaluatedAt: at,
+    },
+  } as unknown as ResearchEvent;
+  const replayed = replayResearchEvents([...foundationEvents(), evaluation]);
+
+  assert.isTrue(replayed.ok);
+  if (!replayed.ok) return;
+  assert.equal(replayed.state.campaign?.lastObservedMessageCount, 0);
+  assert.equal(replayed.state.observerEvaluations.length, 1);
+  assert.equal(replayed.state.observerEvaluations[0]?.observedThreadId, "thread-child");
+});
+
 it("rejects findings tied to a stale contract revision", () => {
   const staleFinding = {
     eventId: "event-4",
