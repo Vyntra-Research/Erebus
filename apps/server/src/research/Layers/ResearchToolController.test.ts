@@ -12,7 +12,10 @@ import { ResearchToolController } from "../Services/ResearchToolController.ts";
 import { ProteusBridge } from "../Services/ProteusBridge.ts";
 import { ResearchCampaignStoreLive } from "./ResearchCampaignStore.ts";
 import { ResearchEngineLive } from "./ResearchEngine.ts";
-import { ResearchToolControllerLive } from "./ResearchToolController.ts";
+import {
+  researchProteusDependencyIssues,
+  ResearchToolControllerLive,
+} from "./ResearchToolController.ts";
 
 const completedProteusCampaigns: string[] = [];
 const proteusCampaignStatuses = new Map<string, string>();
@@ -96,6 +99,25 @@ const context = {
   proteus: health,
 };
 const providerThreadId = "provider-thread-1";
+
+it("does not block research when only the Proteus plugin probe is unknown", () => {
+  assert.deepStrictEqual(
+    researchProteusDependencyIssues({
+      ...health,
+      plugin: "unknown",
+      message: "Proteus: plugin unknown.",
+    }),
+    [],
+  );
+  assert.deepStrictEqual(
+    researchProteusDependencyIssues({
+      ...health,
+      plugin: "missing",
+      message: "Proteus: plugin missing.",
+    }),
+    ["Proteus plugin is missing"],
+  );
+});
 
 layer("ResearchToolController", (it) => {
   it.effect("injects harness-owned Observer policy into a registered contract", () =>

@@ -1,5 +1,6 @@
 import {
   CommandId,
+  type ResearchProteusHealth,
   ResearchCampaignRefInput,
   ResearchCampaignCloseInput,
   ResearchCheckpointInput,
@@ -69,6 +70,18 @@ const proteusNumericId = (value: string): number | null => {
 
 const isTerminalCampaignStatus = (status: string): boolean =>
   status === "completed" || status === "aborted";
+
+export const researchProteusDependencyIssues = (
+  proteus: ResearchProteusHealth,
+): ReadonlyArray<string> =>
+  (["runtime", "plugin", "skills", "mcp"] as const)
+    .filter((key) => {
+      const state = proteus[key];
+      // plugin/list can time out while the installed plugin's skills and MCP
+      // are already usable. Unknown is not evidence that the plugin is absent.
+      return state !== "ready" && !(key === "plugin" && state === "unknown");
+    })
+    .map((key) => `Proteus ${key} is ${proteus[key]}`);
 
 const makeResearchToolController = Effect.gen(function* () {
   const engine = yield* ResearchEngine;
@@ -323,12 +336,7 @@ const makeResearchToolController = Effect.gen(function* () {
                 "campaign context mismatch",
               ]);
             }
-            const dependencyEntries = Object.entries(context.proteus).filter(([key]) =>
-              ["runtime", "plugin", "skills", "mcp"].includes(key),
-            );
-            const dependencyIssues = dependencyEntries
-              .filter(([, value]) => value !== "ready")
-              .map(([key, value]) => `Proteus ${key} is ${String(value)}`);
+            const dependencyIssues = [...researchProteusDependencyIssues(context.proteus)];
             const projection = yield* engine.findProjection(input.campaignId);
             if (projection?.campaign) {
               dependencyIssues.push(
@@ -388,12 +396,7 @@ const makeResearchToolController = Effect.gen(function* () {
                 "campaign context mismatch",
               ]);
             }
-            const dependencyEntries = Object.entries(context.proteus).filter(([key]) =>
-              ["runtime", "plugin", "skills", "mcp"].includes(key),
-            );
-            const dependencyIssues = dependencyEntries
-              .filter(([, value]) => value !== "ready")
-              .map(([key, value]) => `Proteus ${key} is ${String(value)}`);
+            const dependencyIssues = [...researchProteusDependencyIssues(context.proteus)];
             const projection = yield* engine.findProjection(input.campaignId);
             const campaign = projection?.campaign;
             if (params.tool === "resume" && campaign) {
