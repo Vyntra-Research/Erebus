@@ -229,6 +229,10 @@ export interface CodexThreadSnapshot {
   readonly turns: ReadonlyArray<CodexThreadTurnSnapshot>;
 }
 
+export interface CodexThreadForkResult extends CodexThreadSnapshot {
+  readonly resumeCursor: { readonly threadId: string };
+}
+
 export interface CodexSessionRuntimeShape {
   readonly start: () => Effect.Effect<ProviderSession, CodexSessionRuntimeError>;
   readonly getSession: Effect.Effect<ProviderSession>;
@@ -244,6 +248,9 @@ export interface CodexSessionRuntimeShape {
   readonly rollbackThread: (
     numTurns: number,
   ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  readonly forkThread?: (
+    throughTurnCount: number,
+  ) => Effect.Effect<CodexThreadForkResult, CodexSessionRuntimeError>;
   readonly uploadFeedback: (
     reason?: string,
   ) => Effect.Effect<EffectCodexSchema.V2FeedbackUploadResponse, CodexSessionRuntimeError>;
@@ -264,6 +271,7 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimePendingApprovalNotFoundError
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
+  | CodexSessionRuntimeForkBoundaryError
   | CodexSessionRuntimeThreadIdMissingError;
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
@@ -307,6 +315,19 @@ export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedErrorC
 ) {
   override get message(): string {
     return `Codex session is missing a provider thread id for ${this.threadId}`;
+  }
+}
+
+export class CodexSessionRuntimeForkBoundaryError extends Schema.TaggedErrorClass<CodexSessionRuntimeForkBoundaryError>()(
+  "CodexSessionRuntimeForkBoundaryError",
+  {
+    threadId: Schema.String,
+    throughTurnCount: Schema.Number,
+    availableTurnCount: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `Cannot fork Codex thread ${this.threadId} through turn ${this.throughTurnCount}; ${this.availableTurnCount} turns are available`;
   }
 }
 
@@ -1176,7 +1197,10 @@ function updateSession(
 }
 
 function parseThreadSnapshot(
-  response: EffectCodexSchema.V2ThreadReadResponse | EffectCodexSchema.V2ThreadRollbackResponse,
+  response:
+    | EffectCodexSchema.V2ThreadReadResponse
+    | EffectCodexSchema.V2ThreadRollbackResponse
+    | EffectCodexSchema.V2ThreadForkResponse,
 ): CodexThreadSnapshot {
   return {
     threadId: response.thread.id,
@@ -2420,6 +2444,36 @@ export const makeCodexSessionRuntime = (
             activeTurnId: undefined,
           });
           return parseThreadSnapshot(response);
+        }),
+      forkThread: (throughTurnCount) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          const current = yield* client.request("thread/read", {
+            threadId: providerThreadId,
+            includeTurns: true,
+          });
+          if (
+            !Number.isInteger(throughTurnCount) ||
+            throughTurnCount < 1 ||
+            throughTurnCount > current.thread.turns.length
+          ) {
+            return yield* new CodexSessionRuntimeForkBoundaryError({
+              threadId: options.threadId,
+              throughTurnCount,
+              availableTurnCount: current.thread.turns.length,
+            });
+          }
+          const lastTurnId = current.thread.turns[throughTurnCount - 1]!.id;
+          const response = yield* client.request("thread/fork", {
+            threadId: providerThreadId,
+            lastTurnId,
+            cwd: options.cwd,
+          });
+          const snapshot = parseThreadSnapshot(response);
+          return {
+            ...snapshot,
+            resumeCursor: { threadId: response.thread.id },
+          };
         }),
       uploadFeedback: (reason) =>
         Effect.gen(function* () {

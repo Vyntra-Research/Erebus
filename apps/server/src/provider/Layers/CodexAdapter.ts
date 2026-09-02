@@ -2007,6 +2007,26 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
   };
 
+  const forkThread: NonNullable<CodexAdapterShape["forkThread"]> = (threadId, throughTurnCount) =>
+    Effect.gen(function* () {
+      const session = yield* requireSession(threadId);
+      const forkRuntimeThread = session.runtime.forkThread;
+      if (forkRuntimeThread === undefined) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "forkThread",
+          issue: "This Codex runtime does not support conversation forks.",
+        });
+      }
+      const result = yield* forkRuntimeThread(throughTurnCount).pipe(
+        Effect.mapError((cause) => mapCodexRuntimeError(threadId, "thread/fork", cause)),
+      );
+      return {
+        resumeCursor: result.resumeCursor,
+        turns: result.turns,
+      };
+    });
+
   const uploadFeedback: CodexAdapterShape["uploadFeedback"] = (input) =>
     requireSession(input.threadId).pipe(
       Effect.flatMap((session) => session.runtime.uploadFeedback(input.reason)),
@@ -2106,6 +2126,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     steerTurn,
     readThread,
     rollbackThread,
+    forkThread,
     uploadFeedback,
     respondToRequest,
     respondToUserInput,

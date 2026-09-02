@@ -275,6 +275,8 @@ import {
   useThread,
   useThreadRefs,
   useThreadShell,
+  readThreadShell,
+  readThreadDetail,
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
@@ -405,6 +407,41 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+
+type ConversationBranchRelation = {
+  readonly rootThreadId: ThreadId;
+  readonly parentThreadId: ThreadId;
+  readonly childThreadId: ThreadId;
+  readonly sourceMessageId: MessageId;
+};
+
+function conversationBranchRelations(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<ConversationBranchRelation> {
+  const relations = new Map<string, ConversationBranchRelation>();
+  for (const activity of activities) {
+    if (activity.kind !== "conversation.branch.created") continue;
+    const payload = activity.payload;
+    if (typeof payload !== "object" || payload === null) continue;
+    const value = payload as Record<string, unknown>;
+    if (
+      typeof value.rootThreadId !== "string" ||
+      typeof value.parentThreadId !== "string" ||
+      typeof value.childThreadId !== "string" ||
+      typeof value.sourceMessageId !== "string"
+    ) {
+      continue;
+    }
+    const relation = {
+      rootThreadId: value.rootThreadId as ThreadId,
+      parentThreadId: value.parentThreadId as ThreadId,
+      childThreadId: value.childThreadId as ThreadId,
+      sourceMessageId: value.sourceMessageId as MessageId,
+    };
+    relations.set(`${relation.parentThreadId}:${relation.childThreadId}`, relation);
+  }
+  return [...relations.values()];
+}
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1313,6 +1350,9 @@ function ChatViewContent(props: ChatViewProps) {
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
+  const forkThreadConversation = useAtomCommand(threadEnvironment.forkConversation, {
+    reportFailure: false,
+  });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
@@ -1439,6 +1479,7 @@ function ChatViewContent(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [isForkingConversation, setIsForkingConversation] = useState(false);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -2694,6 +2735,20 @@ function ChatViewContent(props: ChatViewProps) {
       ),
     [activeThread?.proposedPlans, timelineMessages, turnPlans, workLogEntries],
   );
+  const activeConversationBranches = useMemo(
+    () => conversationBranchRelations(activeThread?.activities ?? EMPTY_ACTIVITIES),
+    [activeThread?.activities],
+  );
+  const parentConversationBranch =
+    activeThread === null || activeThread === undefined
+      ? undefined
+      : activeConversationBranches.find((relation) => relation.childThreadId === activeThread.id);
+  const childConversationBranches =
+    activeThread === null || activeThread === undefined
+      ? []
+      : activeConversationBranches.filter(
+          (relation) => relation.parentThreadId === activeThread.id,
+        );
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
     activeThreadKey !== null && dockedDraftHeroThreadKey === activeThreadKey;
@@ -6667,6 +6722,116 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+  const onEditUserMessage = useCallback(
+    async (messageId: MessageId, text: string) => {
+      if (
+        !activeThreadRef ||
+        !activeThread ||
+        !isServerThread ||
+        isForkingConversation ||
+        phase === "running"
+      ) {
+        return;
+      }
+      const targetThreadId = newThreadId();
+      const targetRef = scopeThreadRef(activeThreadRef.environmentId, targetThreadId);
+      setIsForkingConversation(true);
+      const result = await forkThreadConversation({
+        environmentId: activeThreadRef.environmentId,
+        input: {
+          threadId: activeThread.id,
+          targetThreadId,
+          sourceMessageId: messageId,
+        },
+      });
+      if (result._tag === "Failure") {
+        setIsForkingConversation(false);
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not create conversation branch",
+              description: error instanceof Error ? error.message : "The branch request failed.",
+            }),
+          );
+        }
+        return;
+      }
+
+      const deadline = Date.now() + 20_000;
+      let ready = false;
+      while (Date.now() < deadline) {
+        const targetShell = readThreadShell(targetRef);
+        const targetDetail = targetShell === null ? null : readThreadDetail(targetRef);
+        ready =
+          targetDetail?.activities.some(
+            (activity) => activity.kind === "conversation.branch.ready",
+          ) ?? false;
+        if (ready) break;
+        const sourceDetail = readThreadDetail(activeThreadRef);
+        const failure = sourceDetail?.activities.find((activity) => {
+          if (activity.kind !== "conversation.branch.failed") return false;
+          const payload = activity.payload;
+          return (
+            typeof payload === "object" &&
+            payload !== null &&
+            "targetThreadId" in payload &&
+            payload.targetThreadId === targetThreadId
+          );
+        });
+        if (failure) {
+          setIsForkingConversation(false);
+          const payload = failure.payload as { readonly detail?: unknown };
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not create conversation branch",
+              description:
+                typeof payload.detail === "string"
+                  ? payload.detail
+                  : "The provider could not fork this conversation.",
+            }),
+          );
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
+      if (!ready) {
+        setIsForkingConversation(false);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Conversation branch did not become ready",
+            description: "The original conversation and workspace were left unchanged.",
+          }),
+        );
+        return;
+      }
+
+      setComposerDraftPrompt(targetRef, text);
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: activeThreadRef.environmentId,
+          threadId: targetThreadId,
+        },
+      });
+      setIsForkingConversation(false);
+      window.requestAnimationFrame(() => composerRef.current?.focusAtEnd());
+    },
+    [
+      activeThread,
+      activeThreadRef,
+      composerRef,
+      forkThreadConversation,
+      isForkingConversation,
+      isServerThread,
+      navigate,
+      phase,
+      setComposerDraftPrompt,
+    ],
+  );
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -6883,6 +7048,49 @@ function ChatViewContent(props: ChatViewProps) {
             setThreadErrorBannerDismissTick((tick) => tick + 1);
           }}
         />
+        {parentConversationBranch || childConversationBranches.length > 0 ? (
+          <nav
+            aria-label="Conversation branches"
+            className="flex min-h-9 items-center gap-1 border-b border-border/60 px-4 text-xs"
+          >
+            <span className="me-1 text-muted-foreground">Conversation branches</span>
+            {parentConversationBranch ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() =>
+                  void navigate({
+                    to: "/$environmentId/$threadId",
+                    params: {
+                      environmentId: activeThread.environmentId,
+                      threadId: parentConversationBranch.parentThreadId,
+                    },
+                  })
+                }
+              >
+                Parent
+              </Button>
+            ) : null}
+            {childConversationBranches.map((relation, index) => (
+              <Button
+                key={relation.childThreadId}
+                size="xs"
+                variant="ghost"
+                onClick={() =>
+                  void navigate({
+                    to: "/$environmentId/$threadId",
+                    params: {
+                      environmentId: activeThread.environmentId,
+                      threadId: relation.childThreadId,
+                    },
+                  })
+                }
+              >
+                Branch {index + 1}
+              </Button>
+            ))}
+          </nav>
+        ) : null}
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
@@ -6935,6 +7143,9 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
+                onEditUserMessage={(messageId, text) => {
+                  void onEditUserMessage(messageId, text);
+                }}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}

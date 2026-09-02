@@ -947,6 +947,15 @@ const ThreadSessionStopCommand = Schema.Struct({
   onlyIfSettled: Schema.optional(Schema.Boolean),
 });
 
+const ThreadConversationForkCommand = Schema.Struct({
+  type: Schema.Literal("thread.conversation.fork"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  targetThreadId: ThreadId,
+  sourceMessageId: MessageId,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -970,6 +979,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
+  ThreadConversationForkCommand,
   ThreadSessionStopCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -998,6 +1008,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
+  ThreadConversationForkCommand,
   ThreadSessionStopCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
@@ -1027,6 +1038,19 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   messageId: MessageId,
   turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
+});
+
+const ThreadMessageImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.import"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  role: OrchestrationMessageRole,
+  text: Schema.String,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  turnId: Schema.NullOr(TurnId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
 });
 
 const ThreadProposedPlanUpsertCommand = Schema.Struct({
@@ -1079,6 +1103,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
+  ThreadMessageImportCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
@@ -1117,6 +1142,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
   "thread.checkpoint-revert-requested",
+  "thread.conversation-fork-requested",
   "thread.reverted",
   "thread.session-stop-requested",
   "thread.session-set",
@@ -1293,6 +1319,13 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadConversationForkRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  targetThreadId: ThreadId,
+  sourceMessageId: MessageId,
   createdAt: IsoDateTime,
 });
 
@@ -1507,6 +1540,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.checkpoint-revert-requested"),
     payload: ThreadCheckpointRevertRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.conversation-fork-requested"),
+    payload: ThreadConversationForkRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

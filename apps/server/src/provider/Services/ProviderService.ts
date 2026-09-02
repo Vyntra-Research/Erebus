@@ -33,6 +33,7 @@ import type * as Stream from "effect/Stream";
 
 import type { ProviderServiceError } from "../Errors.ts";
 import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type { ProviderConversationForkResult } from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
 
 /**
@@ -109,6 +110,12 @@ export interface ProviderServiceShape {
     readonly threadId: ThreadId;
     readonly numTurns: number;
   }) => Effect.Effect<void, ProviderServiceError>;
+
+  /** Fork a provider conversation without changing the source thread or files. */
+  readonly forkConversation?: (input: {
+    readonly threadId: ThreadId;
+    readonly throughTurnCount: number;
+  }) => Effect.Effect<ProviderConversationForkResult, ProviderServiceError>;
 
   /**
    * Upload a thread and return the provider's shareable feedback identifier.
