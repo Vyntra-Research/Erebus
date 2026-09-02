@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-09-01
+
+### Fixed
+
+- Allow campaign start and resume when the Proteus plugin probe times out but its skills and MCP tools are ready. Confirmed missing, disabled, or incompatible plugins still block the campaign.
+
 ## 0.2.0 - 2026-09-01
 
 ### Added
