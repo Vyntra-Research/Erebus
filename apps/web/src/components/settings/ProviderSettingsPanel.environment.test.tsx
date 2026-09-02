@@ -272,6 +272,7 @@ describe("EnvironmentProviderSettings routing", () => {
       providerInstances: {
         [codexId]: settingsState.value.providerInstances?.[codexId],
       },
+      codexAccountRouting: settingsState.value.codexAccountRouting,
     });
 
     settingsState.updateSettings.mockClear();
