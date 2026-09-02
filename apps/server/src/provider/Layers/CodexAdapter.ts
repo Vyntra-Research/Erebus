@@ -42,6 +42,11 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import type { CoagentToolControllerShape } from "../../coagents/Services/CoagentToolController.ts";
+import {
+  EREBUS_THREADS_DYNAMIC_TOOL,
+  isErebusThreadsToolCall,
+} from "../../coagents/coagentTools.ts";
 import type { ResearchToolControllerShape } from "../../research/Services/ResearchToolController.ts";
 import { EREBUS_RESEARCH_DYNAMIC_TOOL } from "../../research/researchTools.ts";
 
@@ -89,6 +94,7 @@ export interface CodexAdapterLiveOptions {
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly researchToolController?: ResearchToolControllerShape;
+  readonly coagentToolController?: CoagentToolControllerShape;
 }
 
 interface CodexAdapterSessionContext {
@@ -1700,6 +1706,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         }
         const projectId = input.projectId;
         const researchToolController = options?.researchToolController;
+        const coagentToolController = options?.coagentToolController;
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -1722,25 +1729,58 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   McpProviderSession.setMcpProviderSessionProteusHealth(input.threadId, health),
               }
             : {}),
-          ...(projectId && researchToolController
+          ...(projectId && (researchToolController || coagentToolController)
             ? {
-                dynamicTools: [EREBUS_RESEARCH_DYNAMIC_TOOL],
+                dynamicTools: [
+                  ...(researchToolController ? [EREBUS_RESEARCH_DYNAMIC_TOOL] : []),
+                  ...(coagentToolController ? [EREBUS_THREADS_DYNAMIC_TOOL] : []),
+                ],
                 handleDynamicTool: (params, proteus) =>
-                  researchToolController.handle(
-                    {
-                      projectId,
-                      threadId: input.threadId,
-                      cwd: input.cwd ?? process.cwd(),
-                      proteus,
-                    },
-                    params,
-                  ),
+                  isErebusThreadsToolCall(params) && coagentToolController
+                    ? coagentToolController.handle(
+                        {
+                          projectId,
+                          threadId: input.threadId,
+                          cwd: input.cwd ?? process.cwd(),
+                        },
+                        params,
+                      )
+                    : researchToolController
+                      ? researchToolController.handle(
+                          {
+                            projectId,
+                            threadId: input.threadId,
+                            cwd: input.cwd ?? process.cwd(),
+                            proteus,
+                          },
+                          params,
+                        )
+                      : Effect.succeed({
+                          success: false,
+                          contentItems: [
+                            {
+                              type: "inputText" as const,
+                              text: "The requested Erebus control plane is unavailable.",
+                            },
+                          ],
+                        }),
                 getAdditionalDeveloperInstructions: () =>
-                  researchToolController.principalInstructions({
-                    projectId,
-                    threadId: input.threadId,
-                    cwd: input.cwd ?? process.cwd(),
-                  }),
+                  Effect.all([
+                    researchToolController
+                      ? researchToolController.principalInstructions({
+                          projectId,
+                          threadId: input.threadId,
+                          cwd: input.cwd ?? process.cwd(),
+                        })
+                      : Effect.succeed(""),
+                    coagentToolController
+                      ? coagentToolController.instructions({
+                          projectId,
+                          threadId: input.threadId,
+                          cwd: input.cwd ?? process.cwd(),
+                        })
+                      : Effect.succeed(""),
+                  ]).pipe(Effect.map((parts) => parts.filter(Boolean).join("\n\n"))),
               }
             : {}),
           ...(mcpSession && mcpAppServerArgs.length > 0

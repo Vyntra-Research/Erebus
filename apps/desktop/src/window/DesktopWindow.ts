@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 
 import * as Electron from "electron";
 
@@ -70,7 +71,17 @@ type DesktopWindowRuntimeServices =
 
 export type DesktopWindowError =
   | ElectronWindow.ElectronWindowCreateError
+  | DesktopWindowTrayError
   | PreviewManager.PreviewManagerError;
+
+export class DesktopWindowTrayError extends Schema.TaggedErrorClass<DesktopWindowTrayError>()(
+  "DesktopWindowTrayError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to configure the desktop tray.";
+  }
+}
 
 export type MainWindowZoomDirection = "in" | "out" | "reset";
 
@@ -107,6 +118,10 @@ export class DesktopWindow extends Context.Service<
     // the main window.
     readonly zoomMain: (direction: MainWindowZoomDirection) => Effect.Effect<void>;
     readonly syncAppearance: Effect.Effect<void>;
+    readonly setCloseToTrayEnabled?: (
+      enabled: boolean,
+    ) => Effect.Effect<void, DesktopWindowTrayError>;
+    readonly prepareForQuit?: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/window/DesktopWindow") {}
 
@@ -308,6 +323,8 @@ export const make = Effect.gen(function* () {
   const runFork = Effect.runForkWith(context);
   const runPromise = Effect.runPromiseWith(context);
   let flushMainWindowBounds: Effect.Effect<void> = Effect.void;
+  let closeToTrayEnabled = false;
+  let tray: Electron.Tray | null = null;
 
   const dismissConnectingSplash = Effect.gen(function* () {
     const splash = yield* Ref.getAndSet(splashWindowRef, Option.none());
@@ -334,6 +351,76 @@ export const make = Effect.gen(function* () {
 
   const currentMainWindow = electronWindow.currentMainOrFirst.pipe(Effect.flatMap(withoutSplash));
   const focusedMainWindow = electronWindow.focusedMainOrFirst.pipe(Effect.flatMap(withoutSplash));
+
+  const setCloseToTrayEnabled = Effect.fn("desktop.window.setCloseToTrayEnabled")(function* (
+    enabled: boolean,
+  ) {
+    if (!enabled) {
+      closeToTrayEnabled = false;
+      if (tray !== null && !tray.isDestroyed()) {
+        tray.destroy();
+      }
+      tray = null;
+      return;
+    }
+
+    const iconPaths = yield* assets.iconPaths;
+    const preferredIcon = environment.platform === "win32" ? iconPaths.ico : iconPaths.png;
+    const iconPath = Option.getOrElse(preferredIcon, () =>
+      Option.getOrElse(iconPaths.png, () => ""),
+    );
+    if (iconPath.length === 0) {
+      return yield* new DesktopWindowTrayError({
+        cause: new Error("No desktop tray icon is available."),
+      });
+    }
+
+    yield* Effect.try({
+      try: () => {
+        if (tray === null || tray.isDestroyed()) {
+          tray = new Electron.Tray(iconPath);
+          tray.on("click", () => {
+            void runPromise(
+              Effect.gen(function* () {
+                const mainWindow = yield* currentMainWindow;
+                if (Option.isSome(mainWindow)) {
+                  yield* electronWindow.reveal(mainWindow.value);
+                }
+              }),
+            );
+          });
+        }
+        tray.setToolTip(environment.displayName);
+        tray.setContextMenu(
+          Electron.Menu.buildFromTemplate([
+            {
+              label: "Open Erebus",
+              click: () => {
+                void runPromise(
+                  Effect.gen(function* () {
+                    const mainWindow = yield* currentMainWindow;
+                    if (Option.isSome(mainWindow)) {
+                      yield* electronWindow.reveal(mainWindow.value);
+                    }
+                  }),
+                );
+              },
+            },
+            { type: "separator" },
+            {
+              label: "Quit Erebus",
+              click: () => {
+                closeToTrayEnabled = false;
+                void runPromise(electronApp.quit);
+              },
+            },
+          ]),
+        );
+      },
+      catch: (cause) => new DesktopWindowTrayError({ cause }),
+    });
+    closeToTrayEnabled = true;
+  });
 
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (): Effect.fn.Return<
     Electron.BrowserWindow,
@@ -613,8 +700,13 @@ export const make = Effect.gen(function* () {
     window.on("move", scheduleBoundsPersist);
     window.on("maximize", scheduleBoundsPersist);
     window.on("unmaximize", scheduleBoundsPersist);
-    window.on("close", () => {
+    window.on("close", (event) => {
       runFork(flushBoundsPersist);
+      if (!closeToTrayEnabled) {
+        return;
+      }
+      event.preventDefault();
+      window.hide();
     });
 
     if (environment.platform === "darwin") {
@@ -766,6 +858,15 @@ export const make = Effect.gen(function* () {
     });
 
     loadApplication();
+    if (persistedSettings.closeToTray === true && !closeToTrayEnabled) {
+      yield* setCloseToTrayEnabled(true).pipe(
+        Effect.catch((error) =>
+          logWindowWarning("failed to restore close-to-tray; normal close remains enabled", {
+            message: error.message,
+          }),
+        ),
+      );
+    }
     if (environment.isDevelopment) {
       window.webContents.openDevTools({ mode: "detach" });
     }
@@ -935,6 +1036,10 @@ export const make = Effect.gen(function* () {
         syncWindowAppearance(window, shouldUseDarkColors, environment.platform),
       );
     }).pipe(Effect.withSpan("desktop.window.syncAppearance")),
+    setCloseToTrayEnabled,
+    prepareForQuit: Effect.sync(() => {
+      closeToTrayEnabled = false;
+    }),
   });
 });
 

@@ -141,6 +141,7 @@ function toRuntimePayloadFromSession(
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
     readonly erebusResearchNativeTools?: boolean;
+    readonly erebusNativeControlVersion?: number;
   },
 ): Record<string, unknown> {
   return {
@@ -155,6 +156,9 @@ function toRuntimePayloadFromSession(
       : {}),
     ...(extra?.erebusResearchNativeTools !== undefined
       ? { erebusResearchNativeTools: extra.erebusResearchNativeTools }
+      : {}),
+    ...(extra?.erebusNativeControlVersion !== undefined
+      ? { erebusNativeControlVersion: extra.erebusNativeControlVersion }
       : {}),
   };
 }
@@ -181,15 +185,18 @@ function readPersistedCwd(
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function readPersistedResearchNativeTools(
+const EREBUS_NATIVE_CONTROL_VERSION = 3;
+
+function readPersistedNativeControlIsCurrent(
   runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
 ): boolean {
   return (
     runtimePayload !== null &&
     typeof runtimePayload === "object" &&
     !Array.isArray(runtimePayload) &&
-    "erebusResearchNativeTools" in runtimePayload &&
-    runtimePayload.erebusResearchNativeTools === true
+    "erebusNativeControlVersion" in runtimePayload &&
+    typeof runtimePayload.erebusNativeControlVersion === "number" &&
+    runtimePayload.erebusNativeControlVersion >= EREBUS_NATIVE_CONTROL_VERSION
   );
 }
 
@@ -291,8 +298,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const previewEnabled = yield* agentBrowserAccessEnabled;
       // Codex accepts dynamic tools only on thread/start. Its thread/resume
       // request has no dynamicTools field, so an existing provider thread needs
-      // the authenticated MCP transport for the same durable research tools.
-      // Fresh Codex threads keep the native dynamic namespace exclusively.
+      // the authenticated MCP transport when it predates the current durable
+      // Erebus control toolset. Fresh Codex threads keep native namespaces only.
       const researchFallbackEnabled = needsResearchMcpFallback(input);
       if (!previewEnabled && !researchFallbackEnabled) {
         // Revoke as well as clear. Every other prepare path reaches
@@ -360,6 +367,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
       readonly erebusResearchNativeTools?: boolean;
+      readonly erebusNativeControlVersion?: number;
     },
   ) =>
     Effect.gen(function* () {
@@ -499,7 +507,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         providerInstanceId: bindingInstanceId,
         provider: input.binding.provider,
         resumeCursor: input.binding.resumeCursor,
-        hasNativeResearchTools: readPersistedResearchNativeTools(input.binding.runtimePayload),
+        hasNativeResearchTools: readPersistedNativeControlIsCurrent(input.binding.runtimePayload),
       });
       const resumed = yield* adapter
         .startSession({
@@ -701,7 +709,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: resolvedInstanceId,
           provider: resolvedProvider,
           resumeCursor: effectiveResumeCursor,
-          hasNativeResearchTools: readPersistedResearchNativeTools(
+          hasNativeResearchTools: readPersistedNativeControlIsCurrent(
             persistedBinding?.runtimePayload ?? null,
           ),
         });
@@ -735,7 +743,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...(resolvedProvider === "codex" &&
           effectiveResumeCursor === undefined &&
           input.projectId !== undefined
-            ? { erebusResearchNativeTools: true }
+            ? {
+                erebusResearchNativeTools: true,
+                erebusNativeControlVersion: EREBUS_NATIVE_CONTROL_VERSION,
+              }
             : {}),
         });
         yield* analytics.record("provider.session.started", {

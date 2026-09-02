@@ -1,10 +1,12 @@
 import {
   CommandId,
   EventId,
+  IsoDateTime,
   MessageId,
   ResearchEventId,
   ResearchEvaluationId,
   type ResearchFindingId,
+  type ResearchPrincipalMessage,
   ResearchInterventionId,
   type ResearchJudgeEvaluation,
   ThreadMessageSentPayload,
@@ -25,6 +27,7 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { CoagentRegistry } from "../../coagents/Services/CoagentRegistry.ts";
 import { ResearchEngine } from "../Services/ResearchEngine.ts";
 import { ResearchEvaluator } from "../Services/ResearchEvaluator.ts";
 import {
@@ -81,6 +84,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
   const research = yield* ResearchEngine;
   const evaluator = yield* ResearchEvaluator;
   const serverSettings = yield* ServerSettingsService;
+  const coagents = yield* CoagentRegistry;
   const crypto = yield* Crypto.Crypto;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -148,6 +152,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
     readonly source: import("@t3tools/contracts").ResearchInterventionSource;
     readonly observation: string;
     readonly expectedTurnId: TurnId | null;
+    readonly targetThreadId: ThreadId;
   }) {
     // Observer steering is valid only against the exact live turn it evaluated.
     // The durable evaluation remains the audit record when that turn has ended.
@@ -159,6 +164,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
       id,
       campaignId: input.campaignId,
       evaluationId: input.evaluationId,
+      targetThreadId: input.targetThreadId,
       source: input.source,
       delivery: "live" as const,
       status: "queued" as const,
@@ -179,12 +185,9 @@ const makeResearchSupervisor = Effect.gen(function* () {
       campaignId: input.campaignId,
       intervention,
     });
-    const projection = yield* research.findProjection(input.campaignId);
-    const principalThreadId = projection?.campaign?.principalThreadId;
-    if (!principalThreadId) return;
     const delivered = yield* Effect.result(
       providers.steerTurn({
-        threadId: principalThreadId,
+        threadId: input.targetThreadId,
         expectedTurnId: input.expectedTurnId,
         text: intervention.message,
       }),
@@ -202,7 +205,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
     });
     yield* appendSupervisorActivity({
       activityId: `observer:${id}:settled`,
-      threadId: principalThreadId,
+      threadId: input.targetThreadId,
       turnId: input.expectedTurnId,
       kind: "research.observer.intervention",
       summary:
@@ -222,11 +225,16 @@ const makeResearchSupervisor = Effect.gen(function* () {
   const expireQueuedObserverInterventions = Effect.fn(
     "ResearchSupervisor.expireQueuedObserverInterventions",
   )(function* (threadId: ThreadId) {
-    const projection = yield* research.findProjectionByThread(threadId);
+    const childLink = yield* coagents.getByChild(threadId).pipe(Effect.map(Option.getOrNull));
+    const projection = yield* research.findProjectionByThread(
+      childLink?.parentThreadId ?? threadId,
+    );
     const campaign = projection?.campaign;
     if (!projection || !campaign) return;
     yield* Effect.forEach(
-      queuedObserverInterventions(projection),
+      queuedObserverInterventions(projection).filter(
+        (intervention) => (intervention.targetThreadId ?? campaign.principalThreadId) === threadId,
+      ),
       (intervention) =>
         research.dispatch({
           type: "intervention.record",
@@ -393,23 +401,60 @@ const makeResearchSupervisor = Effect.gen(function* () {
 
   const evaluateObserverWindow = Effect.fn("ResearchSupervisor.evaluateObserverWindow")(function* (
     campaignId: import("@t3tools/contracts").ResearchCampaignId,
+    observedThreadId?: ThreadId,
   ) {
     const projection = yield* research.findProjection(campaignId);
     const campaign = projection?.campaign;
     if (!projection || !campaign || campaign.status !== "active") return;
     const contract = activeResearchContract(projection);
     if (!contract) return;
+    const targetThreadId = observedThreadId ?? campaign.principalThreadId;
+    const coagentLink = observedThreadId
+      ? yield* coagents.getByChild(observedThreadId).pipe(Effect.map(Option.getOrNull))
+      : null;
+    if (
+      observedThreadId &&
+      (!coagentLink ||
+        coagentLink.parentThreadId !== campaign.principalThreadId ||
+        coagentLink.status === "failed" ||
+        coagentLink.status === "released")
+    ) {
+      return;
+    }
     const supervisionSettings = (yield* serverSettings.getSettings).researchSupervision;
     const observerPolicy = researchObserverPolicyFromSettings(supervisionSettings);
-    const start = campaign.lastObservedMessageCount;
-    const end = start + observerPolicy.messageWindow;
-    if (campaign.eligibleMessageCount < end) return;
-    const persistedMessages = projection.principalMessages.slice(start, end);
-    if (persistedMessages.length !== observerPolicy.messageWindow) return;
-    const context = yield* threadContext(campaign.principalThreadId);
+    const context = yield* threadContext(targetThreadId);
     if (!context) return;
-    const campaignSnapshot = buildObserverCampaignSnapshot(projection, observerPolicy);
-    if (!campaignSnapshot) return;
+    const completedMessages: ReadonlyArray<ResearchPrincipalMessage> = observedThreadId
+      ? context.thread.messages
+          .filter(
+            (message) =>
+              message.role === "assistant" && !message.streaming && message.text.trim().length > 0,
+          )
+          .map((message) => ({ id: message.id, text: message.text, turnId: message.turnId }))
+      : projection.principalMessages;
+    const start = observedThreadId
+      ? coagentLink?.observerCampaignId === campaignId
+        ? coagentLink.observerMessageCount
+        : 0
+      : campaign.lastObservedMessageCount;
+    const end = start + observerPolicy.messageWindow;
+    if (completedMessages.length < end) return;
+    const persistedMessages = completedMessages.slice(start, end);
+    if (persistedMessages.length !== observerPolicy.messageWindow) return;
+    const baseCampaignSnapshot = buildObserverCampaignSnapshot(projection, observerPolicy);
+    if (!baseCampaignSnapshot) return;
+    const campaignSnapshot = coagentLink
+      ? {
+          ...baseCampaignSnapshot,
+          observedTask: {
+            threadId: coagentLink.childThreadId,
+            role: "coagent" as const,
+            parentThreadId: coagentLink.parentThreadId,
+            assignment: coagentLink.assignment,
+          },
+        }
+      : baseCampaignSnapshot;
     const messages = hydratePrincipalMessageTexts(persistedMessages, context.thread.messages);
     if (messages.some((message) => message.text.trim().length === 0)) {
       yield* Effect.logWarning("Erebus observer window contains unresolved empty messages", {
@@ -470,6 +515,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
     const evaluation = {
       evaluationId,
       campaignId,
+      ...(observedThreadId ? { observedThreadId } : {}),
       contractId: contract.id,
       contractRevision: contract.revision,
       messageItemIds: messages.map((message) => message.id),
@@ -484,11 +530,19 @@ const makeResearchSupervisor = Effect.gen(function* () {
     } as const;
     const recorded = yield* research.dispatch({
       type: "observer.evaluation.record",
-      commandId: CommandId.make(`observer:evaluation:${campaignId}:${end}`),
+      commandId: CommandId.make(`observer:evaluation:${campaignId}:${targetThreadId}:${end}`),
       campaignId,
       evaluation,
       windowEndMessageCount: end,
     });
+    if (coagentLink) {
+      yield* coagents.setObserverCursor({
+        childThreadId: coagentLink.childThreadId,
+        campaignId,
+        messageCount: end,
+        updatedAt: IsoDateTime.make(evaluatedAt),
+      });
+    }
     if (recorded.replayed) return;
     if (recorded.projection.campaign?.status !== "active") return;
 
@@ -497,7 +551,9 @@ const makeResearchSupervisor = Effect.gen(function* () {
 
     const expectedTurnId = messages.at(-1)?.turnId ?? null;
     const interventionsThisTurn = recorded.projection.interventions.filter(
-      (intervention) => intervention.expectedTurnId === expectedTurnId,
+      (intervention) =>
+        intervention.expectedTurnId === expectedTurnId &&
+        (intervention.targetThreadId ?? campaign.principalThreadId) === targetThreadId,
     ).length;
     if (
       observerPolicy.maxInterventionsPerTurn !== null &&
@@ -511,13 +567,17 @@ const makeResearchSupervisor = Effect.gen(function* () {
       .map((intervention) => ({
         intervention,
         evaluation: recorded.projection.observerEvaluations.find(
-          (candidate) => candidate.evaluationId === intervention.evaluationId,
+          (candidate) =>
+            candidate.evaluationId === intervention.evaluationId &&
+            (candidate.observedThreadId ?? campaign.principalThreadId) === targetThreadId,
         ),
       }))
       .find((entry) => entry.evaluation !== undefined);
     const previousWindowEnd = previousObserverIntervention?.evaluation?.messageItemIds.at(-1);
     if (previousWindowEnd) {
-      const previousIndex = recorded.projection.principalMessageItemIds.indexOf(previousWindowEnd);
+      const previousIndex = completedMessages.findIndex(
+        (message) => message.id === previousWindowEnd,
+      );
       const messagesSinceIntervention = previousIndex < 0 ? end : end - (previousIndex + 1);
       if (messagesSinceIntervention < observerPolicy.cooldownMessages) return;
     }
@@ -526,6 +586,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
       evaluationId,
       source: "observer",
       expectedTurnId,
+      targetThreadId,
       observation: evaluation.recommendedSteering!,
     });
   });
@@ -545,7 +606,17 @@ const makeResearchSupervisor = Effect.gen(function* () {
       if (!isCompletedAssistantMessage(payload)) return;
       const projection = yield* research.findProjectionByThread(payload.threadId);
       const campaign = projection?.campaign;
-      if (!campaign || campaign.status !== "active") return;
+      if (!campaign || campaign.status !== "active") {
+        const childLink = yield* coagents
+          .getByChild(payload.threadId)
+          .pipe(Effect.map(Option.getOrNull));
+        if (!childLink || childLink.status === "failed" || childLink.status === "released") return;
+        const parentProjection = yield* research.findProjectionByThread(childLink.parentThreadId);
+        const parentCampaign = parentProjection?.campaign;
+        if (!parentCampaign || parentCampaign.status !== "active") return;
+        yield* evaluateObserverWindow(parentCampaign.id, payload.threadId);
+        return;
+      }
       const context = yield* threadContext(payload.threadId);
       if (!context) return;
       const text = resolveCompletedAssistantMessageText(payload, context.thread.messages);
@@ -807,6 +878,34 @@ const makeResearchSupervisor = Effect.gen(function* () {
           yield* Effect.forEach(
             Array.from({ length: Math.max(0, pendingObserverWindows) }),
             () => evaluateObserverWindow(campaign.id),
+            { discard: true },
+          );
+          const childLinks = (yield* coagents.listByParent(campaign.principalThreadId)).filter(
+            (link) => link.status === "ready" || link.status === "preparing",
+          );
+          yield* Effect.forEach(
+            childLinks,
+            (link) =>
+              Effect.gen(function* () {
+                const context = yield* threadContext(link.childThreadId);
+                if (!context) return;
+                const completedCount = context.thread.messages.filter(
+                  (message) =>
+                    message.role === "assistant" &&
+                    !message.streaming &&
+                    message.text.trim().length > 0,
+                ).length;
+                const cursor =
+                  link.observerCampaignId === campaign.id ? link.observerMessageCount : 0;
+                const pending = Math.floor(
+                  Math.max(0, completedCount - cursor) / observerPolicy.messageWindow,
+                );
+                yield* Effect.forEach(
+                  Array.from({ length: pending }),
+                  () => evaluateObserverWindow(campaign.id, link.childThreadId),
+                  { discard: true },
+                );
+              }),
             { discard: true },
           );
           yield* Effect.forEach(

@@ -129,6 +129,8 @@ import { ResearchEvaluatorLive } from "./research/Layers/ResearchEvaluator.ts";
 import { ResearchSupervisorLive } from "./research/Layers/ResearchSupervisor.ts";
 import { ResearchToolControllerLive } from "./research/Layers/ResearchToolController.ts";
 import { ProteusBridgeLive } from "./research/Layers/ProteusBridge.ts";
+import { CoagentRegistryLive } from "./coagents/Layers/CoagentRegistry.ts";
+import { CoagentToolControllerLive } from "./coagents/Layers/CoagentToolController.ts";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
@@ -252,8 +254,13 @@ const PlatformServicesLive = Layer.unwrap(
   }),
 );
 
+const CoagentRegistryLayerLive = CoagentRegistryLive.pipe(
+  Layer.provideMerge(SqlitePersistenceLayerLive),
+);
+
 const ResearchSupervisorRuntimeLive = ResearchSupervisorLive.pipe(
   Layer.provideMerge(ResearchEvaluatorLive),
+  Layer.provideMerge(CoagentRegistryLayerLive),
 );
 
 const ReactorLayerLive = Layer.empty.pipe(
@@ -293,9 +300,15 @@ const ResearchEngineLayerLive = ResearchEngineLive.pipe(
 const ResearchLayerLive = ResearchToolControllerLive.pipe(
   Layer.provideMerge(ResearchEngineLayerLive),
   Layer.provideMerge(ProteusBridgeLive.pipe(Layer.provide(ProcessRunner.layer))),
+  Layer.provideMerge(CoagentRegistryLayerLive),
 );
-const ProviderInstanceRegistryHydrationWithResearchLive =
-  ProviderInstanceRegistryHydrationLive.pipe(Layer.provideMerge(ResearchLayerLive));
+const CoagentLayerLive = CoagentToolControllerLive.pipe(
+  Layer.provideMerge(CoagentRegistryLayerLive),
+  Layer.provideMerge(OrchestrationLayerLive),
+);
+const ErebusControlLayerLive = ResearchLayerLive.pipe(Layer.provideMerge(CoagentLayerLive));
+const ProviderInstanceRegistryHydrationWithErebusControlLive =
+  ProviderInstanceRegistryHydrationLive.pipe(Layer.provideMerge(ErebusControlLayerLive));
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
@@ -420,7 +433,7 @@ const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationWithResearchLive),
+  Layer.provideMerge(ProviderInstanceRegistryHydrationWithErebusControlLive),
 );
 
 const RuntimeCoreDependenciesLive = RuntimeCoreServicesLive.pipe(

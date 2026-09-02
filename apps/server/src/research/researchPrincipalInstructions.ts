@@ -3,7 +3,7 @@ import type { ResearchContract } from "@t3tools/contracts";
 import type { ResearchProjection } from "./researchState.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const EREBUS_PRINCIPAL_POLICY_VERSION = 10;
+export const EREBUS_PRINCIPAL_POLICY_VERSION = 11;
 
 export const EREBUS_PRINCIPAL_INSTRUCTIONS = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
@@ -123,4 +123,48 @@ export function buildPrincipalResearchInstructions(projection: ResearchProjectio
   ].join("\n");
 
   return `${EREBUS_PRINCIPAL_INSTRUCTIONS}\n<erebus_campaign_state>\n${state}\n</erebus_campaign_state>`;
+}
+
+export function buildCoagentResearchInstructions(
+  projection: ResearchProjection | null,
+  assignment: string,
+  parentThreadId: string,
+): string {
+  const campaign = projection?.campaign;
+  const contract =
+    projection && campaign
+      ? projection.contracts.find(
+          (candidate) =>
+            candidate.id === campaign.activeContractId &&
+            candidate.revision === campaign.activeContractRevision,
+        )
+      : undefined;
+  const checkpoint = projection?.checkpoints.at(-1);
+  const state = campaign
+    ? [
+        `Parent campaign ${campaign.id} is ${campaign.status}; Proteus campaign ${campaign.proteusCampaignId}.`,
+        contract ? summarizeContract(contract) : "No contract revision is active.",
+        checkpoint
+          ? `Latest parent checkpoint: ${checkpoint.summary} Next move: ${checkpoint.nextMove}`
+          : "No parent checkpoint has been recorded.",
+      ].join("\n")
+    : "The parent task has no active Erebus campaign.";
+
+  return `${EREBUS_RESEARCH_BASE_CONTRACT}
+<erebus_research_protocol version="1" role="coagent" parent_thread_id="${parentThreadId}">
+You are a monitored research co-agent, not the campaign owner. The active parent contract and explicit user instructions are binding for your assigned surface.
+
+- Work only on the bounded assignment below. Do not coordinate other Erebus co-agents or overlap another delegated surface.
+- You may call research.get_status, or its matching MCP fallback, only to read the parent campaign. Never call another research control. You cannot create, register, start, checkpoint, pause, resume, finish, abort, submit, revise, promote, reject, or otherwise manage an Erebus or Proteus campaign.
+- Do not submit findings to the Judge. Return candidate evidence, PoC state, negative controls, killed paths, open questions, and recommendations to the parent. The parent validates, records, submits, and decides.
+- The Observer evaluates this task independently against the same parent contract and your assignment. Treat a freshly delivered live Observer steer as a contract correction, not as campaign authority or strategy ownership.
+- Your final response is the canonical handback to the parent. Keep it exact enough for independent verification.
+
+<coagent_assignment>
+${assignment}
+</coagent_assignment>
+<parent_campaign_state>
+${state}
+</parent_campaign_state>
+</erebus_research_protocol>`;
 }

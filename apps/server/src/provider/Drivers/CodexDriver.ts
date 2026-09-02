@@ -39,6 +39,7 @@ import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneratio
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { CoagentToolController } from "../../coagents/Services/CoagentToolController.ts";
 import { ResearchToolController } from "../../research/Services/ResearchToolController.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
@@ -134,6 +135,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const researchToolController = yield* ResearchToolController;
+      const coagentToolController = yield* CoagentToolController;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const defaultInstanceId = defaultInstanceIdForDriver(DRIVER_KIND);
       const accountConfig = withAutomaticCodexAccountOverlay(config, {
@@ -218,6 +220,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         ...(researchToolController ? { researchToolController } : {}),
+        ...(coagentToolController ? { coagentToolController } : {}),
       });
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);
 

@@ -11,13 +11,18 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { CoagentRegistry } from "../../coagents/Services/CoagentRegistry.ts";
 import { ResearchEngine } from "../Services/ResearchEngine.ts";
 import { ResearchToolController } from "../Services/ResearchToolController.ts";
 import { ProteusBridge } from "../Services/ProteusBridge.ts";
-import { buildPrincipalResearchInstructions } from "../researchPrincipalInstructions.ts";
+import {
+  buildCoagentResearchInstructions,
+  buildPrincipalResearchInstructions,
+} from "../researchPrincipalInstructions.ts";
 import { canonicalContractDigest, canonicalizeFindingCvss } from "../researchIntegrity.ts";
 import { researchObserverPolicyFromSettings } from "../researchPolicy.ts";
 import { isErebusResearchToolCall, toDynamicToolResponse } from "../researchTools.ts";
@@ -87,6 +92,7 @@ const makeResearchToolController = Effect.gen(function* () {
   const engine = yield* ResearchEngine;
   const proteusBridge = yield* ProteusBridge;
   const serverSettings = yield* ServerSettingsService;
+  const coagents = yield* CoagentRegistry;
 
   const resolveProteusCampaign = Effect.fn("ResearchToolController.resolveProteusCampaign")(
     function* (
@@ -173,8 +179,18 @@ const makeResearchToolController = Effect.gen(function* () {
 
   return {
     principalInstructions: (context) =>
-      engine.findProjectionByThread(context.threadId).pipe(
-        Effect.map((projection) => buildPrincipalResearchInstructions(projection)),
+      Effect.gen(function* () {
+        const link = yield* coagents
+          .getByChild(context.threadId)
+          .pipe(Effect.map(Option.getOrNull));
+        if (link) {
+          const projection = yield* engine.findProjectionByThread(link.parentThreadId);
+          return buildCoagentResearchInstructions(projection, link.assignment, link.parentThreadId);
+        }
+        return buildPrincipalResearchInstructions(
+          yield* engine.findProjectionByThread(context.threadId),
+        );
+      }).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("Failed to read Erebus campaign context.", {
             threadId: context.threadId,
@@ -186,6 +202,16 @@ const makeResearchToolController = Effect.gen(function* () {
       Effect.gen(function* () {
         if (!isErebusResearchToolCall(params)) {
           return failure("Unknown Erebus research tool.", [params.tool]);
+        }
+
+        const coagentLink = yield* coagents
+          .getByChild(context.threadId)
+          .pipe(Effect.map(Option.getOrNull));
+        if (coagentLink && params.tool !== "get_status") {
+          return failure(
+            "A co-agent cannot manage the research campaign. Return evidence and recommendations to the parent task.",
+            [`parentThreadId=${coagentLink.parentThreadId}`, `tool=research.${params.tool}`],
+          );
         }
 
         const commandId = CommandId.make(`dynamic:${context.threadId}:${params.callId}`);
@@ -257,9 +283,10 @@ const makeResearchToolController = Effect.gen(function* () {
             if (!projection || !campaign) {
               return failure("The campaign does not exist.", ["campaign not found"]);
             }
+            const ownerThreadId = coagentLink?.parentThreadId ?? context.threadId;
             if (
               campaign.projectId !== context.projectId ||
-              campaign.principalThreadId !== context.threadId
+              campaign.principalThreadId !== ownerThreadId
             ) {
               return failure("The campaign is not owned by this project thread.", [
                 "campaign context mismatch",

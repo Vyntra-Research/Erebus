@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.3 - 2026-09-02
+
+### Added
+
+- Added co-agent tasks for parallel coverage. A principal task can create blank or forked tasks, inspect progress, send follow-up instructions, wait for results, interrupt work, and release completed slots.
+- Added independent Observer windows for co-agent tasks while keeping campaign control with the principal task.
+- Added message editing and resend from conversation history.
+- Added an option to keep Erebus running in the system tray when its window closes.
+
+### Changed
+
+- Grouped active tasks by project and nested co-agents under their principal task with a visible role marker.
+- Moved the Settings shortcut into the sidebar footer and reduced the height of active task cards.
+- Extended the authenticated fallback control plane to cover task coordination when an older Codex session cannot receive native tools on resume.
+
+### Fixed
+
+- Prevented co-agents from changing campaign state while still allowing them to read the active research status.
+- Kept Observer message windows and steering bound to the task they evaluated.
+
 ## 0.2.2 - 2026-09-01
 
 ### Fixed

@@ -16,6 +16,21 @@ import { vi } from "vite-plus/test";
 
 vi.mock("electron", async (importOriginal) => ({
   ...(await importOriginal<typeof import("electron")>()),
+  Tray: class {
+    private destroyed = false;
+    on() {}
+    setToolTip() {}
+    setContextMenu() {}
+    isDestroyed() {
+      return this.destroyed;
+    }
+    destroy() {
+      this.destroyed = true;
+    }
+  },
+  Menu: {
+    buildFromTemplate: vi.fn(() => ({})),
+  },
   session: {
     fromPartition: vi.fn(() => ({
       getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/1.2.3"),
@@ -87,6 +102,7 @@ function makeFakeBrowserWindow() {
   const window = {
     close: vi.fn(),
     focus: vi.fn(),
+    hide: vi.fn(),
     getBounds: vi.fn(() => ({ x: 0, y: 0, width: 1100, height: 780 })),
     getNormalBounds: vi.fn(() => ({ x: 0, y: 0, width: 1100, height: 780 })),
     isDestroyed: vi.fn(() => false),
@@ -121,6 +137,7 @@ function makeFakeBrowserWindow() {
     isMinimized: window.isMinimized,
     loadURL: window.loadURL,
     maximize: window.maximize,
+    hide: window.hide,
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
     send: webContents.send,
@@ -205,6 +222,7 @@ function makeTestLayer(input: {
   ) => Effect.Effect<void>;
   readonly openedExternalUrls?: unknown[];
   readonly previewZoomReapplies?: number[];
+  readonly trayIconPath?: string;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -259,10 +277,21 @@ function makeTestLayer(input: {
     syncAllAppearance: (sync) => sync(input.window),
   } satisfies ElectronWindow.ElectronWindow["Service"]);
 
+  const assetsLayer = input.trayIconPath
+    ? Layer.succeed(DesktopAssets.DesktopAssets, {
+        iconPaths: Effect.succeed({
+          ico: Option.some(input.trayIconPath),
+          icns: Option.some(input.trayIconPath),
+          png: Option.some(input.trayIconPath),
+        }),
+        resolveResourcePath: () => Effect.succeed(Option.none<string>()),
+      } satisfies DesktopAssets.DesktopAssets["Service"])
+    : desktopAssetsLayer;
+
   return DesktopWindow.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        desktopAssetsLayer,
+        assetsLayer,
         desktopEnvironmentLayer,
         desktopAppSettingsLayer,
         desktopClientSettingsLayer,
@@ -951,6 +980,47 @@ describe("DesktopWindow", () => {
       assert.equal(createdWindowOptions[0]?.height, 780);
       assert.isUndefined(createdWindowOptions[0]?.x);
       assert.isUndefined(createdWindowOptions[0]?.y);
+    }),
+  );
+
+  it.effect("hides the main window on close only while close-to-tray is enabled", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        trayIconPath: "/repo/resources/erebus.png",
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        yield* desktopWindow.setCloseToTrayEnabled!(true);
+
+        const close = fakeWindow.windowListeners.get("close");
+        if (!close) return yield* Effect.die("window close listener was not registered");
+        let prevented = false;
+        close({
+          preventDefault: () => {
+            prevented = true;
+          },
+        });
+        assert.isTrue(prevented);
+        assert.equal(fakeWindow.hide.mock.calls.length, 1);
+
+        yield* desktopWindow.prepareForQuit!;
+        prevented = false;
+        close({
+          preventDefault: () => {
+            prevented = true;
+          },
+        });
+        assert.isFalse(prevented);
+        assert.equal(fakeWindow.hide.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
     }),
   );
 

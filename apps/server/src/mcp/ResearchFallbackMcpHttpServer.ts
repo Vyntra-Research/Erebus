@@ -8,6 +8,8 @@ import * as Option from "effect/Option";
 import { McpProtocol, McpSchema, McpServer } from "effect/unstable/ai";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { CoagentToolController } from "../coagents/Services/CoagentToolController.ts";
+import { EREBUS_THREADS_DYNAMIC_TOOL } from "../coagents/coagentTools.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ResearchToolController } from "../research/Services/ResearchToolController.ts";
 import { EREBUS_RESEARCH_DYNAMIC_TOOL } from "../research/researchTools.ts";
@@ -36,6 +38,7 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
     const server = yield* McpServer.McpServer;
     const projectionQuery = yield* ProjectionSnapshotQuery;
     const researchToolController = yield* ResearchToolController;
+    const coagentToolController = yield* CoagentToolController;
 
     for (const tool of EREBUS_RESEARCH_DYNAMIC_TOOL.tools) {
       yield* server.addTool({
@@ -117,13 +120,90 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
           }),
       });
     }
+
+    for (const tool of EREBUS_THREADS_DYNAMIC_TOOL.tools) {
+      const fallbackToolName = `threads_${tool.name}`;
+      yield* server.addTool({
+        tool: new McpSchema.Tool({
+          name: fallbackToolName,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+        }),
+        annotations: Context.empty(),
+        handle: (payload) =>
+          Effect.withFiber((fiber) => {
+            const invocation = Context.getUnsafe(fiber.context, McpInvocationContext);
+            if (!invocation.capabilities.has("researchFallback")) {
+              return Effect.succeed(
+                failureResult("This credential is not authorized for Erebus fallback tools."),
+              );
+            }
+            if (!coagentToolController) {
+              return Effect.succeed(
+                failureResult("The Erebus task coordination control plane is unavailable."),
+              );
+            }
+
+            return projectionQuery.getThreadCheckpointContext(invocation.threadId).pipe(
+              Effect.flatMap((contextOption) => {
+                const threadContext = Option.getOrUndefined(contextOption);
+                if (!threadContext) {
+                  return Effect.succeed(
+                    failureResult(
+                      "The Erebus project context for this task could not be resolved.",
+                    ),
+                  );
+                }
+                return coagentToolController
+                  .handle(
+                    {
+                      projectId: threadContext.projectId,
+                      threadId: invocation.threadId,
+                      cwd: threadContext.worktreePath ?? threadContext.workspaceRoot,
+                    },
+                    {
+                      namespace: EREBUS_THREADS_DYNAMIC_TOOL.name,
+                      tool: tool.name,
+                      arguments: payload,
+                      callId: `mcp:${NodeCrypto.randomUUID()}`,
+                      threadId: invocation.threadId,
+                      turnId: "mcp-fallback",
+                    },
+                  )
+                  .pipe(
+                    Effect.map(
+                      (response) =>
+                        new McpSchema.CallToolResult({
+                          isError: !response.success,
+                          content: response.contentItems.map((item) =>
+                            item.type === "inputText"
+                              ? { type: "text" as const, text: item.text }
+                              : { type: "text" as const, text: JSON.stringify(item) },
+                          ),
+                        }),
+                    ),
+                  );
+              }),
+              Effect.catchCause((cause) =>
+                Effect.logError("task coordination fallback MCP tool failed", {
+                  tool: fallbackToolName,
+                  threadId: invocation.threadId,
+                  cause,
+                }).pipe(
+                  Effect.as(failureResult("The Erebus task coordination fallback call failed.")),
+                ),
+              ),
+            );
+          }),
+      });
+    }
   },
 );
 
 const RegistrationLive = Layer.effectDiscard(registerResearchFallbackTools());
 
 const TransportLive = McpServer.layerHttp({
-  name: "Erebus Research",
+  name: "Erebus Control",
   version: packageJson.version,
   path: "/research-mcp",
   protocols: [McpProtocol.v2025_06_18],

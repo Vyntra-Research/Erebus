@@ -471,10 +471,18 @@ export const OrchestrationProjectShell = Schema.Struct({
 });
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 
+export const OrchestrationCoagentShell = Schema.Struct({
+  parentThreadId: ThreadId,
+  creationMode: Schema.Literals(["blank", "fork"]),
+  status: Schema.Literals(["preparing", "ready", "failed", "released"]),
+});
+export type OrchestrationCoagentShell = typeof OrchestrationCoagentShell.Type;
+
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  coagent: Schema.optionalKey(Schema.NullOr(OrchestrationCoagentShell)),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
