@@ -182,6 +182,13 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "compaction";
+      createdAt: string;
+      status: "running" | "completed";
+      turnId: TurnId | null;
     };
 
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
@@ -1856,15 +1863,57 @@ export function deriveTimelineEntries(
     createdAt: turnPlan.createdAt,
     turnPlan,
   }));
-  const workRows: TimelineEntry[] = workEntries.map((entry) => ({
-    id: entry.id,
-    kind: "work",
-    createdAt: entry.createdAt,
-    entry,
-  }));
-  return [...messageRows, ...proposedPlanRows, ...turnPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
+  const completedCompactionTurns = new Set(
+    workEntries.flatMap((entry) =>
+      entry.sourceActivityKind === "context-compaction" && entry.turnId ? [entry.turnId] : [],
+    ),
   );
+  const compactionRows: TimelineEntry[] = [];
+  for (const entry of workEntries) {
+    if (entry.sourceActivityKind === "context-compaction") {
+      compactionRows.push({
+        id: entry.id,
+        kind: "compaction",
+        createdAt: entry.createdAt,
+        status: "completed",
+        turnId: entry.turnId ?? null,
+      });
+      continue;
+    }
+    if (entry.sourceActivityKind !== "context-compaction.started") {
+      continue;
+    }
+    if (entry.turnId && completedCompactionTurns.has(entry.turnId)) {
+      continue;
+    }
+    compactionRows.push({
+      id: entry.id,
+      kind: "compaction",
+      createdAt: entry.createdAt,
+      status: "running",
+      turnId: entry.turnId ?? null,
+    });
+  }
+  const workRows: TimelineEntry[] = workEntries.flatMap((entry) =>
+    entry.sourceActivityKind === "context-compaction" ||
+    entry.sourceActivityKind === "context-compaction.started"
+      ? []
+      : [
+          {
+            id: entry.id,
+            kind: "work" as const,
+            createdAt: entry.createdAt,
+            entry,
+          },
+        ],
+  );
+  return [
+    ...messageRows,
+    ...proposedPlanRows,
+    ...turnPlanRows,
+    ...workRows,
+    ...compactionRows,
+  ].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function inferCheckpointTurnCountByTurnId(

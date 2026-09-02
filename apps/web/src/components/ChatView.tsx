@@ -6667,39 +6667,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
-  const onEditUserMessage = useCallback(
-    async (messageId: MessageId, text: string) => {
-      const targetTurnCount = revertTurnCountRef.current.get(messageId);
-      if (typeof targetTurnCount !== "number") {
-        return;
-      }
-      const reverted = await revertToTurnCount(targetTurnCount, [
-        "Edit and resend this message?",
-        "Newer messages, turn diffs, and the current unsent draft will be replaced.",
-        "The selected text will return to the composer before anything is sent.",
-      ]);
-      if (!reverted) {
-        return;
-      }
-      clearComposerDraftContent(composerDraftTarget);
-      promptRef.current = text;
-      setComposerDraftPrompt(composerDraftTarget, text);
-      composerRef.current?.resetCursorState({
-        cursor: collapseExpandedComposerCursor(text, text.length),
-        prompt: text,
-        detectTrigger: true,
-      });
-      scheduleComposerFocus();
-    },
-    [
-      clearComposerDraftContent,
-      composerDraftTarget,
-      revertToTurnCount,
-      scheduleComposerFocus,
-      setComposerDraftPrompt,
-    ],
-  );
-
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -6967,7 +6934,6 @@ function ChatViewContent(props: ChatViewProps) {
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-                onEditUserMessage={onEditUserMessage}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}

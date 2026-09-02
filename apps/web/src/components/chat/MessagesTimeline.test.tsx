@@ -884,43 +884,46 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
-  it("offers edit-and-resend only when the user message has a revert checkpoint", () => {
-    const entry = buildUserTimelineEntry("Please revise this request.");
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[entry]}
-        revertTurnCountByUserMessageId={new Map([[entry.message.id, 0]])}
-        onEditUserMessage={() => {}}
-      />,
-    );
-
-    expect(markup).toContain('aria-label="Edit and resend this message"');
-    expect(markup).toContain("Edit and resend");
-  });
-
-  it("renders context compaction entries in the normal work log", () => {
+  it("renders a completed context compaction as a persistent timeline marker", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
         timelineEntries={[
           {
             id: "entry-1",
-            kind: "work",
+            kind: "compaction",
             createdAt: "2026-03-17T19:12:28.000Z",
-            entry: {
-              id: "work-1",
-              createdAt: "2026-03-17T19:12:28.000Z",
-              label: "Context compacted",
-              tone: "info",
-            },
+            status: "completed",
+            turnId: TurnId.make("turn-1"),
           },
         ]}
       />,
     );
 
     expect(markup).toContain("Context compacted");
-    expect(markup).toContain("Work Log");
+    expect(markup).toContain('data-context-compaction="completed"');
+    expect(markup).not.toContain("Work Log");
+  });
+
+  it("renders an animated marker while context compaction is running", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "compaction",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            status: "running",
+            turnId: TurnId.make("turn-1"),
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Compacting context…");
+    expect(markup).toContain('data-context-compaction="running"');
+    expect(markup).toContain("animate-spin");
   });
 
   it("summarizes changed files in one line", () => {

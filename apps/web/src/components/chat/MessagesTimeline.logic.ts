@@ -296,6 +296,12 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string | null;
       showThinking: boolean;
+    }
+  | {
+      kind: "compaction";
+      id: string;
+      createdAt: string;
+      status: "running" | "completed";
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -1039,6 +1045,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "compaction") {
+      nextRows.push({
+        kind: "compaction",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        status: timelineEntry.status,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "proposed-plan") {
       nextRows.push({
         kind: "proposed-plan",
@@ -1131,6 +1147,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return (
         a.createdAt === (b as typeof a).createdAt && a.showThinking === (b as typeof a).showThinking
       );
+
+    case "compaction": {
+      const bc = b as typeof a;
+      return a.createdAt === bc.createdAt && a.status === bc.status;
+    }
 
     case "turn-fold": {
       const bf = b as typeof a;
