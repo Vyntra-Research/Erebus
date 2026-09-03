@@ -84,6 +84,8 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  /** Stable identity shared by context-compaction start and completion events. */
+  compactionItemId?: string;
   /** Correlates a visible Observer/Judge card with its provider-facing control message. */
   supervisionEvaluationId?: string;
   /** Grouping key for subagent lifecycle rows (one row per agent). */
@@ -1006,6 +1008,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (supervisionEvaluationId) {
     entry.supervisionEvaluationId = supervisionEvaluationId;
   }
+  if (
+    (activity.kind === "context-compaction" || activity.kind === "context-compaction.started") &&
+    typeof payload?.itemId === "string" &&
+    payload.itemId.length > 0
+  ) {
+    entry.compactionItemId = payload.itemId;
+  }
   if (toolCallId) {
     entry.toolCallId = toolCallId;
   }
@@ -1863,11 +1872,38 @@ export function deriveTimelineEntries(
     createdAt: turnPlan.createdAt,
     turnPlan,
   }));
-  const completedCompactionTurns = new Set(
-    workEntries.flatMap((entry) =>
-      entry.sourceActivityKind === "context-compaction" && entry.turnId ? [entry.turnId] : [],
-    ),
+  const compactionEntries = workEntries.filter(
+    (entry) =>
+      entry.sourceActivityKind === "context-compaction" ||
+      entry.sourceActivityKind === "context-compaction.started",
   );
+  const completedCompactions = compactionEntries.filter(
+    (entry) => entry.sourceActivityKind === "context-compaction",
+  );
+  const startedCompactions = compactionEntries.filter(
+    (entry) => entry.sourceActivityKind === "context-compaction.started",
+  );
+  const completedStartIds = new Set<string>();
+  for (const completed of completedCompactions) {
+    const matchingStart = completed.compactionItemId
+      ? startedCompactions.find(
+          (started) =>
+            !completedStartIds.has(started.id) &&
+            started.compactionItemId === completed.compactionItemId,
+        )
+      : startedCompactions
+          .filter(
+            (started) =>
+              !completedStartIds.has(started.id) &&
+              started.turnId === completed.turnId &&
+              started.createdAt <= completed.createdAt,
+          )
+          .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    if (matchingStart) {
+      completedStartIds.add(matchingStart.id);
+    }
+  }
+  const conversationRows = [...messageRows, ...proposedPlanRows, ...turnPlanRows];
   const compactionRows: TimelineEntry[] = [];
   for (const entry of workEntries) {
     if (entry.sourceActivityKind === "context-compaction") {
@@ -1883,14 +1919,18 @@ export function deriveTimelineEntries(
     if (entry.sourceActivityKind !== "context-compaction.started") {
       continue;
     }
-    if (entry.turnId && completedCompactionTurns.has(entry.turnId)) {
+    if (completedStartIds.has(entry.id)) {
       continue;
     }
+    // Older Erebus builds persisted the start but ignored Codex's item-level
+    // completion. Any later conversation row proves that compaction finished,
+    // so repair those historical markers while rendering them.
+    const hasLaterConversationRow = conversationRows.some((row) => row.createdAt > entry.createdAt);
     compactionRows.push({
       id: entry.id,
       kind: "compaction",
       createdAt: entry.createdAt,
-      status: "running",
+      status: hasLaterConversationRow ? "completed" : "running",
       turnId: entry.turnId ?? null,
     });
   }

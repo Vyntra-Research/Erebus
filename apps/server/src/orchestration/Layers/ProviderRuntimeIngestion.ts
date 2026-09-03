@@ -826,7 +826,21 @@ export function runtimeEventToActivities(
 
     case "item.completed": {
       if (event.payload.itemType === "context_compaction") {
-        return [];
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "context-compaction",
+            summary: "Context compacted",
+            payload: {
+              status: "completed",
+              ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
       }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
