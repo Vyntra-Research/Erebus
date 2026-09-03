@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.6 - 2026-09-03
+
+### Fixed
+
+- Keep each Codex account's SQLite state private while sharing sessions and configuration, preventing database corruption during concurrent research.
+- Rebuild missing cross-account thread index entries from their preserved rollouts and refuse unsafe blank-thread fallback.
+
 ## 0.2.5 - 2026-09-03
 
 ### Fixed

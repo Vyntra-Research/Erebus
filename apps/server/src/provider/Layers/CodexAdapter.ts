@@ -72,6 +72,7 @@ import {
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { ensureCodexThreadRolloutIndexed } from "../Drivers/CodexRolloutPathRepair.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
@@ -1799,6 +1800,30 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
         );
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
+        if (codexConfig.homePath && isCodexResumeCursorSchema(input.resumeCursor)) {
+          const indexed = yield* ensureCodexThreadRolloutIndexed(
+            codexConfig.homePath,
+            input.resumeCursor.threadId,
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          );
+          if (!indexed) {
+            return yield* new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId: input.threadId,
+              detail: `Cannot resume Codex thread ${input.resumeCursor.threadId}: its rollout was not found. Erebus refused to replace it with a blank thread.`,
+              cause: new Error("Codex rollout not found"),
+            });
+          }
+        }
         const runtime = yield* createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),

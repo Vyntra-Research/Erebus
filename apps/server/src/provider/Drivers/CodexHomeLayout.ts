@@ -1,4 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off - account overlays must detach SQLite hardlinks safely.
 import * as NodeOS from "node:os";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 
 import {
   ProviderDriverKind,
@@ -54,6 +58,16 @@ const KNOWN_SHARED_DIRECTORIES = [
 const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
 const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "tmp"]);
 const REPLACEABLE_SHARED_RUNTIME_DIRECTORIES = new Set(["mcp-oauth-locks"]);
+const SQLITE_DATABASE_ENTRY = /^.+\.sqlite$/i;
+const SQLITE_SIDECAR_ENTRY = /^.+\.sqlite-(?:shm|wal)$/i;
+
+function isShadowLocalEntry(entryName: string): boolean {
+  return (
+    SHADOW_LOCAL_ENTRY_NAMES.has(entryName) ||
+    SQLITE_DATABASE_ENTRY.test(entryName) ||
+    SQLITE_SIDECAR_ENTRY.test(entryName)
+  );
+}
 
 function resolveHomePath(
   path: Path.Path,
@@ -111,6 +125,7 @@ export class CodexShadowHomeFileSystemError extends Schema.TaggedErrorClass<Code
       "stat",
       "symlink",
       "link",
+      "copy",
     ]),
     path: Schema.String,
     targetPath: Schema.optional(Schema.String),
@@ -123,6 +138,81 @@ export class CodexShadowHomeFileSystemError extends Schema.TaggedErrorClass<Code
     return `Codex shadow home filesystem operation '${this.operation}' failed for '${this.path}'${target}.`;
   }
 }
+
+async function sameFile(left: string, right: string): Promise<boolean> {
+  try {
+    const [leftStat, rightStat] = await Promise.all([NodeFSP.stat(left), NodeFSP.stat(right)]);
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+  } catch {
+    return false;
+  }
+}
+
+const materializePrivateSqliteDatabases = Effect.fn(
+  "CodexHomeLayout.materializePrivateSqliteDatabases",
+)(function* (input: {
+  readonly sharedHomePath: string;
+  readonly effectiveHomePath: string;
+  readonly sharedEntryNames: readonly string[];
+}) {
+  yield* Effect.tryPromise({
+    try: async () => {
+      const databaseEntries = input.sharedEntryNames.filter((entryName) =>
+        SQLITE_DATABASE_ENTRY.test(entryName),
+      );
+      for (const entryName of databaseEntries) {
+        const sourcePath = NodePath.join(input.sharedHomePath, entryName);
+        const targetPath = NodePath.join(input.effectiveHomePath, entryName);
+        const targetExists = await NodeFSP.stat(targetPath).then(
+          () => true,
+          () => false,
+        );
+        if (targetExists && !(await sameFile(sourcePath, targetPath))) continue;
+
+        const temporaryPath = `${targetPath}.erebus-private-${process.pid}`;
+        await NodeFSP.rm(temporaryPath, { force: true });
+        const source = new NodeSqlite.DatabaseSync(sourcePath, { readOnly: true });
+        try {
+          await NodeSqlite.backup(source, temporaryPath);
+        } finally {
+          source.close();
+        }
+        const copied = new NodeSqlite.DatabaseSync(temporaryPath);
+        try {
+          copied.exec("REINDEX");
+        } finally {
+          copied.close();
+        }
+
+        for (const suffix of ["-shm", "-wal"] as const) {
+          const sourceSidecar = `${sourcePath}${suffix}`;
+          const targetSidecar = `${targetPath}${suffix}`;
+          if (await sameFile(sourceSidecar, targetSidecar)) {
+            await NodeFSP.rm(targetSidecar, { force: true });
+          }
+        }
+        const displacedPath = `${targetPath}.erebus-shared-link`;
+        await NodeFSP.rm(displacedPath, { force: true });
+        if (targetExists) await NodeFSP.rename(targetPath, displacedPath);
+        try {
+          await NodeFSP.rename(temporaryPath, targetPath);
+          await NodeFSP.rm(displacedPath, { force: true });
+        } catch (cause) {
+          if (targetExists) await NodeFSP.rename(displacedPath, targetPath);
+          throw cause;
+        }
+      }
+    },
+    catch: (cause) =>
+      new CodexShadowHomeFileSystemError({
+        sharedHomePath: input.sharedHomePath,
+        effectiveHomePath: input.effectiveHomePath,
+        operation: "copy",
+        path: input.effectiveHomePath,
+        cause,
+      }),
+  });
+});
 
 export class CodexShadowHomePathConflictError extends Schema.TaggedErrorClass<CodexShadowHomePathConflictError>()(
   "CodexShadowHomePathConflictError",
@@ -473,9 +563,14 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
     }),
   );
   const establishedOverlay = yield* fileSystem.exists(path.join(effectiveHomePath, "auth.json"));
+  yield* materializePrivateSqliteDatabases({
+    sharedHomePath: layout.sharedHomePath,
+    effectiveHomePath,
+    sharedEntryNames,
+  });
   const entries = new Set<string>(KNOWN_SHARED_DIRECTORIES);
   for (const entryName of sharedEntryNames) {
-    if (!PRIVATE_ENTRY_NAMES.has(entryName) && !SHADOW_LOCAL_ENTRY_NAMES.has(entryName)) {
+    if (!PRIVATE_ENTRY_NAMES.has(entryName) && !isShadowLocalEntry(entryName)) {
       entries.add(entryName);
     }
   }

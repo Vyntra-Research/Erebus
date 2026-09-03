@@ -187,7 +187,9 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               }),
           ),
         );
-        yield* reconcileCodexRolloutPaths(homeLayout.sharedHomePath).pipe(
+        yield* reconcileCodexRolloutPaths(
+          homeLayout.effectiveHomePath ?? homeLayout.sharedHomePath,
+        ).pipe(
           Effect.mapError(
             (cause) =>
               new ProviderDriverError({

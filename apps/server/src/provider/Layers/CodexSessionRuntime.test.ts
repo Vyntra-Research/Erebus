@@ -21,7 +21,6 @@ import {
   describeMcpElicitation,
   handleDynamicToolCallForProviderThread,
   hasConfiguredMcpServer,
-  isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
   toMcpElicitationResponse,
@@ -833,65 +832,6 @@ describe("codexSessionAppServerArgs", () => {
   });
 });
 
-describe("isRecoverableThreadResumeError", () => {
-  it("matches missing thread errors", () => {
-    NodeAssert.equal(
-      isRecoverableThreadResumeError(
-        new CodexErrors.CodexAppServerRequestError({
-          code: -32603,
-          errorMessage: "Thread does not exist",
-        }),
-      ),
-      true,
-    );
-  });
-
-  it("matches a missing rollout for a known thread id", () => {
-    NodeAssert.equal(
-      isRecoverableThreadResumeError(
-        new CodexErrors.CodexAppServerRequestError({
-          code: -32603,
-          errorMessage: "no rollout found for thread id 019fdf74-aaa9-7950-b252-7cc7a8650470",
-        }),
-      ),
-      true,
-    );
-  });
-
-  it("ignores non-recoverable resume errors", () => {
-    NodeAssert.equal(
-      isRecoverableThreadResumeError(
-        new CodexErrors.CodexAppServerRequestError({
-          code: -32603,
-          errorMessage: "Permission denied",
-        }),
-      ),
-      false,
-    );
-  });
-
-  it("ignores unrelated missing-resource errors that do not mention threads", () => {
-    NodeAssert.equal(
-      isRecoverableThreadResumeError(
-        new CodexErrors.CodexAppServerRequestError({
-          code: -32603,
-          errorMessage: "Config file not found",
-        }),
-      ),
-      false,
-    );
-    NodeAssert.equal(
-      isRecoverableThreadResumeError(
-        new CodexErrors.CodexAppServerRequestError({
-          code: -32603,
-          errorMessage: "Model does not exist",
-        }),
-      ),
-      false,
-    );
-  });
-});
-
 describe("openCodexThread", () => {
   it.effect("registers dynamic tools on a fresh Codex thread", () =>
     Effect.gen(function* () {
@@ -933,10 +873,9 @@ describe("openCodexThread", () => {
     }),
   );
 
-  it.effect("falls back to thread/start when resume fails recoverably", () =>
+  it.effect("does not replace a missing resumed thread with a fresh thread", () =>
     Effect.gen(function* () {
       const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
-      const started = makeThreadOpenResponse("fresh-thread");
       const client = {
         request: <M extends "thread/start" | "thread/resume">(
           method: M,
@@ -951,11 +890,13 @@ describe("openCodexThread", () => {
               }),
             );
           }
-          return Effect.succeed(started as CodexRpc.ClientRequestResponsesByMethod[M]);
+          return Effect.succeed(
+            makeThreadOpenResponse("fresh-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
+          );
         },
       };
 
-      const opened = yield* openCodexThread({
+      const error = yield* openCodexThread({
         client,
         threadId: ThreadId.make("thread-1"),
         runtimeMode: "full-access",
@@ -963,12 +904,13 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: "stale-thread",
-      });
+      }).pipe(Effect.flip);
 
-      NodeAssert.equal(opened.thread.id, "fresh-thread");
+      NodeAssert.ok(isCodexAppServerRequestError(error));
+      NodeAssert.equal(error.errorMessage, "thread not found");
       NodeAssert.deepStrictEqual(
         calls.map((call) => call.method),
-        ["thread/resume", "thread/start"],
+        ["thread/resume"],
       );
     }),
   );
