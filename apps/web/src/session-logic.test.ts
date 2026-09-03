@@ -1891,6 +1891,81 @@ describe("deriveTimelineEntries", () => {
     });
   });
 
+  it("matches separate compactions in one turn by item id", () => {
+    const entries = deriveTimelineEntries(
+      [],
+      [],
+      [
+        {
+          id: "compaction-a-started",
+          createdAt: "2026-03-17T19:12:27.000Z",
+          turnId: TurnId.make("turn-1"),
+          label: "Compacting context",
+          tone: "info",
+          sourceActivityKind: "context-compaction.started",
+          compactionItemId: "compaction-a",
+        },
+        {
+          id: "compaction-b-started",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          turnId: TurnId.make("turn-1"),
+          label: "Compacting context",
+          tone: "info",
+          sourceActivityKind: "context-compaction.started",
+          compactionItemId: "compaction-b",
+        },
+        {
+          id: "compaction-a-completed",
+          createdAt: "2026-03-17T19:12:29.000Z",
+          turnId: TurnId.make("turn-1"),
+          label: "Context compacted",
+          tone: "info",
+          sourceActivityKind: "context-compaction",
+          compactionItemId: "compaction-a",
+        },
+      ],
+    );
+
+    expect(entries).toEqual([
+      expect.objectContaining({ id: "compaction-b-started", status: "running" }),
+      expect.objectContaining({ id: "compaction-a-completed", status: "completed" }),
+    ]);
+  });
+
+  it("repairs a historical live marker when later conversation content exists", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("message-after-compaction"),
+          role: "assistant",
+          text: "Work continued after compaction.",
+          createdAt: "2026-03-17T19:12:29.000Z",
+          turnId: TurnId.make("turn-1"),
+          updatedAt: "2026-03-17T19:12:29.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [
+        {
+          id: "stale-compaction-started",
+          createdAt: "2026-03-17T19:12:27.000Z",
+          turnId: TurnId.make("turn-1"),
+          label: "Compacting context",
+          tone: "info",
+          sourceActivityKind: "context-compaction.started",
+          compactionItemId: "stale-compaction",
+        },
+      ],
+    );
+
+    expect(entries[0]).toMatchObject({
+      id: "stale-compaction-started",
+      kind: "compaction",
+      status: "completed",
+    });
+  });
+
   it("includes proposed plans alongside messages and work entries in chronological order", () => {
     const entries = deriveTimelineEntries(
       [

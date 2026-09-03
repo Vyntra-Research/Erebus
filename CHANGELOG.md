@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5 - 2026-09-03
+
+### Fixed
+
+- Finish context-compaction markers when Codex reports completion, including repeated compactions in the same turn.
+- Repair old compaction markers that remained active even though the conversation had continued.
+
 ## 0.2.4 - 2026-09-02
 
 ### Fixed
