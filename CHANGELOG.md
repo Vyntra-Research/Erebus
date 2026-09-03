@@ -6,6 +6,8 @@
 
 - Finish context-compaction markers when Codex reports completion, including repeated compactions in the same turn.
 - Repair old compaction markers that remained active even though the conversation had continued.
+- Keep each Codex account's SQLite state private while sharing sessions and configuration, preventing database corruption during concurrent research.
+- Rebuild missing cross-account thread index entries from their preserved rollouts and refuse unsafe blank-thread fallback.
 
 ## 0.2.4 - 2026-09-02
 

@@ -1,3 +1,4 @@
+import * as NodeSqlite from "node:sqlite";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -128,6 +129,40 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
   });
 
   describe("materializeCodexShadowHome", () => {
+    it.effect("detaches a shared SQLite hardlink into an account-private database", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+        const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+        const shadowHome = path.join(shadowRoot, "shadow");
+        const sharedDatabasePath = path.join(sharedHome, "state_5.sqlite");
+        const database = new NodeSqlite.DatabaseSync(sharedDatabasePath);
+        database.exec("CREATE TABLE values_for_test (value TEXT NOT NULL)");
+        database.exec("INSERT INTO values_for_test VALUES ('shared')");
+        database.close();
+        yield* fileSystem.makeDirectory(shadowHome, { recursive: true });
+        yield* fileSystem.link(sharedDatabasePath, path.join(shadowHome, "state_5.sqlite"));
+        yield* writeTextFile(path.join(shadowHome, "auth.json"), '{"account":true}\n');
+
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+        yield* materializeCodexShadowHome(layout);
+
+        const shadowDatabase = new NodeSqlite.DatabaseSync(path.join(shadowHome, "state_5.sqlite"));
+        shadowDatabase.exec("UPDATE values_for_test SET value = 'private'");
+        shadowDatabase.close();
+        const sharedDatabase = new NodeSqlite.DatabaseSync(sharedDatabasePath, { readOnly: true });
+        const row = sharedDatabase.prepare("SELECT value FROM values_for_test").get() as {
+          readonly value: string;
+        };
+        sharedDatabase.close();
+
+        expect(row.value).toBe("shared");
+      }),
+    );
+
     it.effect("materializes a shadow home with shared state links and private auth", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
