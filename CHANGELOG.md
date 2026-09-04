@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2 - 2026-09-04
+
+### Changed
+
+- Run CI checks only for the parts of the workspace affected by a change, while keeping full validation for shared configuration and workflow changes.
+- Split the web test suite across two runners and run build validation independently from typechecking.
+- Start release gating only from successful `main` CI runs.
+
 ## 0.3.1 - 2026-09-04
 
 ### Fixed
