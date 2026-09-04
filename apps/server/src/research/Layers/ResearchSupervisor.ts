@@ -37,10 +37,10 @@ import {
   hydratePrincipalMessageTexts,
   isCompletedAssistantMessage,
   pendingJudgeFindings,
-  pendingObserverWindowCount,
   queuedJudgeFollowUps,
   queuedObserverInterventions,
   resolveCompletedAssistantMessageText,
+  selectObserverWindowBounds,
   shouldObserverIntervene,
 } from "../researchSupervision.ts";
 import {
@@ -433,13 +433,25 @@ const makeResearchSupervisor = Effect.gen(function* () {
           )
           .map((message) => ({ id: message.id, text: message.text, turnId: message.turnId }))
       : projection.principalMessages;
-    const start = observedThreadId
+    const observerCursor = observedThreadId
       ? coagentLink?.observerCampaignId === campaignId
         ? coagentLink.observerMessageCount
         : 0
       : campaign.lastObservedMessageCount;
-    const end = start + observerPolicy.messageWindow;
-    if (completedMessages.length < end) return;
+    const windowBounds = selectObserverWindowBounds({
+      completedMessageCount: completedMessages.length,
+      cursor: observerCursor,
+      messageWindow: observerPolicy.messageWindow,
+    });
+    if (!windowBounds) return;
+    const { start, end, skippedMessageCount } = windowBounds;
+    if (skippedMessageCount > 0) {
+      yield* Effect.logInfo("Erebus Observer skipped stale message backlog", {
+        campaignId,
+        targetThreadId,
+        skippedMessageCount,
+      });
+    }
     const persistedMessages = completedMessages.slice(start, end);
     if (persistedMessages.length !== observerPolicy.messageWindow) return;
     const baseCampaignSnapshot = buildObserverCampaignSnapshot(projection, observerPolicy);
@@ -871,43 +883,10 @@ const makeResearchSupervisor = Effect.gen(function* () {
           if (!campaign || campaign.status !== "active") return;
           const contract = activeResearchContract(projection);
           if (!contract) return;
-          const observerPolicy = researchObserverPolicyFromSettings(
-            (yield* serverSettings.getSettings).researchSupervision,
-          );
-          const pendingObserverWindows = pendingObserverWindowCount(projection, observerPolicy);
-          yield* Effect.forEach(
-            Array.from({ length: Math.max(0, pendingObserverWindows) }),
-            () => evaluateObserverWindow(campaign.id),
-            { discard: true },
-          );
-          const childLinks = (yield* coagents.listByParent(campaign.principalThreadId)).filter(
-            (link) => link.status === "ready" || link.status === "preparing",
-          );
-          yield* Effect.forEach(
-            childLinks,
-            (link) =>
-              Effect.gen(function* () {
-                const context = yield* threadContext(link.childThreadId);
-                if (!context) return;
-                const completedCount = context.thread.messages.filter(
-                  (message) =>
-                    message.role === "assistant" &&
-                    !message.streaming &&
-                    message.text.trim().length > 0,
-                ).length;
-                const cursor =
-                  link.observerCampaignId === campaign.id ? link.observerMessageCount : 0;
-                const pending = Math.floor(
-                  Math.max(0, completedCount - cursor) / observerPolicy.messageWindow,
-                );
-                yield* Effect.forEach(
-                  Array.from({ length: pending }),
-                  () => evaluateObserverWindow(campaign.id, link.childThreadId),
-                  { discard: true },
-                );
-              }),
-            { discard: true },
-          );
+          // Observer steering is useful only while the triggering research is
+          // current. Never replay missed Observer windows during bootstrap.
+          // The next completed assistant message selects one fresh bounded
+          // window and advances past any stale backlog.
           yield* Effect.forEach(
             pendingJudgeFindings(projection),
             (finding) =>
@@ -975,7 +954,9 @@ const makeResearchSupervisor = Effect.gen(function* () {
     Stream.runForEach(orchestration.streamDomainEvents, onOrchestrationEvent),
   );
   yield* Effect.forkScoped(Stream.runForEach(research.events, onResearchEvent));
-  yield* recoverPendingWork;
+  // Judge and follow-up recovery can involve slow external model calls. It
+  // must never delay HTTP readiness or prevent the desktop window from opening.
+  yield* Effect.forkScoped(recoverPendingWork);
 });
 
 export const ResearchSupervisorLive = Layer.effectDiscard(makeResearchSupervisor);

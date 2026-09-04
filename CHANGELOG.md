@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 - 2026-09-04
+
+### Fixed
+
+- Open the desktop app before any slow Judge or follow-up recovery finishes.
+- Do not run missed Observer windows during startup. After a restart or evaluator failure, the next completed assistant message evaluates only the newest bounded window instead of replaying stale work.
+
 ## 0.3.0 - 2026-09-04
 
 ### Added
