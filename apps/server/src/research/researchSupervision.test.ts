@@ -10,6 +10,7 @@ import {
 import { emptyResearchProjection, type ResearchProjection } from "./researchState.ts";
 import {
   buildObserverCampaignSnapshot,
+  buildObserverCommandAudit,
   buildObserverTimeline,
   hydratePrincipalMessageTexts,
   isCompletedAssistantMessage,
@@ -194,6 +195,121 @@ it("keeps co-agent coordination separate from user authority", () => {
       { id: "coagent", source: "coagentMessage" },
       { id: "a1", source: "principalAssistant" },
     ],
+  );
+});
+
+it("gives Observer a bounded redacted command audit for the monitored turns", () => {
+  const audit = buildObserverCommandAudit(
+    [{ turnId: "turn-1" }],
+    [
+      {
+        id: "tool-1",
+        kind: "tool.started",
+        tone: "tool",
+        summary: "Ran command started",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "call-1",
+          detail: "robocopy .\\node_modules .\\work\\copy\\node_modules /E /MT:16 TOKEN=hidden",
+          agentId: "subagent-1",
+        },
+        turnId: "turn-1",
+        createdAt: contract.createdAt,
+      },
+      {
+        id: "tool-other-turn",
+        kind: "tool.started",
+        tone: "tool",
+        summary: "Ran command started",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "call-2",
+          detail: "git status --short",
+        },
+        turnId: "turn-2",
+        createdAt: contract.createdAt,
+      },
+    ] as never,
+    "C:\\Users\\researcher\\work\\target",
+  );
+
+  assert.equal(audit.entries.length, 1);
+  assert.equal(audit.entries[0]?.outcome, "unsafeExecuted");
+  assert.equal(audit.entries[0]?.safetyCode, "unsafe-copy");
+  assert.equal(audit.entries[0]?.agentId, "subagent-1");
+  assert.isFalse(audit.entries[0]?.command.includes("hidden") ?? true);
+});
+
+it("records a denied command as blocked even when denial follows tool start", () => {
+  const audit = buildObserverCommandAudit(
+    [{ turnId: "turn-parent" }],
+    [
+      {
+        id: "started",
+        kind: "tool.started",
+        tone: "tool",
+        summary: "Command started",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "child-call",
+          detail: "rg --files C:\\Users\\researcher",
+          agentId: "child-agent",
+        },
+        turnId: "turn-parent",
+        createdAt: contract.createdAt,
+      },
+      {
+        id: "denied",
+        kind: "tool.denied",
+        tone: "error",
+        summary: "Tool denied: command",
+        payload: {
+          toolName: "command",
+          toolUseId: "child-call",
+          command: "rg --files C:\\Users\\researcher",
+          safetyCode: "blocked-tool",
+        },
+        turnId: "turn-child",
+        createdAt: contract.createdAt,
+      },
+    ] as never,
+    "C:\\Users\\researcher\\work\\target",
+  );
+
+  assert.equal(audit.entries.length, 1);
+  assert.equal(audit.entries[0]?.outcome, "blocked");
+  assert.equal(audit.entries[0]?.agentId, "child-agent");
+  assert.equal(audit.entries[0]?.safetyCode, "blocked-tool");
+});
+
+it("bounds command audit by message chronology when one turn emits several messages", () => {
+  const commandActivity = (id: string, createdAt: string, detail: string) => ({
+    id,
+    kind: "tool.started",
+    tone: "tool",
+    summary: "Command started",
+    payload: { itemType: "command_execution", toolCallId: id, detail },
+    turnId: "turn-shared",
+    createdAt,
+  });
+  const audit = buildObserverCommandAudit(
+    [{ id: "assistant-current", turnId: "turn-shared" }],
+    [
+      commandActivity("before", "2026-08-27T12:00:01.000Z", "git status --short"),
+      commandActivity("inside", "2026-08-27T12:00:03.000Z", "Get-ChildItem -LiteralPath src"),
+      commandActivity("after", "2026-08-27T12:00:05.000Z", "git status --short"),
+    ] as never,
+    "C:\\Users\\researcher\\work\\target",
+    [
+      { id: "assistant-previous", createdAt: "2026-08-27T12:00:02.000Z" },
+      { id: "assistant-current", createdAt: "2026-08-27T12:00:04.000Z" },
+    ],
+    "assistant-previous",
+  );
+
+  assert.deepStrictEqual(
+    audit.entries.map((entry) => entry.id),
+    ["inside"],
   );
 });
 

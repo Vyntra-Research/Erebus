@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.3 - 2026-09-04
+
+### Added
+
+- Add a fail-closed Codex command guard for clearly unsafe host operations, including dependency-tree recursion, junction-following copies, broad destructive cleanup, protected-path mutation, pattern process kills, and opaque shell commands.
+- Include a bounded, redacted command audit from the principal and native subagents in each Observer evaluation window.
+
+### Changed
+
+- Treat the assigned workspace as the agent's host lab without requiring a specially named directory, while preserving normal scoped Docker, WSL, Git, and external-target work.
+- Keep full-access command decisions automatic: safe commands continue immediately and blocked commands are rejected before process spawn without requesting user permission.
+
 ## 0.3.2 - 2026-09-04
 
 ### Changed

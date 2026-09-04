@@ -11,6 +11,7 @@ import { CodexSettings } from "@t3tools/contracts";
 import {
   CodexShadowHomeEntryConflictError,
   CodexShadowHomePathConflictError,
+  materializeErebusCodexExecPolicy,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
   withAutomaticCodexAccountOverlay,
@@ -412,6 +413,27 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
         expect(error.message).toBe(
           `Codex shadow home filesystem operation 'makeDirectory' failed for '${error.path}'.`,
         );
+      }),
+    );
+  });
+
+  describe("materializeErebusCodexExecPolicy", () => {
+    it.effect("writes the managed policy without replacing local rule files", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const homePath = yield* makeTempDir("erebus-codex-policy-");
+        const localRulePath = path.join(homePath, "rules", "local.rules");
+        yield* writeTextFile(localRulePath, 'prefix_rule(pattern=["git"], decision="allow")\n');
+
+        yield* materializeErebusCodexExecPolicy(homePath);
+        yield* materializeErebusCodexExecPolicy(homePath);
+
+        const managed = yield* fileSystem.readFileString(
+          path.join(homePath, "rules", "erebus-safety.rules"),
+        );
+        expect(managed).toContain("[erebus-command-guard]");
+        expect(yield* fileSystem.readFileString(localRulePath)).toContain('pattern=["git"]');
       }),
     );
   });

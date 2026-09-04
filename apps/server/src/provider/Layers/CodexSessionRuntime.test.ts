@@ -204,7 +204,7 @@ describe("buildTurnStartParams", () => {
 
     NodeAssert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
-      approvalPolicy: "never",
+      approvalPolicy: "on-request",
       approvalsReviewer: "user",
       sandboxPolicy: {
         type: "dangerFullAccess",
@@ -294,6 +294,8 @@ describe("buildTurnStartParams", () => {
     NodeAssert.equal(settings?.model, DEFAULT_MODEL);
     NodeAssert.equal(settings?.reasoning_effort, "medium");
     NodeAssert.ok(settings?.developer_instructions?.includes(`as ${DEFAULT_MODEL} with medium`));
+    NodeAssert.ok(settings?.developer_instructions?.includes("Never run 'rg'"));
+    NodeAssert.ok(settings?.developer_instructions?.includes("every native provider subagent"));
   });
 
   it.effect("routes approvals to the auto reviewer in auto mode", () =>
