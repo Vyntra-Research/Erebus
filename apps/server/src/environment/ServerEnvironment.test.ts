@@ -47,7 +47,7 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     traceTimingEnabled: true,
     traceBatchWindowMs: 200,
     traceMaxBytes: 10 * 1024 * 1024,
-    traceMaxFiles: 10,
+    traceMaxFiles: 5,
     otlpTracesUrl: undefined,
     otlpMetricsUrl: undefined,
     otlpExportIntervalMs: 10_000,

@@ -738,6 +738,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:process-diagnostics",
       tag: WS_METHODS.serverGetProcessDiagnostics,
     }),
+    storageDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:storage-diagnostics",
+      tag: WS_METHODS.serverGetStorageDiagnostics,
+    }),
     processResourceHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:process-resource-history",
       tag: WS_METHODS.serverGetProcessResourceHistory,
@@ -818,6 +822,22 @@ export function createServerEnvironmentAtoms<R, E>(
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
+    }),
+    deleteInactiveSubagents: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:delete-inactive-subagents",
+      tag: WS_METHODS.serverDeleteInactiveSubagents,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
+    deleteRecoverySnapshots: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:delete-recovery-snapshots",
+      tag: WS_METHODS.serverDeleteRecoverySnapshots,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId }) => environmentId,
+      },
     }),
     retryResourceTelemetry: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:retry-resource-telemetry",

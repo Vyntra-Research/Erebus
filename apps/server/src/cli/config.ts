@@ -84,7 +84,7 @@ const EnvServerConfig = Config.all({
     Config.map(Option.getOrUndefined),
   ),
   traceMaxBytes: Config.int("T3CODE_TRACE_MAX_BYTES").pipe(Config.withDefault(10 * 1024 * 1024)),
-  traceMaxFiles: Config.int("T3CODE_TRACE_MAX_FILES").pipe(Config.withDefault(10)),
+  traceMaxFiles: Config.int("T3CODE_TRACE_MAX_FILES").pipe(Config.withDefault(5)),
   traceBatchWindowMs: Config.int("T3CODE_TRACE_BATCH_WINDOW_MS").pipe(Config.withDefault(1_000)),
   otlpTracesUrl: Config.string("T3CODE_OTLP_TRACES_URL").pipe(
     Config.option,

@@ -4,8 +4,10 @@ import {
   ChevronRightIcon,
   CopyIcon,
   FolderOpenIcon,
+  HardDriveIcon,
   InfoIcon,
   RefreshCwIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -816,6 +818,12 @@ export function DiagnosticsSettingsPanel() {
   const signalServerProcess = useAtomCommand(serverEnvironment.signalProcess, {
     reportFailure: false,
   });
+  const deleteInactiveSubagents = useAtomCommand(serverEnvironment.deleteInactiveSubagents, {
+    reportFailure: false,
+  });
+  const deleteRecoverySnapshots = useAtomCommand(serverEnvironment.deleteRecoverySnapshots, {
+    reportFailure: false,
+  });
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
   });
@@ -839,6 +847,16 @@ export function DiagnosticsSettingsPanel() {
       : serverEnvironment.processDiagnostics({ environmentId, input: {} }),
   );
   const {
+    data: storageData,
+    error: storageError,
+    isPending: isStoragePending,
+    refresh: refreshStorage,
+  } = useEnvironmentQuery(
+    environmentId === null
+      ? null
+      : serverEnvironment.storageDiagnostics({ environmentId, input: {} }),
+  );
+  const {
     data: resourceData,
     error: resourceError,
     isPending: isResourcePending,
@@ -857,6 +875,8 @@ export function DiagnosticsSettingsPanel() {
   const [isOpeningLogsDirectory, setIsOpeningLogsDirectory] = useState(false);
   const [openLogsDirectoryError, setOpenLogsDirectoryError] = useState<string | null>(null);
   const [signalingPid, setSignalingPid] = useState<number | null>(null);
+  const [isDeletingSubagents, setIsDeletingSubagents] = useState(false);
+  const [isDeletingRecovery, setIsDeletingRecovery] = useState(false);
   const signalingPidRef = useRef<number | null>(null);
   const environmentIdRef = useRef(environmentId);
   const processDataRef = useRef(processData);
@@ -984,6 +1004,94 @@ export function DiagnosticsSettingsPanel() {
     [refreshProcesses, signalServerProcess],
   );
 
+  const handleDeleteInactiveSubagents = useCallback(async () => {
+    if (
+      environmentId === null ||
+      !storageData ||
+      storageData.deletableSubagentCount === 0 ||
+      isDeletingSubagents
+    ) {
+      return;
+    }
+    const confirmed = await ensureLocalApi().dialogs.confirm(
+      `Delete ${formatCount(storageData.deletableSubagentCount)} inactive sub-agent sessions and free about ${formatBytes(storageData.deletableSubagentBytes)}? Active task trees are excluded. Deleted agent transcripts cannot be resumed.`,
+      { variant: "destructive" },
+    );
+    if (!confirmed) return;
+    setIsDeletingSubagents(true);
+    try {
+      const result = await deleteInactiveSubagents({
+        environmentId,
+        input: { snapshotDigest: storageData.snapshotDigest },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: "Could not delete agent sessions",
+            description: error instanceof Error ? error.message : "Storage cleanup failed.",
+          });
+        }
+        return;
+      }
+      toastManager.add({
+        type: result.value.accepted ? "success" : "info",
+        title: result.value.accepted ? "Agent sessions deleted" : "Storage changed",
+        description: result.value.accepted
+          ? `${formatCount(result.value.deletedCount)} sessions removed; ${formatBytes(result.value.deletedBytes)} freed.`
+          : result.value.message,
+      });
+      refreshStorage();
+    } finally {
+      setIsDeletingSubagents(false);
+    }
+  }, [deleteInactiveSubagents, environmentId, isDeletingSubagents, refreshStorage, storageData]);
+
+  const handleDeleteRecoverySnapshots = useCallback(async () => {
+    if (
+      environmentId === null ||
+      !storageData ||
+      storageData.recoverySnapshotCount === 0 ||
+      isDeletingRecovery
+    ) {
+      return;
+    }
+    const confirmed = await ensureLocalApi().dialogs.confirm(
+      `Delete ${formatCount(storageData.recoverySnapshotCount)} recovery snapshots and free about ${formatBytes(storageData.recoverySnapshotBytes)}? These backups are used only for manual recovery after storage damage and cannot be restored after deletion.`,
+      { variant: "destructive" },
+    );
+    if (!confirmed) return;
+    setIsDeletingRecovery(true);
+    try {
+      const result = await deleteRecoverySnapshots({
+        environmentId,
+        input: { snapshotDigest: storageData.recoverySnapshotDigest },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: "Could not delete recovery snapshots",
+            description: error instanceof Error ? error.message : "Recovery cleanup failed.",
+          });
+        }
+        return;
+      }
+      toastManager.add({
+        type: result.value.accepted ? "success" : "info",
+        title: result.value.accepted ? "Recovery snapshots deleted" : "Storage changed",
+        description: result.value.accepted
+          ? `${formatCount(result.value.deletedCount)} snapshots removed; ${formatBytes(result.value.deletedBytes)} freed.`
+          : result.value.message,
+      });
+      refreshStorage();
+    } finally {
+      setIsDeletingRecovery(false);
+    }
+  }, [deleteRecoverySnapshots, environmentId, isDeletingRecovery, refreshStorage, storageData]);
+
   const processDiagnosticsError = processData ? Option.getOrNull(processData.error) : null;
   const processResourceError = resourceData ? Option.getOrNull(resourceData.error) : null;
   const traceDiagnosticsError = data ? Option.getOrNull(data.error) : null;
@@ -994,6 +1102,94 @@ export function DiagnosticsSettingsPanel() {
   return (
     <SettingsPageContainer width="expanded" className="gap-10">
       <ResourceTelemetryDiagnostics />
+
+      <SettingsSection
+        title="Storage"
+        headerAction={
+          <DiagnosticsRefreshButton
+            isPending={isStoragePending}
+            label="Refresh storage details"
+            onClick={refreshStorage}
+          />
+        }
+      >
+        <StatsGrid>
+          <StatBlock
+            label="Agent Sessions"
+            value={storageData ? formatCount(storageData.subagentSessionCount) : "..."}
+          />
+          <StatBlock
+            label="Agent Storage"
+            value={storageData ? formatBytes(storageData.subagentSessionBytes) : "..."}
+          />
+          <StatBlock
+            label="Can Delete"
+            value={storageData ? formatCount(storageData.deletableSubagentCount) : "..."}
+          />
+          <StatBlock
+            label="Can Free"
+            value={storageData ? formatBytes(storageData.deletableSubagentBytes) : "..."}
+          />
+        </StatsGrid>
+        <div className="flex flex-col gap-3 border-t border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex min-w-0 items-start gap-2 text-xs text-muted-foreground">
+            <HardDriveIcon className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              Finished sub-agent transcripts stay on disk so a parent task can reuse them. Cleanup
+              excludes active task trees and sessions used in the last ten minutes.
+            </span>
+          </div>
+          <Button
+            type="button"
+            size="xs"
+            variant="destructive"
+            className="shrink-0"
+            disabled={
+              !storageData || storageData.deletableSubagentCount === 0 || isDeletingSubagents
+            }
+            onClick={() => void handleDeleteInactiveSubagents()}
+          >
+            <Trash2Icon className="size-3.5" />
+            {isDeletingSubagents ? "Deleting…" : "Delete inactive agents"}
+          </Button>
+        </div>
+        <StatsGrid>
+          <StatBlock
+            label="Recovery Snapshots"
+            value={storageData ? formatCount(storageData.recoverySnapshotCount) : "..."}
+          />
+          <StatBlock
+            label="Recovery Storage"
+            value={storageData ? formatBytes(storageData.recoverySnapshotBytes) : "..."}
+          />
+        </StatsGrid>
+        <div className="flex flex-col gap-3 border-t border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex min-w-0 items-start gap-2 text-xs text-muted-foreground">
+            <HardDriveIcon className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              Recovery snapshots are emergency copies created before storage repair. Delete them
+              only after confirming current tasks open and run correctly.
+            </span>
+          </div>
+          <Button
+            type="button"
+            size="xs"
+            variant="destructive"
+            className="shrink-0"
+            disabled={!storageData || storageData.recoverySnapshotCount === 0 || isDeletingRecovery}
+            onClick={() => void handleDeleteRecoverySnapshots()}
+          >
+            <Trash2Icon className="size-3.5" />
+            {isDeletingRecovery ? "Deleting…" : "Delete recovery snapshots"}
+          </Button>
+        </div>
+        {storageData?.error || storageError ? (
+          <div className="flex items-start gap-2 border-t border-border/60 px-4 py-3 text-xs text-destructive sm:px-5">
+            <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+            <span>{storageData?.error ?? storageError}</span>
+          </div>
+        ) : null}
+      </SettingsSection>
 
       <SettingsSection
         title="Live Processes"

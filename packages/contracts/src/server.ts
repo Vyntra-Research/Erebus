@@ -358,6 +358,44 @@ export const ServerProcessDiagnosticsResult = Schema.Struct({
 });
 export type ServerProcessDiagnosticsResult = typeof ServerProcessDiagnosticsResult.Type;
 
+export const ServerStorageDiagnosticsResult = Schema.Struct({
+  readAt: IsoDateTime,
+  error: Schema.NullOr(TrimmedNonEmptyString),
+  codexAvailable: Schema.Boolean,
+  subagentSessionCount: NonNegativeInt,
+  subagentSessionBytes: NonNegativeInt,
+  deletableSubagentCount: NonNegativeInt,
+  deletableSubagentBytes: NonNegativeInt,
+  protectedSubagentCount: NonNegativeInt,
+  protectedSubagentBytes: NonNegativeInt,
+  snapshotDigest: TrimmedNonEmptyString,
+  recoverySnapshotCount: NonNegativeInt,
+  recoverySnapshotBytes: NonNegativeInt,
+  recoverySnapshotDigest: TrimmedNonEmptyString,
+});
+export type ServerStorageDiagnosticsResult = typeof ServerStorageDiagnosticsResult.Type;
+
+export const ServerDeleteInactiveSubagentsInput = Schema.Struct({
+  snapshotDigest: TrimmedNonEmptyString,
+});
+export type ServerDeleteInactiveSubagentsInput = typeof ServerDeleteInactiveSubagentsInput.Type;
+
+export const ServerDeleteInactiveSubagentsResult = Schema.Struct({
+  accepted: Schema.Boolean,
+  deletedCount: NonNegativeInt,
+  deletedBytes: NonNegativeInt,
+  message: TrimmedNonEmptyString,
+});
+export type ServerDeleteInactiveSubagentsResult = typeof ServerDeleteInactiveSubagentsResult.Type;
+
+export const ServerDeleteRecoverySnapshotsInput = Schema.Struct({
+  snapshotDigest: TrimmedNonEmptyString,
+});
+export type ServerDeleteRecoverySnapshotsInput = typeof ServerDeleteRecoverySnapshotsInput.Type;
+
+export const ServerDeleteRecoverySnapshotsResult = ServerDeleteInactiveSubagentsResult;
+export type ServerDeleteRecoverySnapshotsResult = typeof ServerDeleteRecoverySnapshotsResult.Type;
+
 export const ServerProcessResourceHistoryInput = Schema.Struct({
   windowMs: NonNegativeInt,
   bucketMs: NonNegativeInt,
