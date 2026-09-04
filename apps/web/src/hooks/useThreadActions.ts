@@ -147,6 +147,9 @@ export function useThreadActions() {
   const deleteThreadMutation = useAtomCommand(threadEnvironment.delete, {
     reportFailure: false,
   });
+  const deleteArchivedThreadsMutation = useAtomCommand(threadEnvironment.deleteArchived, {
+    reportFailure: false,
+  });
   const settleThreadMutation = useAtomCommand(threadEnvironment.settle, {
     reportFailure: false,
   });
@@ -697,12 +700,35 @@ export function useThreadActions() {
     [confirmThreadDelete, deleteThread, resolveThreadTarget],
   );
 
+  const deleteArchivedThreads = useCallback(
+    async (targets: ReadonlyArray<ScopedThreadRef>) => {
+      const targetsByEnvironment = new Map<EnvironmentId, ThreadId[]>();
+      for (const target of targets) {
+        const existing = targetsByEnvironment.get(target.environmentId) ?? [];
+        existing.push(target.threadId);
+        targetsByEnvironment.set(target.environmentId, existing);
+      }
+
+      for (const [environmentId, threadIds] of targetsByEnvironment) {
+        const result = await deleteArchivedThreadsMutation({
+          environmentId,
+          input: { threadIds },
+        });
+        if (result._tag === "Failure") return result;
+        refreshArchivedThreadsForEnvironment(environmentId);
+      }
+      return AsyncResult.success(undefined);
+    },
+    [deleteArchivedThreadsMutation],
+  );
+
   return useMemo(
     () => ({
       archiveThread,
       unarchiveThread,
       deleteThread,
       confirmAndDeleteThread,
+      deleteArchivedThreads,
       settleThread,
       unsettleThread,
       snoozeThread,
@@ -714,6 +740,7 @@ export function useThreadActions() {
     [
       archiveThread,
       confirmAndDeleteThread,
+      deleteArchivedThreads,
       deleteThread,
       pinThread,
       reorderPinnedThread,

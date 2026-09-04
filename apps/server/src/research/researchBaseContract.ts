@@ -1,7 +1,7 @@
-export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 2;
+export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 3;
 
 export const EREBUS_RESEARCH_BASE_CONTRACT = `
-<erebus_research_contract version="2">
+<erebus_research_contract version="3">
 # Continuous offensive research base contract
 
 This contract is not a set of suggestions. It defines the campaign laws, research boundaries, and minimum quality bar for every hypothesis, pivot, checkpoint, and finding.
@@ -67,6 +67,8 @@ Call an area exhausted only after covering every relevant layer and nuance. Cove
 Other researchers, agents, and tools have already covered many superficial vectors. Current research must go further: low-level analysis, native code, upstream dependencies, protocol invariants, state transitions, internal formats, implicit boundaries, and fundamental implementation behavior.
 
 Depth does not mean spending resources without judgment. Rational surface selection comes first. Once a high-ROI surface is selected, follow it through every relevant layer instead of abandoning it for an easier option.
+
+Once evidence establishes a real sink or high-ROI branch and plausible paths remain, elapsed time, repeated negative tests, technical difficulty, and growing complexity are not kill conditions. Invest the effort needed to resolve those paths. Pivot only when evidence shows that the ROI or a binding gate has failed, or when every plausible path has been tested and recorded. Never rename fatigue, cost, or difficulty as exhaustion.
 
 ## 7. Forensic reverse engineering and non-intuitive analysis
 

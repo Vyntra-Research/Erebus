@@ -1,7 +1,12 @@
 import { assert, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
-import { JudgeAssessment, ObserverAssessment } from "./ResearchEvaluator.ts";
+import {
+  describeResearchEvaluatorFailure,
+  isResearchEvaluatorQuotaFailure,
+  JudgeAssessment,
+  ObserverAssessment,
+} from "./ResearchEvaluator.ts";
 
 const decodeObserverAssessment = Schema.decodeUnknownSync(ObserverAssessment);
 const decodeJudgeAssessment = Schema.decodeUnknownSync(JudgeAssessment);
@@ -42,4 +47,28 @@ it("emits provider-compatible confidence schemas and preserves range validation"
   assert.equal(decodeJudgeAssessment(judge).confidence, 0.5);
   assert.throws(() => decodeObserverAssessment({ ...observer, confidence: -1 }));
   assert.throws(() => decodeJudgeAssessment({ ...judge, confidence: 2 }));
+});
+
+it("classifies Codex quota exhaustion without persisting raw provider output", () => {
+  const raw =
+    "Codex CLI command failed. ERROR: You've hit your usage limit. Visit the account page to continue.";
+
+  assert.isTrue(isResearchEvaluatorQuotaFailure(raw));
+  assert.equal(
+    describeResearchEvaluatorFailure(raw),
+    "The selected Codex evaluator account has exhausted its current usage quota.",
+  );
+  assert.isTrue(isResearchEvaluatorQuotaFailure(describeResearchEvaluatorFailure(raw)));
+  assert.notInclude(describeResearchEvaluatorFailure(raw), "account page");
+});
+
+it("keeps unknown evaluator failures out of durable campaign text", () => {
+  const raw = "provider failed while processing SECRET_PROMPT_CONTENT at C:\\private\\evidence";
+  const described = describeResearchEvaluatorFailure(raw);
+
+  assert.equal(
+    described,
+    "The evaluator provider failed before it produced a valid result. See the local server log for the provider error.",
+  );
+  assert.notInclude(described, "SECRET_PROMPT_CONTENT");
 });

@@ -109,13 +109,30 @@ export class ResearchEvaluatorError extends Schema.TaggedErrorClass<ResearchEval
   {
     operation: Schema.Literals(["observer", "judge"]),
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     return `${this.operation} evaluation failed: ${this.detail}`;
   }
 }
+
+export const isResearchEvaluatorQuotaFailure = (detail: string): boolean =>
+  /(?:you(?:'|’)ve hit your usage limit|usage limit (?:has been )?reached|insufficient_quota|quota (?:is )?exhausted|quota exceeded|exhausted.{0,32}usage quota)/iu.test(
+    detail,
+  );
+
+export const describeResearchEvaluatorFailure = (detail: string): string => {
+  if (isResearchEvaluatorQuotaFailure(detail)) {
+    return "The selected Codex evaluator account has exhausted its current usage quota.";
+  }
+  if (/prompt_cache_retention.+not supported/iu.test(detail)) {
+    return "The evaluator model rejected an unsupported prompt-cache option.";
+  }
+  if (/(?:timed out|timeout)/iu.test(detail)) {
+    return "The evaluator timed out before it produced a valid result.";
+  }
+  return "The evaluator provider failed before it produced a valid result. See the local server log for the provider error.";
+};
 
 export interface ResearchEvaluatorShape {
   readonly evaluateObserver: (input: {

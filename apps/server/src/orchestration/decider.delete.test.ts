@@ -102,6 +102,30 @@ const seedReadModel = Effect.gen(function* () {
   });
 });
 
+const seedArchivedReadModel = Effect.gen(function* () {
+  let readModel = yield* seedReadModel;
+  for (const [index, threadId] of ["thread-delete-1", "thread-delete-2"].entries()) {
+    readModel = yield* projectEvent(readModel, {
+      sequence: 4 + index,
+      eventId: asEventId(`evt-thread-archive-${index + 1}`),
+      aggregateKind: "thread",
+      aggregateId: asThreadId(threadId),
+      type: "thread.archived",
+      occurredAt: "2026-01-01T00:01:00.000Z",
+      commandId: asCommandId(`cmd-thread-archive-${index + 1}`),
+      causationEventId: null,
+      correlationId: asCommandId(`cmd-thread-archive-${index + 1}`),
+      metadata: {},
+      payload: {
+        threadId: asThreadId(threadId),
+        archivedAt: "2026-01-01T00:01:00.000Z",
+        updatedAt: "2026-01-01T00:01:00.000Z",
+      },
+    });
+  }
+  return readModel;
+});
+
 type PlannedEvent = Omit<OrchestrationEvent, "sequence">;
 
 function normalizeDeleteEvent(event: PlannedEvent | ReadonlyArray<PlannedEvent>) {
@@ -212,6 +236,42 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
       }
 
       expect(normalizeDeleteEvent(forcedResult)).toEqual(normalizeDeleteEvent(sequentialEvents));
+    }),
+  );
+
+  it.effect("deletes an exact archived-thread set as one planned event sequence", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedArchivedReadModel;
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.archived.delete-all",
+          commandId: asCommandId("cmd-delete-all-archived"),
+          threadIds: [asThreadId("thread-delete-1"), asThreadId("thread-delete-2")],
+        },
+        readModel,
+      });
+
+      expect(normalizeDeleteEvent(result)).toEqual([
+        expect.objectContaining({ type: "thread.deleted", aggregateId: "thread-delete-1" }),
+        expect.objectContaining({ type: "thread.deleted", aggregateId: "thread-delete-2" }),
+      ]);
+    }),
+  );
+
+  it.effect("rejects the full batch before planning deletes when any target is not archived", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const error = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.archived.delete-all",
+            commandId: asCommandId("cmd-delete-all-rejected"),
+            threadIds: [asThreadId("thread-delete-1"), asThreadId("thread-delete-2")],
+          },
+          readModel,
+        }),
+      );
+      expect(error.message).toContain("not archived");
     }),
   );
 });

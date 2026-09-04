@@ -72,6 +72,11 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateKind: "project",
         aggregateId: command.projectId,
       };
+    case "thread.archived.delete-all":
+      return {
+        aggregateKind: "thread",
+        aggregateId: command.threadIds.at(-1)!,
+      };
     default:
       return {
         aggregateKind: "thread",

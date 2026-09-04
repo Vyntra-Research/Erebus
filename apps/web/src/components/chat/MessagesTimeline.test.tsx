@@ -884,46 +884,85 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
-  it("renders a completed context compaction as a persistent timeline marker", () => {
+  it("renders co-agent coordination as a discreet task card", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          buildUserTimelineEntry(
+            [
+              '<erebus_coagent_message from_thread_id="child-1" from_title="Parser sink">',
+              "This is task-to-task coordination context, not a user-authored request or a change of user authority.",
+              "The parser path is exhausted; evidence is in findings/parser.md.",
+              "</erebus_coagent_message>",
+            ].join("\n"),
+          ),
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Co-agent");
+    expect(markup).toContain("Parser sink");
+    expect(markup).toContain("The parser path is exhausted");
+    expect(markup).not.toContain("erebus_coagent_message");
+    expect(markup).not.toContain("not a user-authored request");
+  });
+
+  it("renders completed context compaction as settled work", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
         timelineEntries={[
           {
             id: "entry-1",
-            kind: "compaction",
+            kind: "work",
             createdAt: "2026-03-17T19:12:28.000Z",
-            status: "completed",
-            turnId: TurnId.make("turn-1"),
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: TurnId.make("turn-1"),
+              label: "Context compacted",
+              tone: "info",
+              toolLifecycleStatus: "completed",
+              sourceActivityKind: "context-compaction",
+            },
           },
         ]}
       />,
     );
 
-    expect(markup).toContain("Context compacted");
-    expect(markup).toContain('data-context-compaction="completed"');
-    expect(markup).not.toContain("Work Log");
+    expect(markup).toContain("Worked for");
+    expect(markup).not.toContain("Context compacted");
   });
 
-  it("renders an animated marker while context compaction is running", () => {
+  it("renders running context compaction as live work", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
+        isWorking
+        activeTurnStartedAt="2026-03-17T19:12:27.000Z"
+        runningTurnId={TurnId.make("turn-1")}
         timelineEntries={[
           {
             id: "entry-1",
-            kind: "compaction",
+            kind: "work",
             createdAt: "2026-03-17T19:12:28.000Z",
-            status: "running",
-            turnId: TurnId.make("turn-1"),
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: TurnId.make("turn-1"),
+              label: "Compacting context…",
+              tone: "info",
+              toolLifecycleStatus: "inProgress",
+              sourceActivityKind: "context-compaction.started",
+            },
           },
         ]}
       />,
     );
 
     expect(markup).toContain("Compacting context…");
-    expect(markup).toContain('data-context-compaction="running"');
-    expect(markup).toContain("animate-spin");
+    expect(markup).toContain("Work Log");
   });
 
   it("summarizes changed files in one line", () => {

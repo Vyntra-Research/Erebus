@@ -693,6 +693,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
           .pipe(Effect.retry({ times: 2 })),
       );
       if (assessmentResult._tag === "Failure") {
+        const failureDetail = assessmentResult.failure.detail;
         const failureEvaluationId = ResearchEvaluationId.make(yield* uuid);
         const evaluatorModelSelection = buildResearchEvaluatorModelSelection(
           context.thread.modelSelection,
@@ -710,11 +711,10 @@ const makeResearchSupervisor = Effect.gen(function* () {
           gates: contract.gates.map((gate) => ({
             gateId: gate.id,
             status: "unknown" as const,
-            reason: "The independent Judge did not complete after bounded retries.",
+            reason: `The independent Judge did not complete after bounded retries. ${failureDetail}`,
             evidence: [],
           })),
-          summary:
-            "Review blocked by a harness or evaluator failure. No technical verdict exists and the finding remains preserved.",
+          summary: `Review blocked by a harness or evaluator failure. ${failureDetail} No technical verdict exists and the finding remains preserved.`,
           nextAction:
             "Repair the evaluator and retry this same finding revision; do not return the branch to research or claim acceptance, rejection, downgrade, or closure.",
           cvssV31: null,

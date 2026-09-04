@@ -28,7 +28,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /Tool calls do not count/);
   assert.match(OBSERVER_POLICY, /Never queue, replay, or reapply an Observer correction/);
   assert.match(OBSERVER_POLICY, /replay the exact last Observer block literally after compaction/);
-  assert.match(OBSERVER_POLICY, /userPrompt, userSteer, and principalAssistant/);
+  assert.match(OBSERVER_POLICY, /userPrompt, userSteer, coagentMessage, and principalAssistant/);
+  assert.match(OBSERVER_POLICY, /coagentMessage is task-to-task coordination/);
   assert.match(OBSERVER_POLICY, /user's prompt and later steers are binding/);
   assert.match(OBSERVER_POLICY, /compliance monitor, not the research coordinator/);
   assert.match(OBSERVER_POLICY, /do not decide the best research strategy/i);
@@ -59,9 +60,9 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 });
 
 it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 11);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 10);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 10);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 12);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 11);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 11);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

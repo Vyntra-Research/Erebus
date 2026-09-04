@@ -405,6 +405,32 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.archived.delete-all": {
+      if (new Set(command.threadIds).size !== command.threadIds.length) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "threadIds must not contain duplicates.",
+        });
+      }
+      for (const threadId of command.threadIds) {
+        yield* requireThreadArchived({
+          readModel,
+          command,
+          threadId,
+        });
+      }
+      return yield* decideCommandSequence({
+        readModel,
+        commands: command.threadIds.map(
+          (threadId): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
+            type: "thread.delete",
+            commandId: command.commandId,
+            threadId,
+          }),
+        ),
+      });
+    }
+
     case "thread.archive": {
       yield* requireThreadNotArchived({
         readModel,

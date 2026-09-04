@@ -561,7 +561,9 @@ const make = Effect.gen(function* () {
       activeSession !== undefined &&
       activeSession.providerInstanceId !== undefined
         ? activeSession.providerInstanceId
-        : thread.modelSelection.instanceId;
+        : thread.session?.providerInstanceId !== undefined
+          ? thread.session.providerInstanceId
+          : thread.modelSelection.instanceId;
     const desiredModelSelection = yield* codexAccountRouter.resolveModelSelection(
       requestedModelSelection ?? thread.modelSelection,
     );

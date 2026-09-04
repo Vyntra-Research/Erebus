@@ -130,7 +130,7 @@ export const EREBUS_THREADS_DYNAMIC_TOOL = {
       type: "function",
       name: "release",
       description:
-        "Archive one completed direct co-agent after its final result has been read and collected. This frees one co-agent slot while preserving the task as an audit trail. Running tasks must be interrupted and settled first.",
+        "Permanently discard one completed direct co-agent after its final result has been read and collected. This frees one co-agent slot; only the coordination registry remains as an audit record. Running tasks must be interrupted and settled first.",
       inputSchema: objectSchema({ threadId }, ["threadId"]),
     },
   ],

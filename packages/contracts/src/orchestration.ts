@@ -723,6 +723,12 @@ const ThreadDeleteCommand = Schema.Struct({
   threadId: ThreadId,
 });
 
+const ArchivedThreadsDeleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.archived.delete-all"),
+  commandId: CommandId,
+  threadIds: Schema.Array(ThreadId).check(Schema.isMinLength(1), Schema.isMaxLength(10_000)),
+});
+
 const ThreadArchiveCommand = Schema.Struct({
   type: Schema.Literal("thread.archive"),
   commandId: CommandId,
@@ -953,6 +959,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
+  ArchivedThreadsDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadSettleCommand,
@@ -981,6 +988,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
+  ArchivedThreadsDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadSettleCommand,

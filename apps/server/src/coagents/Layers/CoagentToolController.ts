@@ -133,7 +133,7 @@ const childAssignmentPrompt = (input: {
     "<erebus_coagent_assignment>",
     `Parent task: ${input.parentThreadId}`,
     "You are a direct co-agent. Work only on the bounded assignment below and return your result to the parent in your final response.",
-    "Do not create or coordinate additional Erebus co-agent tasks. You may use the provider's native subagents when they materially help your own bounded work.",
+    "Do not create or coordinate additional Erebus co-agent tasks. You may use the provider's native subagents for vertical parallel work that helps this same bounded assignment.",
     "Do not expand scope, change shared goals, or make overlapping edits unless the assignment explicitly authorizes them. The parent owns synthesis, decisions, and user communication.",
     "You have the same Erebus project, workspace, model settings, skills, MCPs, and read-only campaign context as the parent.",
     "The parent exclusively owns the Erebus and Proteus campaign lifecycle, contract, checkpoints, findings, Judge submissions, gates, promotion, rejection, pause, resume, and closure. You may call research.get_status to read the parent campaign when needed, but never call a mutating research tool or mutate campaign state. Return evidence and recommendations to the parent instead.",
@@ -168,24 +168,25 @@ const principalInstructions = (isChild: boolean) =>
     ? [
         "Erebus co-agent contract:",
         "- This task is a managed child. It cannot spawn other Erebus co-agent tasks.",
-        "- Stay within the parent's assignment. Do not overlap another delegated surface or take ownership of synthesis.",
+        "- Stay within the parent's separate horizontal sink or surface assignment. Do not overlap another delegated surface or take ownership of synthesis.",
         "- The parent alone manages the Erebus and Proteus campaign, contract, checkpoints, findings, gates, Judge, and lifecycle. research.get_status is read-only; never call another research tool or mutate campaign state.",
         "- Your final response is the canonical handback. Include the result, exact evidence, killed paths, unresolved questions, and any files changed.",
-        "- Native provider subagents remain available for bounded work inside this task.",
+        "- Native provider subagents remain available for vertical parallel work inside this same bounded task.",
         "- Use threads.send only to communicate an important result or blocker to the parent.",
         "- Resumed sessions may expose the same controls as mcp__erebus-research__threads_* tools.",
       ].join("\n")
     : [
         "Erebus task coordination contract:",
-        "- Use threads.spawn only for independent, bounded horizontal work that is worth a separate visible task.",
+        "- Use threads.spawn only for independent, bounded horizontal dives into separate sinks or surfaces that are worth separate visible tasks.",
         `- At most ${MAX_DIRECT_CHILDREN} direct co-agent tasks may exist. Co-agents cannot create more co-agents.`,
         "- Give each child a distinct scope, expected output, constraints, and stop condition. Avoid overlapping writes.",
-        "- Delegate separate surfaces for horizontal coverage. State write ownership and evidence requirements before spawning each child.",
+        "- Delegate separate sinks or surfaces for horizontal coverage. State write ownership, evidence requirements, and stop conditions before spawning each child. Do not split one vertical line of work across co-agent tasks.",
+        "- Use the provider's native subagents for vertical parallel work that supports the same task. A co-agent may use its own native subagents inside its assigned sink.",
         "- Use blank by default. Use fork only when recent completed conversation is required; fork context is bounded and explicitly historical.",
         "- You alone own the Erebus and Proteus campaign, contract, checkpoints, findings, gates, Judge submissions, lifecycle, synthesis, validation, and user communication. Never delegate campaign control.",
         "- Check progress with threads.list, threads.read, or event-bounded threads.wait. Do not poll. Treat a child's final response as its canonical handback and verify it before synthesis.",
         "- Use threads.send only for a material scope update or dependency. Interrupt only for recovery or a clear scope violation, not to micromanage valid work.",
-        "- After collecting a completed child's final result, call threads.release to archive it and free its slot. Never release before collection.",
+        "- After collecting a completed child's final result, call threads.release to permanently discard the child task and free its slot. Never release before collection.",
         "- Resumed sessions may expose the same controls as mcp__erebus-research__threads_* tools.",
       ].join("\n");
 
@@ -493,14 +494,15 @@ const make = Effect.gen(function* () {
               return failure("Only an unreleased direct co-agent may be released.");
             }
             const target = yield* getThread(input.threadId);
-            if (!target) return failure("The co-agent task is not active or was already archived.");
+            if (!target)
+              return failure("The co-agent task is not active or was already discarded.");
             if (threadStatus(target) === "running") {
               return failure(
                 "A running co-agent cannot be released. Interrupt it and wait for settlement first.",
               );
             }
             yield* engine.dispatch({
-              type: "thread.archive",
+              type: "thread.delete",
               commandId: CommandId.make(`coagent-release:${uuid()}`),
               threadId: target.id,
             });

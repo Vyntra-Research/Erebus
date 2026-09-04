@@ -5,9 +5,12 @@ import { describe, it } from "vite-plus/test";
 
 import {
   buildCodexHistoricalUserSteerMarker,
+  buildCodexLiveCoagentMessagePrompt,
   buildCodexLiveUserSteerPrompt,
   contextCompactionTurnId,
+  deliveredLiveContext,
   deliveredLiveUserSteerId,
+  erebusCoagentSteerClientId,
   erebusContextClientId,
   erebusUserSteerClientId,
   isHiddenErebusContextItem,
@@ -29,13 +32,15 @@ describe("Codex user steering across compaction", () => {
   it("marks only the exact last steer as historical", () => {
     const marker = buildCodexHistoricalUserSteerMarker("message-7");
 
-    NodeAssert.match(marker, /stale_user_steer_id="message-7"/);
+    NodeAssert.match(marker, /stale_context_id="message-7"/);
+    NodeAssert.match(marker, /stale_context_kind="userSteer"/);
     NodeAssert.match(marker, /Only the user steer with this exact id/);
-    NodeAssert.match(marker, /Do not reclassify any other user message/);
+    NodeAssert.match(marker, /Do not reclassify any other message/);
 
     const last = {
       clientUserMessageId: "message-7",
       turnId: TurnId.make("turn-7"),
+      kind: "userSteer" as const,
       state: "fresh" as const,
     };
     const unrelatedCompaction = markTrackedUserSteerHistorical(last, TurnId.make("turn-6"));
@@ -97,5 +102,24 @@ describe("Codex user steering across compaction", () => {
       undefined,
     );
     NodeAssert.equal(deliveredLiveUserSteerId({ type: "agentMessage", clientId }), undefined);
+  });
+
+  it("tracks a co-agent delivery as the exact transient context across compaction", () => {
+    const clientId = erebusCoagentSteerClientId("coagent-message-1");
+    NodeAssert.deepEqual(deliveredLiveContext({ type: "userMessage", clientId }), {
+      clientUserMessageId: "coagent-message-1",
+      kind: "coagentMessage",
+    });
+
+    const prompt = buildCodexLiveCoagentMessagePrompt(
+      "coagent-message-1",
+      '<erebus_coagent_message from_thread_id="child" from_title="Child">done</erebus_coagent_message>',
+    );
+    NodeAssert.match(prompt, /<erebus_coagent_delivery/);
+    NodeAssert.match(prompt, /visual position after the compacted summary does not make it newer/);
+
+    const marker = buildCodexHistoricalUserSteerMarker("coagent-message-1", "coagentMessage");
+    NodeAssert.match(marker, /stale_context_kind="coagentMessage"/);
+    NodeAssert.match(marker, /Only the co-agent message with this exact id/);
   });
 });

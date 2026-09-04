@@ -528,7 +528,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           yield* Effect.yieldNow;
 
           const status = yield* Fiber.join(statusFiber);
-          assert.strictEqual(status.status, "error");
+          assert.strictEqual(status.status, "warning");
           assert.strictEqual(
             status.message,
             "Timed out while checking Codex app-server provider status.",
@@ -536,6 +536,34 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(yield* Ref.get(killCalls), 1);
         }),
       );
+
+      it("keeps a ready Codex snapshot when a later status probe times out", () => {
+        const readyProvider = {
+          instanceId: ProviderInstanceId.make("codex-2"),
+          driver: ProviderDriverKind.make("codex"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-09-04T01:00:00.000Z",
+          version: "0.151.0",
+          models: [],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const timedOutProvider = {
+          ...readyProvider,
+          status: "warning",
+          auth: { status: "unknown" },
+          checkedAt: "2026-09-04T01:01:00.000Z",
+          message: "Timed out while checking Codex app-server provider status.",
+        } as const satisfies ServerProvider;
+
+        assert.deepStrictEqual(mergeProviderSnapshot(readyProvider, timedOutProvider), {
+          ...readyProvider,
+          checkedAt: timedOutProvider.checkedAt,
+        });
+      });
     });
 
     describe("ProviderRegistryLive", () => {

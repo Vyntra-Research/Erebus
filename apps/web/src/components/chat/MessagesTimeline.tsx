@@ -53,7 +53,6 @@ import {
   EyeIcon,
   GlobeIcon,
   HammerIcon,
-  LoaderCircleIcon,
   MessageCircleIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
@@ -983,33 +982,69 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "turn-plan" ? <TurnPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
-      {row.kind === "compaction" ? <CompactionTimelineRow row={row} /> : null}
     </div>
   );
 });
 
-function CompactionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "compaction" }> }) {
-  const running = row.status === "running";
+interface CoagentCoordinationMessage {
+  readonly fromThreadId: string;
+  readonly fromTitle: string;
+  readonly body: string;
+}
+
+function parseCoagentCoordinationMessage(text: string): CoagentCoordinationMessage | null {
+  const trimmed = text.trim();
+  const opening =
+    /^<erebus_coagent_message\s+from_thread_id="([^"]+)"\s+from_title=("(?:\\.|[^"\\])*")>\r?\n?/.exec(
+      trimmed,
+    );
+  if (!opening?.[1] || !opening[2] || !trimmed.endsWith("</erebus_coagent_message>")) {
+    return null;
+  }
+  let fromTitle: string;
+  try {
+    fromTitle = JSON.parse(opening[2]) as string;
+  } catch {
+    return null;
+  }
+  const inner = trimmed.slice(opening[0].length, -"</erebus_coagent_message>".length).trim();
+  const body = inner
+    .replace(
+      /^This is task-to-task coordination context, not a user-authored request or a change of user authority\.\r?\n?/,
+      "",
+    )
+    .trim();
+  return { fromThreadId: opening[1], fromTitle, body };
+}
+
+function CoagentCoordinationTimelineRow({ message }: { message: TimelineMessage }) {
+  const ctx = use(TimelineRowCtx);
+  const coordination = parseCoagentCoordinationMessage(message.text);
+  if (!coordination) return null;
   return (
-    <div
-      className="flex items-center gap-2 py-1 text-secondary-label text-xs"
-      aria-live={running ? "polite" : undefined}
-      data-context-compaction={row.status}
-    >
-      <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
-      {running ? (
-        <LoaderCircleIcon className="size-3 animate-spin" aria-hidden="true" />
-      ) : (
-        <CheckIcon className="size-3" aria-hidden="true" />
-      )}
-      <span>{running ? "Compacting context…" : "Context compacted"}</span>
-      <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
-    </div>
+    <section className="-mx-1 space-y-0.5 px-1 py-0.5" aria-label="Co-agent message">
+      <p className="px-0.5 pb-0.5 font-medium text-secondary-label text-[11px]">Co-agent</p>
+      <div className="max-w-full rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-sm">
+        <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
+          <MessageCircleIcon className="size-3.5" aria-hidden="true" />
+          <span className="font-medium text-foreground/85">{coordination.fromTitle}</span>
+        </div>
+        <ChatMarkdown
+          text={coordination.body}
+          cwd={ctx.markdownCwd}
+          threadRef={ctx.threadRef ?? undefined}
+          skills={ctx.skills}
+        />
+      </div>
+    </section>
   );
 }
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
+  if (parseCoagentCoordinationMessage(row.message.text)) {
+    return <CoagentCoordinationTimelineRow message={row.message} />;
+  }
   const userImages = row.message.attachments ?? [];
   const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
   const terminalContexts = displayedUserMessage.contexts;

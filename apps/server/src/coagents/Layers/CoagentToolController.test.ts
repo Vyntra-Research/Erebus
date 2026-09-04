@@ -275,7 +275,7 @@ layer("CoagentToolController", (it) => {
     }),
   );
 
-  it.effect("archives a collected child and frees its direct-child slot", () =>
+  it.effect("discards a collected child and frees its direct-child slot", () =>
     Effect.gen(function* () {
       const context = yield* seedParent("release");
       const controller = yield* CoagentToolController;
