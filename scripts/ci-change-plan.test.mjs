@@ -45,6 +45,8 @@ describe("CI change plan", () => {
   it("finishes documentation-only changes without starting build jobs", () => {
     expect(classifyCiChanges([change("README.md"), change("docs/setup.md")])).toMatchObject({
       build: false,
+      desktop: false,
+      libraries: false,
       node: false,
       rust: false,
       server: false,
@@ -55,9 +57,10 @@ describe("CI change plan", () => {
   it("uses the narrow path for a server-only change", () => {
     expect(classifyCiChanges([change("apps/server/src/research/supervisor.ts")])).toMatchObject({
       build: true,
+      desktop: false,
       full: false,
+      libraries: false,
       node: true,
-      nonServer: false,
       rust: false,
       server: true,
       serverOnly: true,
@@ -70,6 +73,8 @@ describe("CI change plan", () => {
       classifyCiChanges([change("apps/server/src/research/supervisor.test.ts")]),
     ).toMatchObject({
       build: false,
+      desktop: false,
+      libraries: false,
       node: true,
       server: true,
       serverOnly: true,
@@ -79,8 +84,9 @@ describe("CI change plan", () => {
   it("fans shared contract changes out to every JavaScript test surface", () => {
     expect(classifyCiChanges([change("packages/contracts/src/index.ts")])).toMatchObject({
       build: true,
+      desktop: true,
+      libraries: true,
       node: true,
-      nonServer: true,
       server: true,
       serverOnly: false,
       web: true,
@@ -90,7 +96,8 @@ describe("CI change plan", () => {
   it("keeps web changes off unrelated server and library tests", () => {
     expect(classifyCiChanges([change("apps/web/src/App.tsx")])).toMatchObject({
       build: true,
-      nonServer: false,
+      desktop: false,
+      libraries: false,
       server: false,
       web: true,
     });
@@ -99,6 +106,8 @@ describe("CI change plan", () => {
   it("runs only Rust checks for resource monitor changes", () => {
     expect(classifyCiChanges([change("native/resource-monitor/src/main.rs")])).toMatchObject({
       build: false,
+      desktop: false,
+      libraries: false,
       node: false,
       rust: true,
     });
@@ -107,9 +116,10 @@ describe("CI change plan", () => {
   it("uses full validation when CI policy changes", () => {
     expect(classifyCiChanges([change(".github/workflows/ci.yml")])).toMatchObject({
       build: true,
+      desktop: true,
       full: true,
+      libraries: true,
       node: true,
-      nonServer: true,
       rust: true,
       server: true,
       web: true,

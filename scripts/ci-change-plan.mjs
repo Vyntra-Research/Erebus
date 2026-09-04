@@ -113,11 +113,22 @@ export function classifyCiChanges(changes) {
         "native/libghostty-vt/",
       ]),
     );
-  const nonServer =
+  const desktop =
     full ||
     files.some((file) =>
       matchesAnyPrefix(file, [
         "apps/desktop/",
+        "packages/client-runtime/",
+        "packages/contracts/",
+        "packages/shared/",
+        "packages/ssh/",
+        "packages/tailscale/",
+      ]),
+    );
+  const libraries =
+    full ||
+    files.some((file) =>
+      matchesAnyPrefix(file, [
         "packages/",
         "scripts/",
         "infra/relay/",
@@ -142,9 +153,10 @@ export function classifyCiChanges(changes) {
 
   return {
     build,
+    desktop,
     full,
+    libraries,
     node,
-    nonServer,
     rust,
     server,
     serverOnly,
@@ -176,9 +188,10 @@ function outputPlan(plan) {
   if (!outputPath) throw new Error("GITHUB_OUTPUT is required");
   const output = [
     `build=${String(plan.build)}`,
+    `desktop=${String(plan.desktop)}`,
     `full=${String(plan.full)}`,
+    `libraries=${String(plan.libraries)}`,
     `node=${String(plan.node)}`,
-    `non_server=${String(plan.nonServer)}`,
     `rust=${String(plan.rust)}`,
     `server=${String(plan.server)}`,
     `server_only=${String(plan.serverOnly)}`,

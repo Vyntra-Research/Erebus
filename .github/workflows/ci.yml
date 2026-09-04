@@ -17,9 +17,10 @@ jobs:
     timeout-minutes: 2
     outputs:
       build: ${{ steps.plan.outputs.build }}
+      desktop: ${{ steps.plan.outputs.desktop }}
       full: ${{ steps.plan.outputs.full }}
+      libraries: ${{ steps.plan.outputs.libraries }}
       node: ${{ steps.plan.outputs.node }}
-      non_server: ${{ steps.plan.outputs.non_server }}
       rust: ${{ steps.plan.outputs.rust }}
       server: ${{ steps.plan.outputs.server }}
       server_only: ${{ steps.plan.outputs.server_only }}
@@ -137,19 +138,18 @@ jobs:
         if: needs.changes.outputs.server_only == 'true'
         run: test -f apps/server/dist/bin.mjs
 
-  # Libraries and the Electron shell run apart from the large web suite and
-  # `erebus` (apps/server). Mobile remains outside the current Erebus release.
-  # `--parallel` drops the package
-  # dependency ordering that `vp run` applies by default: these `test` tasks
-  # declare no `dependsOn` and resolve workspace deps from source, so ordering
-  # only bought us idle runners between dependency layers. The concurrency
-  # limit stays at the default 4 so peak load per runner is unchanged.
-  test_non_server:
-    name: Test libraries and desktop
+  # The Electron suite is large enough to dominate a combined package run.
+  # Isolated shards keep UI changes from waiting on unrelated libraries.
+  test_desktop:
+    name: Test Desktop ${{ matrix.shard }}
     needs: changes
-    if: needs.changes.outputs.non_server == 'true'
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -170,9 +170,35 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       - name: Test
+        run: vp run --filter '@t3tools/desktop' test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # These tasks have no dependency ordering requirements, so they can share a
+  # runner while Vite+ uses bounded package concurrency.
+  test_libraries:
+    name: Test Libraries
+    needs: changes
+    if: needs.changes.outputs.libraries == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Test
         run: >-
           vp run --parallel --concurrency-limit 4
-          --filter '@t3tools/desktop'
           --filter '@t3tools/scripts'
           --filter 'effect-acp'
           --filter '@t3tools/oxlint-plugin-t3code'
@@ -322,7 +348,8 @@ jobs:
       - changes
       - quality
       - build
-      - test_non_server
+      - test_desktop
+      - test_libraries
       - test_web
       - test_server
       - rust
@@ -335,7 +362,8 @@ jobs:
             changes=${{ needs.changes.result }},
             quality=${{ needs.quality.result }},
             build=${{ needs.build.result }},
-            test_non_server=${{ needs.test_non_server.result }},
+            test_desktop=${{ needs.test_desktop.result }},
+            test_libraries=${{ needs.test_libraries.result }},
             test_web=${{ needs.test_web.result }},
             test_server=${{ needs.test_server.result }},
             rust=${{ needs.rust.result }}
