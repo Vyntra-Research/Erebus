@@ -685,6 +685,77 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("attributes native subagent commands to the parent Observer window", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-child-command"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "collabAgent/item",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-parent"),
+        itemId: asItemId("child-command-1"),
+        payload: {
+          agentThreadId: "child-1",
+          agentPath: "/root/audit",
+          lifecycle: "item/started",
+          item: {
+            id: "child-command-1",
+            type: "commandExecution",
+            command: "Get-ChildItem -LiteralPath src",
+            status: "inProgress",
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      const lifecycle = Option.getOrUndefined(firstEvent);
+      NodeAssert.equal(lifecycle?.type, "item.started");
+      if (lifecycle?.type === "item.started") {
+        NodeAssert.equal(lifecycle.payload.itemType, "command_execution");
+        NodeAssert.equal(lifecycle.payload.agentId, "child-1");
+        NodeAssert.equal(lifecycle.payload.detail, "Get-ChildItem -LiteralPath src");
+      }
+    }),
+  );
+
+  it.effect("preserves command-guard attribution for native subagents", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-child-command-denied"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "erebus/commandGuard/blocked",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-parent"),
+        itemId: asItemId("child-command-1"),
+        payload: {
+          command: "rg --files C:\\Users\\researcher",
+          code: "blocked-tool",
+          reason: "rg is disabled.",
+          remediation: "Use a bounded search.",
+          agentId: "child-1",
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = Option.getOrUndefined(yield* Fiber.join(firstEventFiber));
+      NodeAssert.equal(firstEvent?.type, "tool.denied");
+      if (firstEvent?.type === "tool.denied") {
+        NodeAssert.equal(firstEvent.payload.agentId, "child-1");
+        NodeAssert.equal(firstEvent.payload.command, "rg --files C:\\Users\\researcher");
+        NodeAssert.equal(firstEvent.payload.safetyCode, "blocked-tool");
+      }
+    }),
+  );
+
   it.effect("maps completed agent message items to canonical item.completed events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

@@ -765,6 +765,8 @@ const ToolDeniedPayload = Schema.Struct({
   toolUseId: Schema.optional(TrimmedNonEmptyStringSchema),
   reason: Schema.optional(TrimmedNonEmptyStringSchema),
   agentId: Schema.optional(TrimmedNonEmptyStringSchema),
+  command: Schema.optional(TrimmedNonEmptyStringSchema),
+  safetyCode: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type ToolDeniedPayload = typeof ToolDeniedPayload.Type;
 

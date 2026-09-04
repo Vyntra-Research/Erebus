@@ -146,6 +146,13 @@ type CodexToolUserInputQuestion =
 const ApprovalDecisionPayload = Schema.Struct({
   decision: ProviderApprovalDecision,
 });
+const ErebusCommandGuardBlockedPayload = Schema.Struct({
+  command: Schema.String,
+  code: Schema.String,
+  reason: Schema.String,
+  remediation: Schema.String,
+  agentId: Schema.optional(Schema.String),
+});
 
 function readPayload<A>(
   schema: Schema.Schema<A>,
@@ -744,6 +751,32 @@ function mapCollabAgentEvent(
         (typeof item?.query === "string" ? item.query : undefined);
       const canonical = toCanonicalItemType(itemTypeRaw);
       const summary = looseSummary ?? canonical.replaceAll("_", " ");
+      const lifecycle =
+        payload.lifecycle === "item/started"
+          ? ("item.started" as const)
+          : payload.lifecycle === "item/completed"
+            ? ("item.completed" as const)
+            : undefined;
+      const itemStatus =
+        lifecycle === "item.started"
+          ? ("inProgress" as const)
+          : item?.status === "failed" || item?.status === "declined"
+            ? item.status
+            : ("completed" as const);
+      const commandLifecycleEvent: ProviderRuntimeEvent | undefined =
+        canonical === "command_execution" && lifecycle
+          ? {
+              ...base,
+              type: lifecycle,
+              payload: {
+                itemType: canonical,
+                status: itemStatus,
+                detail: summary,
+                agentId: agentThreadId,
+              },
+            }
+          : undefined;
+      if (commandLifecycleEvent) return [commandLifecycleEvent];
       return [
         {
           ...base,
@@ -777,6 +810,24 @@ function mapToRuntimeEvents(
 ): ReadonlyArray<ProviderRuntimeEvent> {
   if (event.kind === "notification" && event.method.startsWith("collabAgent/")) {
     return mapCollabAgentEvent(event, canonicalThreadId);
+  }
+  if (event.kind === "notification" && event.method === "erebus/commandGuard/blocked") {
+    const payload = readPayload(ErebusCommandGuardBlockedPayload, event.payload);
+    if (!payload) return [];
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "tool.denied",
+        payload: {
+          toolName: "command",
+          ...(event.itemId ? { toolUseId: event.itemId } : {}),
+          reason: `Blocked command: ${payload.command}. ${payload.reason} ${payload.remediation}`,
+          command: payload.command,
+          safetyCode: payload.code,
+          ...(payload.agentId ? { agentId: payload.agentId } : {}),
+        },
+      },
+    ];
   }
   if (event.kind === "error") {
     if (!event.message) {

@@ -62,6 +62,7 @@ import {
 } from "../providerUpdateSettings.ts";
 import {
   codexContinuationIdentity,
+  materializeErebusCodexExecPolicy,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
   withAutomaticCodexAccountOverlay,
@@ -172,6 +173,17 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
                 driver: DRIVER_KIND,
                 instanceId,
                 detail: cause.detail,
+                cause,
+              }),
+          ),
+        );
+        yield* materializeErebusCodexExecPolicy(homeLayout.sharedHomePath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: cause.message,
                 cause,
               }),
           ),

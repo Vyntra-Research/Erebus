@@ -1,15 +1,18 @@
 import type {
+  OrchestrationThreadActivity,
   ResearchContract,
   ResearchFindingSubmission,
   ResearchIntervention,
   ThreadMessageSentPayload,
 } from "@t3tools/contracts";
+import * as Predicate from "effect/Predicate";
 
 import type { ObserverAssessment } from "./Services/ResearchEvaluator.ts";
 import type { ObserverCampaignSnapshot } from "./Services/ResearchEvaluator.ts";
 import { isErebusCoagentMessage } from "../provider/codexUserSteering.ts";
 import type { ResearchProjection } from "./researchState.ts";
 import { RESEARCH_OBSERVER_RUNTIME_POLICY } from "./researchPolicy.ts";
+import { evaluateCommandSafety, redactCommandForAudit } from "../commandSafety.ts";
 
 export function activeResearchContract(projection: ResearchProjection): ResearchContract | null {
   const campaign = projection.campaign;
@@ -34,6 +37,7 @@ type ProjectedConversationMessage = {
   readonly role: string;
   readonly text: string;
   readonly turnId?: string | null;
+  readonly createdAt?: string;
 };
 
 export type ObserverTimelineMessage = {
@@ -42,6 +46,154 @@ export type ObserverTimelineMessage = {
   readonly text: string;
   readonly turnId: string | null;
 };
+
+export type ObserverCommandAuditEntry = {
+  readonly id: string;
+  readonly command: string;
+  readonly turnId: string | null;
+  readonly createdAt: string;
+  readonly agentId: string | null;
+  readonly outcome: "executed" | "blocked" | "unsafeExecuted";
+  readonly safetyCode: string | null;
+};
+
+export type ObserverCommandAudit = {
+  readonly entries: ReadonlyArray<ObserverCommandAuditEntry>;
+  readonly omittedCount: number;
+};
+
+const OBSERVER_COMMAND_AUDIT_LIMIT = 40;
+
+function payloadString(payload: unknown, key: string): string | null {
+  if (!Predicate.isObject(payload) || Array.isArray(payload)) return null;
+  const value = payload[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+export function buildObserverCommandAudit(
+  assistantMessages: ReadonlyArray<{
+    readonly id?: string;
+    readonly turnId?: string | null;
+  }>,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  workspaceRoot: string,
+  projectedMessages: ReadonlyArray<{
+    readonly id: string;
+    readonly createdAt?: string;
+  }> = [],
+  previousAssistantMessageId?: string,
+): ObserverCommandAudit {
+  const turnIds = new Set(
+    assistantMessages
+      .map((message) => message.turnId)
+      .filter((turnId): turnId is string => typeof turnId === "string" && turnId.length > 0),
+  );
+  const messageCreatedAt = new Map(
+    projectedMessages.flatMap((message) =>
+      message.createdAt ? ([[message.id, message.createdAt]] as const) : [],
+    ),
+  );
+  const upperCreatedAt = assistantMessages.at(-1)?.id
+    ? messageCreatedAt.get(assistantMessages.at(-1)?.id ?? "")
+    : undefined;
+  const lowerCreatedAt = previousAssistantMessageId
+    ? messageCreatedAt.get(previousAssistantMessageId)
+    : undefined;
+  if (!upperCreatedAt && turnIds.size === 0) return { entries: [], omittedCount: 0 };
+  const activityFallsInWindow = (activity: OrchestrationThreadActivity): boolean => {
+    if (upperCreatedAt) {
+      return (
+        activity.createdAt <= upperCreatedAt &&
+        (lowerCreatedAt === undefined || activity.createdAt > lowerCreatedAt)
+      );
+    }
+    return activity.turnId !== null && turnIds.has(activity.turnId);
+  };
+
+  const toolCallId = (activity: OrchestrationThreadActivity): string =>
+    payloadString(activity.payload, "toolCallId") ??
+    payloadString(activity.payload, "toolUseId") ??
+    activity.id;
+  const deniedByToolCall = new Map(
+    activities
+      .filter(
+        (activity) =>
+          activity.kind === "tool.denied" &&
+          payloadString(activity.payload, "toolName") === "command",
+      )
+      .map((activity) => [toolCallId(activity), activity] as const),
+  );
+  const completedByToolCall = new Map(
+    activities
+      .filter(
+        (activity) =>
+          activity.kind === "tool.completed" &&
+          payloadString(activity.payload, "itemType") === "command_execution",
+      )
+      .map((activity) => [toolCallId(activity), activity] as const),
+  );
+  const seenToolCalls = new Set<string>();
+  const entries = activities
+    .filter(
+      (activity) =>
+        activityFallsInWindow(activity) &&
+        (activity.kind === "tool.started" || activity.kind === "tool.denied"),
+    )
+    .flatMap<ObserverCommandAuditEntry>((activity) => {
+      const itemType = payloadString(activity.payload, "itemType");
+      const toolName = payloadString(activity.payload, "toolName");
+      const deniedActivity = activity.kind === "tool.denied" && toolName === "command";
+      if (
+        !deniedActivity &&
+        !(activity.kind === "tool.started" && itemType === "command_execution")
+      ) {
+        return [];
+      }
+      const command =
+        payloadString(activity.payload, "command") ??
+        payloadString(activity.payload, deniedActivity ? "command" : "detail");
+      if (!command) return [];
+      const commandToolCallId = toolCallId(activity);
+      if (seenToolCalls.has(commandToolCallId)) return [];
+      seenToolCalls.add(commandToolCallId);
+      const denied = deniedByToolCall.get(commandToolCallId);
+      const completed = completedByToolCall.get(commandToolCallId);
+      const blocked =
+        deniedActivity ||
+        denied !== undefined ||
+        payloadString(completed?.payload, "status") === "declined";
+      const safety = evaluateCommandSafety({
+        command,
+        cwd: workspaceRoot,
+        workspaceRoot,
+      });
+      return [
+        {
+          id: activity.id,
+          command: redactCommandForAudit(command),
+          turnId: activity.turnId,
+          createdAt: activity.createdAt,
+          agentId:
+            payloadString(activity.payload, "agentId") ??
+            payloadString(completed?.payload, "agentId"),
+          outcome: blocked
+            ? "blocked"
+            : safety.decision === "block"
+              ? "unsafeExecuted"
+              : "executed",
+          safetyCode:
+            payloadString(activity.payload, "safetyCode") ??
+            payloadString(denied?.payload, "safetyCode") ??
+            (safety.decision === "block" ? safety.code : null),
+        },
+      ];
+    });
+  const omittedCount = Math.max(0, entries.length - OBSERVER_COMMAND_AUDIT_LIMIT);
+  return {
+    entries: entries.slice(-OBSERVER_COMMAND_AUDIT_LIMIT),
+    omittedCount,
+  };
+}
 
 export function resolveCompletedAssistantMessageText(
   payload: typeof ThreadMessageSentPayload.Type,

@@ -41,6 +41,11 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { buildCodexInitializeParams, readCodexProteusHealth } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import {
+  EREBUS_COMMAND_GUARD_REASON_MARKER,
+  evaluateCommandSafety,
+  redactCommandForAudit,
+} from "../../commandSafety.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import {
   buildCodexHistoricalUserSteerMarker,
@@ -557,7 +562,9 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
     case "full-access":
     default:
       return {
-        approvalPolicy: "never",
+        // Keep host access, but route policy-matched commands through the
+        // Erebus guard before the provider creates a process.
+        approvalPolicy: "on-request",
         sandbox: "danger-full-access",
         approvalsReviewer: "user",
       };
@@ -1552,9 +1559,11 @@ export const makeCodexSessionRuntime = (
               kind: "notification",
               threadId: options.threadId,
               ...(child.spawnTurnId ? { turnId: child.spawnTurnId } : {}),
+              itemId: ProviderItemId.make(notification.params.item.id),
               method: "collabAgent/item",
               payload: {
                 ...childIdentity,
+                lifecycle: notification.method,
                 item: notification.params.item,
               },
             });
@@ -1859,6 +1868,42 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
       Effect.gen(function* () {
+        const command = payload.command?.trim() ?? "";
+        const commandAgent = (yield* Ref.get(collabChildAgentsRef)).get(payload.threadId);
+        const commandSafety = evaluateCommandSafety({
+          command,
+          cwd: payload.cwd?.trim() || options.cwd,
+          workspaceRoot: options.cwd,
+        });
+        if (commandSafety.decision === "block") {
+          yield* emitEvent({
+            kind: "notification",
+            threadId: options.threadId,
+            method: "erebus/commandGuard/blocked",
+            turnId: commandAgent?.spawnTurnId ?? TurnId.make(payload.turnId),
+            itemId: ProviderItemId.make(payload.itemId),
+            payload: {
+              command: redactCommandForAudit(command),
+              code: commandSafety.code,
+              reason: commandSafety.reason,
+              remediation: commandSafety.remediation,
+              ...(commandAgent ? { agentId: commandAgent.agentThreadId } : {}),
+            },
+          });
+          return {
+            decision: "decline",
+          } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;
+        }
+
+        const requestedByErebusPolicy = payload.reason?.includes(
+          EREBUS_COMMAND_GUARD_REASON_MARKER,
+        );
+        if (options.runtimeMode === "full-access" || requestedByErebusPolicy) {
+          return {
+            decision: "accept",
+          } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;
+        }
+
         const requestId = ApprovalRequestId.make(yield* randomUUIDv4("command-approval-request"));
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);

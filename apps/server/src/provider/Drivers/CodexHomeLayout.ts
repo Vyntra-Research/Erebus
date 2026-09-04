@@ -19,6 +19,8 @@ import * as PlatformError from "effect/PlatformError";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
+import { writeFileStringAtomically } from "../../atomicWrite.ts";
+import { EREBUS_CODEX_EXEC_POLICY } from "../../commandSafety.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 
 export interface CodexHomeLayout {
@@ -53,6 +55,7 @@ const KNOWN_SHARED_DIRECTORIES = [
   "cache",
   "logs",
   "mcp-oauth-locks",
+  "rules",
 ] as const;
 
 const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
@@ -126,6 +129,7 @@ export class CodexShadowHomeFileSystemError extends Schema.TaggedErrorClass<Code
       "symlink",
       "link",
       "copy",
+      "write",
     ]),
     path: Schema.String,
     targetPath: Schema.optional(Schema.String),
@@ -612,6 +616,45 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
     effectiveHomePath,
   });
 });
+
+export const materializeErebusCodexExecPolicy = Effect.fn("materializeErebusCodexExecPolicy")(
+  function* (sharedHomePath: string) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const policyPath = path.join(sharedHomePath, "rules", "erebus-safety.rules");
+    const current = yield* fileSystem.readFileString(policyPath).pipe(
+      Effect.catchTags({
+        PlatformError: (cause) =>
+          cause.reason._tag === "NotFound"
+            ? Effect.succeed("")
+            : new CodexShadowHomeFileSystemError({
+                sharedHomePath,
+                effectiveHomePath: sharedHomePath,
+                operation: "write",
+                path: policyPath,
+                cause,
+              }),
+      }),
+    );
+    if (current === EREBUS_CODEX_EXEC_POLICY) return;
+
+    yield* writeFileStringAtomically({
+      filePath: policyPath,
+      contents: EREBUS_CODEX_EXEC_POLICY,
+    }).pipe(
+      Effect.catchTags({
+        PlatformError: (cause) =>
+          new CodexShadowHomeFileSystemError({
+            sharedHomePath,
+            effectiveHomePath: sharedHomePath,
+            operation: "write",
+            path: policyPath,
+            cause,
+          }),
+      }),
+    );
+  },
+);
 
 export function codexContinuationIdentity(layout: CodexHomeLayout) {
   return {

@@ -28,6 +28,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { redactCommandForAudit } from "../../commandSafety.ts";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -461,6 +462,10 @@ export function runtimeEventToActivities(
             ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
             ...(event.payload.reason ? { detail: truncateDetail(event.payload.reason) } : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.command
+              ? { command: redactCommandForAudit(event.payload.command) }
+              : {}),
+            ...(event.payload.safetyCode ? { safetyCode: event.payload.safetyCode } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -857,6 +862,9 @@ export function runtimeEventToActivities(
             ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.itemType === "command_execution" && event.payload.detail
+              ? { command: redactCommandForAudit(event.payload.detail) }
+              : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.parentToolUseId
@@ -902,6 +910,9 @@ export function runtimeEventToActivities(
             ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.itemType === "command_execution" && event.payload.detail
+              ? { command: redactCommandForAudit(event.payload.detail) }
+              : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.parentToolUseId

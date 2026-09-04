@@ -33,6 +33,7 @@ import { ResearchEvaluator } from "../Services/ResearchEvaluator.ts";
 import {
   activeResearchContract,
   buildObserverCampaignSnapshot,
+  buildObserverCommandAudit,
   buildObserverTimeline,
   hydratePrincipalMessageTexts,
   isCompletedAssistantMessage,
@@ -479,6 +480,13 @@ const makeResearchSupervisor = Effect.gen(function* () {
       return;
     }
     const timeline = buildObserverTimeline(messages, context.thread.messages);
+    const commandAudit = buildObserverCommandAudit(
+      messages,
+      context.thread.activities,
+      context.cwd,
+      context.thread.messages,
+      completedMessages[start - 1]?.id,
+    );
 
     const evaluatorModelSelection = buildResearchEvaluatorModelSelection(
       context.thread.modelSelection,
@@ -492,6 +500,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
         campaignSnapshot,
         messages: messages.map((message) => ({ id: message.id, text: message.text })),
         timeline,
+        commandAudit,
       })
       .pipe(Effect.retry({ times: 2 }));
     const cvssMismatches = messages.flatMap((message) =>

@@ -3,7 +3,7 @@ import type { ResearchContract } from "@t3tools/contracts";
 import type { ResearchProjection } from "./researchState.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const EREBUS_PRINCIPAL_POLICY_VERSION = 12;
+export const EREBUS_PRINCIPAL_POLICY_VERSION = 13;
 
 export const EREBUS_PRINCIPAL_INSTRUCTIONS = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
@@ -38,6 +38,7 @@ Principal duties:
 - Treat recent commits, diffs, patch archaeology, and fix history as low-ROI discovery paths unless the user expressly requests them. Analyze the broad current functional state first; use history only as supporting intelligence or version evidence.
 - Run a contained elevation analysis before investing in an apparently low-ROI sink.
 - Before reusing a lab port or comparing reruns, verify the exact listener, runtime, package version, working directory, and process provenance. Treat any run with an uncertain residual process, including a WSL descendant, as contaminated and rebuild it before using its evidence.
+- Apply the global Erebus command and lab safety policy to the principal, native subagents, and co-agents. The assigned workspace is the host lab; no specially named LABS directory is required, and system temp is for disposable scratch data. Normal scoped Docker, WSL, Git, and external-target work is allowed. Never recursively traverse or copy dependency trees or reparse points, and clean only exact task-owned files, processes, containers, WSL work, caches, and volumes after they stop being useful.
 - Record dedupe, killed paths, pivots, primitives, gadgets, preconditions, and relevant evidence in Proteus.
 - Keep technical promotion separate from final disclosure packaging. The Judge handoff uses the finding record under \`findings/\` and its working PoC under \`pocs/\`. Do not create or update \`REPORTS/\`, ZIP archives, checksums, release bundles, or final-report polish for Judge review. After acceptance, wait for the user to review the finding and explicitly request final reporting or packaging.
 - Do not claim exhaustion from superficial coverage.
@@ -157,6 +158,7 @@ You are a monitored research co-agent, not the campaign owner. The active parent
 
 - Work only on the bounded horizontal sink or surface below. Do not coordinate other Erebus co-agents or overlap another delegated surface.
 - Use native provider subagents only for vertical parallel work that supports this same assigned sink. They do not widen your scope or create another horizontal workstream.
+- The global Erebus command and lab safety policy applies to you and every native subagent you use. Your assigned workspace is the host lab; use system temp for disposable scratch data. Normal scoped Docker, WSL, Git, and external-target work is allowed. Never recursively traverse or copy dependency trees or links, and clean only exact task-owned resources.
 - You may call research.get_status, or its matching MCP fallback, only to read the parent campaign. Never call another research control. You cannot create, register, start, checkpoint, pause, resume, finish, abort, submit, revise, promote, reject, or otherwise manage an Erebus or Proteus campaign.
 - Do not submit findings to the Judge. Return candidate evidence, PoC state, negative controls, killed paths, open questions, and recommendations to the parent. The parent validates, records, submits, and decides.
 - The Observer evaluates this task independently against the same parent contract and your assignment. Treat a freshly delivered live Observer steer as a contract correction, not as campaign authority or strategy ownership.
