@@ -1,16 +1,21 @@
 # Changelog
 
-## 0.3.3 - 2026-09-04
+## 0.3.4 - 2026-09-04
 
 ### Added
 
-- Add a fail-closed Codex command guard for clearly unsafe host operations, including dependency-tree recursion, junction-following copies, broad destructive cleanup, protected-path mutation, pattern process kills, and opaque shell commands.
+- Add native hard-deny rules for commands that are unsafe in every supported context, including `rg`, disk formatting, host-wide Docker cleanup, and destructive Git reset.
+- Classify broader command risks such as dependency-tree recursion, junction-following copies, protected-path mutation, and pattern process kills for approval-mode enforcement and Observer review.
 - Include a bounded, redacted command audit from the principal and native subagents in each Observer evaluation window.
 
 ### Changed
 
 - Treat the assigned workspace as the agent's host lab without requiring a specially named directory, while preserving normal scoped Docker, WSL, Git, and external-target work.
-- Keep full-access command decisions automatic: safe commands continue immediately and blocked commands are rejected before process spawn without requesting user permission.
+- Keep full access prompt-free: safe commands continue immediately and native hard denials stop before process spawn without requesting user permission.
+
+### Fixed
+
+- Stop full-access Codex tasks from asking for approval on ordinary commands after the command-safety policy is installed.
 
 ## 0.3.2 - 2026-09-04
 

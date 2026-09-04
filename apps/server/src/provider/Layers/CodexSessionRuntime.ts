@@ -562,9 +562,10 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
     case "full-access":
     default:
       return {
-        // Keep host access, but route policy-matched commands through the
-        // Erebus guard before the provider creates a process.
-        approvalPolicy: "on-request",
+        // Full access must stay non-interactive. Exec-policy rules used by
+        // Erebus are hard denials; setting this to on-request also enables
+        // ordinary provider approval prompts for otherwise allowed commands.
+        approvalPolicy: "never",
         sandbox: "danger-full-access",
         approvalsReviewer: "user",
       };

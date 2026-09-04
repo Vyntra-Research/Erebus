@@ -220,8 +220,10 @@ it("redacts secrets and bounds Observer command text", () => {
   expect(redacted.length).toBeLessThanOrEqual(180);
 });
 
-it("ships a managed Codex policy that routes guarded commands through Erebus", () => {
+it("ships a prompt-free managed Codex policy with objective hard denials", () => {
   expect(EREBUS_CODEX_EXEC_POLICY).toContain('pattern=["rg"]');
-  expect(EREBUS_CODEX_EXEC_POLICY).toContain('decision="prompt"');
+  expect(EREBUS_CODEX_EXEC_POLICY).toContain('decision="forbidden"');
+  expect(EREBUS_CODEX_EXEC_POLICY).not.toContain('decision="prompt"');
+  expect(EREBUS_CODEX_EXEC_POLICY).not.toContain('pattern=[["powershell"');
   expect(EREBUS_CODEX_EXEC_POLICY).toContain("[erebus-command-guard]");
 });

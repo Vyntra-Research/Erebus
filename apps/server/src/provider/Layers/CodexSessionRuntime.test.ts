@@ -151,6 +151,20 @@ function makeThreadOpenResponse(
 }
 
 describe("buildTurnStartParams", () => {
+  it.effect("keeps full access prompt-free", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "Run a safe command",
+      });
+
+      NodeAssert.equal(params.approvalPolicy, "never");
+      NodeAssert.equal(params.approvalsReviewer, "user");
+      NodeAssert.deepStrictEqual(params.sandboxPolicy, { type: "dangerFullAccess" });
+    }),
+  );
+
   it.effect("preserves the client id for a live user steer", () =>
     Effect.gen(function* () {
       const params = yield* buildTurnStartParams({
@@ -204,7 +218,7 @@ describe("buildTurnStartParams", () => {
 
     NodeAssert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
-      approvalPolicy: "on-request",
+      approvalPolicy: "never",
       approvalsReviewer: "user",
       sandboxPolicy: {
         type: "dangerFullAccess",
@@ -871,6 +885,8 @@ describe("openCodexThread", () => {
         dynamicTools,
       });
 
+      NodeAssert.equal(startPayload?.approvalPolicy, "never");
+      NodeAssert.equal(startPayload?.sandbox, "danger-full-access");
       NodeAssert.deepStrictEqual(startPayload?.dynamicTools, dynamicTools);
     }),
   );
