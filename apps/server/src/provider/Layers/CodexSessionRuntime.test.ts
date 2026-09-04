@@ -577,8 +577,8 @@ describe("buildCodexDeveloperInstructions", () => {
     NodeAssert.ok(instructions.startsWith(codexDefaultModeDeveloperInstructions(true)));
     NodeAssert.match(instructions, /Erebus/);
     NodeAssert.match(instructions, /Codex harness/);
-    NodeAssert.match(instructions, /Erebus live user steering/);
-    NodeAssert.match(instructions, /stale_user_steer_id/);
+    NodeAssert.match(instructions, /Erebus live steering and co-agent context/);
+    NodeAssert.match(instructions, /stale_context_id/);
     NodeAssert.match(instructions, /as gpt-5\.3-codex with high reasoning effort/);
   });
 
