@@ -5,12 +5,14 @@ import * as NodePath from "node:path";
 export const EREBUS_COMMAND_GUARD_REASON_MARKER = "[erebus-command-guard]";
 
 export const EREBUS_CODEX_EXEC_POLICY = `# Managed by Erebus. Local user rules belong in other files.
-# "prompt" routes the command to the Erebus callback before spawn; full-access mode resolves it automatically and never asks the user.
-prefix_rule(pattern=["rg"], decision="prompt", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} rg is disabled. Erebus must deny it before execution.")
-prefix_rule(pattern=["rg.exe"], decision="prompt", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} rg is disabled. Erebus must deny it before execution.")
-prefix_rule(pattern=[["powershell", "powershell.exe", "pwsh", "pwsh.exe", "cmd", "cmd.exe", "wsl", "wsl.exe", "bash", "bash.exe", "sh"],], decision="prompt", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Erebus must validate shell commands before execution.")
-prefix_rule(pattern=[["robocopy", "robocopy.exe", "Remove-Item", "rm", "rmdir", "rd", "del", "erase", "Get-ChildItem", "gci", "find", "grep", "cp", "mv", "Copy-Item", "Move-Item", "Set-Content", "Add-Content", "Out-File", "New-Item", "Compress-Archive", "tar", "7z", "7z.exe", "docker", "Stop-Process", "taskkill", "pkill", "killall", "diskpart", "format"],], decision="prompt", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Erebus must validate costly or mutating commands before execution.")
-prefix_rule(pattern=[["git", "git.exe"], ["clean", "reset", "checkout", "restore"]], decision="prompt", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Erebus must validate destructive version-control commands before execution.")
+# Full-access sessions use approvalPolicy=never. These rules are objective hard
+# denials, not approval hooks, so allowed commands remain prompt-free.
+prefix_rule(pattern=["rg"], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Use a bounded native search instead of rg.")
+prefix_rule(pattern=["rg.exe"], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Use a bounded native search instead of rg.")
+prefix_rule(pattern=[["diskpart", "diskpart.exe"]], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Disk-wide mutation is blocked.")
+prefix_rule(pattern=[["format", "format.com"]], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Filesystem formatting is blocked.")
+prefix_rule(pattern=[["docker", "docker.exe"], ["system", "container", "image", "volume", "network", "builder"], "prune"], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Host-wide Docker cleanup is blocked; remove named lab resources instead.")
+prefix_rule(pattern=[["git", "git.exe"], "reset", "--hard"], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Destructive Git reset is blocked; preserve work and use a scoped operation.")
 `;
 
 export type CommandSafetyCode =
