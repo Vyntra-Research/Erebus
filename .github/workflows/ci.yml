@@ -11,8 +11,59 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
-    name: Check
+  changes:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      desktop: ${{ steps.plan.outputs.desktop }}
+      full: ${{ steps.plan.outputs.full }}
+      libraries: ${{ steps.plan.outputs.libraries }}
+      node: ${{ steps.plan.outputs.node }}
+      rust: ${{ steps.plan.outputs.rust }}
+      server: ${{ steps.plan.outputs.server }}
+      server_only: ${{ steps.plan.outputs.server_only }}
+      web: ${{ steps.plan.outputs.web }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve changed areas
+        id: plan
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          base="$BASE_SHA"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$(git rev-parse "$HEAD_SHA^")"
+          fi
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$base"
+          fi
+          git diff --check "$base" "$HEAD_SHA"
+          node scripts/ci-change-plan.mjs "$base" "$HEAD_SHA"
+
+      - name: Reject repository-owned PR assets
+        run: |
+          files="$(git ls-files .github/pr-assets)"
+          if test -n "$files"; then
+            printf 'PR evidence must be uploaded to GitHub, not committed:\n%s\n' "$files" >&2
+            exit 1
+          fi
+
+  quality:
+    name: Quality
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -24,13 +75,38 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
 
-      - name: Reject repository-owned PR assets
-        run: |
-          files="$(git ls-files .github/pr-assets)"
-          if test -n "$files"; then
-            printf 'PR evidence must be uploaded to GitHub, not committed:\n%s\n' "$files" >&2
-            exit 1
-          fi
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Check
+        run: vp check
+
+      - name: Typecheck server
+        if: needs.changes.outputs.server_only == 'true'
+        run: vp run --filter erebus typecheck
+
+      - name: Typecheck workspace
+        if: needs.changes.outputs.server_only != 'true'
+        run: vpr typecheck
+
+  build:
+    name: Build
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -40,34 +116,40 @@ jobs:
           run-install: true
 
       - name: Ensure Electron runtime is installed
+        if: needs.changes.outputs.server_only != 'true'
         run: vp run --filter @t3tools/desktop ensure:electron
 
-      - name: Check
-        run: vp check
-
-      - name: Typecheck
-        run: vpr typecheck
+      - name: Build server pipeline
+        if: needs.changes.outputs.server_only == 'true'
+        run: vp run --filter erebus build
 
       - name: Build desktop pipeline
+        if: needs.changes.outputs.server_only != 'true'
         run: vp run build:desktop
 
       - name: Verify preload bundle output
+        if: needs.changes.outputs.server_only != 'true'
         run: |
           test -f apps/desktop/dist-electron/preload.cjs
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
           grep -n "__clerk_internal_electron_passkeys" apps/desktop/dist-electron/preload.cjs
 
-  # Everything in the current desktop build except `erebus` (apps/server).
-  # Mobile remains in the inherited source tree but is not part of the current Erebus release.
-  # `--parallel` drops the package
-  # dependency ordering that `vp run` applies by default: these `test` tasks
-  # declare no `dependsOn` and resolve workspace deps from source, so ordering
-  # only bought us idle runners between dependency layers. The concurrency
-  # limit stays at the default 4 so peak load per runner is unchanged.
-  test:
-    name: Test
+      - name: Verify server bundle output
+        if: needs.changes.outputs.server_only == 'true'
+        run: test -f apps/server/dist/bin.mjs
+
+  # The Electron suite is large enough to dominate a combined package run.
+  # Isolated shards keep UI changes from waiting on unrelated libraries.
+  test_desktop:
+    name: Test Desktop ${{ matrix.shard }}
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -88,9 +170,35 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       - name: Test
+        run: vp run --filter '@t3tools/desktop' test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # These tasks have no dependency ordering requirements, so they can share a
+  # runner while Vite+ uses bounded package concurrency.
+  test_libraries:
+    name: Test Libraries
+    needs: changes
+    if: needs.changes.outputs.libraries == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Test
         run: >-
           vp run --parallel --concurrency-limit 4
-          --filter '@t3tools/desktop'
           --filter '@t3tools/scripts'
           --filter 'effect-acp'
           --filter '@t3tools/oxlint-plugin-t3code'
@@ -98,24 +206,56 @@ jobs:
           --filter 'effect-codex-app-server'
           --filter '@t3tools/shared'
           --filter '@t3tools/tailscale'
-          --filter '@t3tools/web'
           --filter '@t3tools/client-runtime'
           --filter '@t3tools/ssh'
           --filter 't3code-relay'
           test
 
-  # apps/server sets `fileParallelism: false`, so its 239 files run strictly
-  # one at a time. Sharding spreads them over separate runners instead of
-  # separate workers, so no two server test files ever share a machine and the
-  # isolation that flag buys is preserved exactly.
-  test_server:
-    name: Test Server ${{ matrix.shard }}
+  # The web suite dominates the non-server test wall time. Two isolated shards
+  # keep feedback fast without increasing per-runner concurrency.
+  test_web:
+    name: Test Web ${{ matrix.shard }}
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Test
+        run: vp run --filter '@t3tools/web' test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # apps/server sets `fileParallelism: false`, so its files run strictly
+  # one at a time. Sharding spreads them over separate runners instead of
+  # separate workers, so no two server test files ever share a machine and the
+  # isolation that flag buys is preserved exactly.
+  test_server:
+    name: Test Server ${{ matrix.shard }}
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -177,6 +317,8 @@ jobs:
   # for checks that take under 3s, on the critical path of every PR.
   rust:
     name: Rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -198,3 +340,36 @@ jobs:
 
       - name: Test resource monitor
         run: cargo test --locked --manifest-path native/resource-monitor/Cargo.toml
+
+  result:
+    name: CI
+    if: always()
+    needs:
+      - changes
+      - quality
+      - build
+      - test_desktop
+      - test_libraries
+      - test_web
+      - test_server
+      - rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every selected check to pass
+        env:
+          RESULTS: >-
+            changes=${{ needs.changes.result }},
+            quality=${{ needs.quality.result }},
+            build=${{ needs.build.result }},
+            test_desktop=${{ needs.test_desktop.result }},
+            test_libraries=${{ needs.test_libraries.result }},
+            test_web=${{ needs.test_web.result }},
+            test_server=${{ needs.test_server.result }},
+            rust=${{ needs.rust.result }}
+        run: |
+          if [[ "$RESULTS" == *failure* || "$RESULTS" == *cancelled* ]]; then
+            echo "One or more selected CI jobs did not pass: $RESULTS" >&2
+            exit 1
+          fi
+          echo "Selected CI jobs passed: $RESULTS"

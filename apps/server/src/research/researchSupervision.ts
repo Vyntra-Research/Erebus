@@ -310,6 +310,19 @@ export function pendingJudgeFindings(
   });
 }
 
+export function unjudgedFindings(
+  projection: ResearchProjection,
+): ReadonlyArray<ResearchFindingSubmission> {
+  return pendingJudgeFindings(projection).filter(
+    (finding) =>
+      !projection.judgeEvaluations.some(
+        (evaluation) =>
+          evaluation.findingId === finding.findingId &&
+          (evaluation.findingRevision ?? 1) === (finding.revision ?? 1),
+      ),
+  );
+}
+
 export function queuedInterventions(
   projection: ResearchProjection,
 ): ReadonlyArray<ResearchIntervention> {

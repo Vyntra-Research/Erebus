@@ -42,6 +42,7 @@ import {
   resolveCompletedAssistantMessageText,
   selectObserverWindowBounds,
   shouldObserverIntervene,
+  unjudgedFindings,
 } from "../researchSupervision.ts";
 import {
   canonicalizeJudgeAssessmentCvss,
@@ -887,8 +888,12 @@ const makeResearchSupervisor = Effect.gen(function* () {
           // current. Never replay missed Observer windows during bootstrap.
           // The next completed assistant message selects one fresh bounded
           // window and advances past any stale backlog.
+          // Bootstrap may recover a submission that never reached the Judge,
+          // but it must not retry a durable reviewBlocked verdict merely
+          // because the app restarted. An explicit campaign resume owns that
+          // retry once the evaluator environment is ready again.
           yield* Effect.forEach(
-            pendingJudgeFindings(projection),
+            unjudgedFindings(projection),
             (finding) =>
               onResearchEvent({
                 eventId: ResearchEventId.make(`recovery:${finding.findingId}`),

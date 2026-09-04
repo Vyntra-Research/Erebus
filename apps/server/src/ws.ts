@@ -118,6 +118,7 @@ import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
+import * as StorageMaintenance from "./diagnostics/StorageMaintenance.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
@@ -1734,6 +1735,34 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetStorageDiagnostics]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetStorageDiagnostics,
+            StorageMaintenance.readStorageDiagnostics({
+              stateDir: config.stateDir,
+              databasePath: config.dbPath,
+            }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverDeleteInactiveSubagents]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverDeleteInactiveSubagents,
+            StorageMaintenance.deleteInactiveSubagents({
+              stateDir: config.stateDir,
+              databasePath: config.dbPath,
+              request: input,
+            }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverDeleteRecoverySnapshots]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverDeleteRecoverySnapshots,
+            StorageMaintenance.deleteRecoverySnapshots({
+              stateDir: config.stateDir,
+              request: input,
+            }),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverGetProcessResourceHistory,

@@ -182,6 +182,11 @@ import {
   ServerSelfUpdateResult,
   ServerTraceDiagnosticsResult,
   ServerProcessDiagnosticsResult,
+  ServerStorageDiagnosticsResult,
+  ServerDeleteInactiveSubagentsInput,
+  ServerDeleteInactiveSubagentsResult,
+  ServerDeleteRecoverySnapshotsInput,
+  ServerDeleteRecoverySnapshotsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
   ServerSignalProcessInput,
@@ -289,6 +294,9 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
+  serverGetStorageDiagnostics: "server.getStorageDiagnostics",
+  serverDeleteInactiveSubagents: "server.deleteInactiveSubagents",
+  serverDeleteRecoverySnapshots: "server.deleteRecoverySnapshots",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverGetResourceTelemetryHistory: "server.getResourceTelemetryHistory",
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
@@ -475,6 +483,30 @@ export const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetPro
   success: ServerProcessDiagnosticsResult,
   error: EnvironmentAuthorizationError,
 });
+
+export const WsServerGetStorageDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetStorageDiagnostics, {
+  payload: Schema.Struct({}),
+  success: ServerStorageDiagnosticsResult,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsServerDeleteInactiveSubagentsRpc = Rpc.make(
+  WS_METHODS.serverDeleteInactiveSubagents,
+  {
+    payload: ServerDeleteInactiveSubagentsInput,
+    success: ServerDeleteInactiveSubagentsResult,
+    error: EnvironmentAuthorizationError,
+  },
+);
+
+export const WsServerDeleteRecoverySnapshotsRpc = Rpc.make(
+  WS_METHODS.serverDeleteRecoverySnapshots,
+  {
+    payload: ServerDeleteRecoverySnapshotsInput,
+    success: ServerDeleteRecoverySnapshotsResult,
+    error: EnvironmentAuthorizationError,
+  },
+);
 
 export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
   WS_METHODS.serverGetProcessResourceHistory,
@@ -1087,6 +1119,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerGetStorageDiagnosticsRpc,
+  WsServerDeleteInactiveSubagentsRpc,
+  WsServerDeleteRecoverySnapshotsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
