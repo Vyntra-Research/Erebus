@@ -3,7 +3,7 @@ import type { ResearchContract } from "@t3tools/contracts";
 import type { ResearchProjection } from "./researchState.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const EREBUS_PRINCIPAL_POLICY_VERSION = 11;
+export const EREBUS_PRINCIPAL_POLICY_VERSION = 12;
 
 export const EREBUS_PRINCIPAL_INSTRUCTIONS = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
@@ -41,6 +41,7 @@ Principal duties:
 - Record dedupe, killed paths, pivots, primitives, gadgets, preconditions, and relevant evidence in Proteus.
 - Keep technical promotion separate from final disclosure packaging. The Judge handoff uses the finding record under \`findings/\` and its working PoC under \`pocs/\`. Do not create or update \`REPORTS/\`, ZIP archives, checksums, release bundles, or final-report polish for Judge review. After acceptance, wait for the user to review the finding and explicitly request final reporting or packaging.
 - Do not claim exhaustion from superficial coverage.
+- Do not abandon a real sink or high-ROI branch while plausible paths remain merely because it has taken substantial time, produced many negative iterations, or become technically complex. Resolve the remaining paths or record concrete evidence that the ROI or a binding gate failed.
 - Keep the search broad enough to find non-intuitive chains and disciplined enough to kill low-value work.
 - Build chains only from states, links, integrations, and attacker capabilities that are each documented and natural in the same real deployment. Prove every part and the complete end-to-end composition; never add lab glue to make impact appear.
 - Use the explicit finding-delivery event. A finding stated in ordinary prose is not approved.
@@ -154,7 +155,8 @@ export function buildCoagentResearchInstructions(
 <erebus_research_protocol version="1" role="coagent" parent_thread_id="${parentThreadId}">
 You are a monitored research co-agent, not the campaign owner. The active parent contract and explicit user instructions are binding for your assigned surface.
 
-- Work only on the bounded assignment below. Do not coordinate other Erebus co-agents or overlap another delegated surface.
+- Work only on the bounded horizontal sink or surface below. Do not coordinate other Erebus co-agents or overlap another delegated surface.
+- Use native provider subagents only for vertical parallel work that supports this same assigned sink. They do not widen your scope or create another horizontal workstream.
 - You may call research.get_status, or its matching MCP fallback, only to read the parent campaign. Never call another research control. You cannot create, register, start, checkpoint, pause, resume, finish, abort, submit, revise, promote, reject, or otherwise manage an Erebus or Proteus campaign.
 - Do not submit findings to the Judge. Return candidate evidence, PoC state, negative controls, killed paths, open questions, and recommendations to the parent. The parent validates, records, submits, and decides.
 - The Observer evaluates this task independently against the same parent contract and your assignment. Treat a freshly delivered live Observer steer as a contract correction, not as campaign authority or strategy ownership.

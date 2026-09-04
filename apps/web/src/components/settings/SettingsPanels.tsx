@@ -1,4 +1,11 @@
-import { ArchiveIcon, ArchiveX, ChevronRightIcon, LoaderIcon, SettingsIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveX,
+  ChevronRightIcon,
+  LoaderIcon,
+  SettingsIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -2648,7 +2655,9 @@ export function GeneralSettingsPanel() {
 
 export function ArchivedThreadsPanel() {
   const projects = useProjects();
-  const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
+  const { unarchiveThread, confirmAndDeleteThread, deleteArchivedThreads } = useThreadActions();
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const environmentIds = useMemo(
     () => [...new Set(projects.map((project) => project.environmentId))],
     [projects],
@@ -2710,6 +2719,35 @@ export function ArchivedThreadsPanel() {
     }
     return groups;
   }, [archivedSnapshots]);
+  const archivedThreadRefs = useMemo(
+    () =>
+      archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
+        snapshot.threads.map((thread) => scopeThreadRef(environmentId, thread.id)),
+      ),
+    [archivedSnapshots],
+  );
+
+  const handleDeleteAllArchived = useCallback(async () => {
+    if (isDeletingAll || archivedThreadRefs.length === 0) return;
+    setIsDeletingAll(true);
+    const result = await deleteArchivedThreads(archivedThreadRefs);
+    setIsDeletingAll(false);
+    if (result._tag === "Success") {
+      setDeleteAllOpen(false);
+      refreshArchivedThreads();
+      return;
+    }
+    if (!isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to delete archived threads",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  }, [archivedThreadRefs, deleteArchivedThreads, isDeletingAll, refreshArchivedThreads]);
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
@@ -2789,93 +2827,145 @@ export function ArchivedThreadsPanel() {
           />
         </SettingsSection>
       ) : (
-        archivedGroups.map(({ project, threads: projectThreads }, index) => (
+        <>
           <SettingsSection
-            key={project.id}
-            id={index === 0 ? searchableSetting("archive").id : undefined}
-            title={project.name}
-            icon={
-              <ProjectFavicon
-                environmentId={project.environmentId}
-                cwd={project.cwd}
-                faviconPath={project.faviconPath}
-              />
-            }
+            id={searchableSetting("archive").id}
+            title={searchableSetting("archive").title}
           >
-            {projectThreads.map((thread) => (
-              <SettingsRow
-                key={thread.id}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  void (async () => {
-                    const result = await settlePromise(() =>
-                      handleArchivedThreadContextMenu(
-                        scopeThreadRef(thread.environmentId, thread.id),
-                        {
-                          x: event.clientX,
-                          y: event.clientY,
-                        },
-                      ),
-                    );
-                    if (result._tag === "Failure") {
-                      const error = squashAtomCommandFailure(result);
-                      toastManager.add(
-                        stackedThreadToast({
-                          type: "error",
-                          title: "Archived thread action failed",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        }),
-                      );
-                    }
-                  })();
-                }}
-                title={thread.title}
-                description={
-                  <>
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
-                  </>
-                }
-                control={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
-                    onClick={() => {
-                      void (async () => {
-                        const result = await unarchiveThread(
-                          scopeThreadRef(thread.environmentId, thread.id),
-                        );
-                        if (result._tag === "Success") {
-                          refreshArchivedThreads();
-                          return;
-                        }
-                        if (!isAtomCommandInterrupted(result)) {
-                          const error = squashAtomCommandFailure(result);
-                          toastManager.add(
-                            stackedThreadToast({
-                              type: "error",
-                              title: "Failed to unarchive thread",
-                              description:
-                                error instanceof Error ? error.message : "An error occurred.",
-                            }),
-                          );
-                        }
-                      })();
-                    }}
-                  >
-                    <ArchiveX className="size-3.5" />
-                    <span>Unarchive</span>
-                  </Button>
-                }
-              />
-            ))}
+            <SettingsRow
+              title={`${archivedThreadRefs.length} archived ${archivedThreadRefs.length === 1 ? "thread" : "threads"}`}
+              description="Permanently delete every thread shown below in one checked operation per environment."
+              control={
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                  onClick={() => setDeleteAllOpen(true)}
+                >
+                  <Trash2Icon className="size-3.5" />
+                  <span>Delete all</span>
+                </Button>
+              }
+            />
           </SettingsSection>
-        ))
+          {archivedGroups.map(({ project, threads: projectThreads }) => (
+            <SettingsSection
+              key={`${project.environmentId}:${project.id}`}
+              title={project.name}
+              icon={
+                <ProjectFavicon
+                  environmentId={project.environmentId}
+                  cwd={project.cwd}
+                  faviconPath={project.faviconPath}
+                />
+              }
+            >
+              {projectThreads.map((thread) => (
+                <SettingsRow
+                  key={thread.id}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    void (async () => {
+                      const result = await settlePromise(() =>
+                        handleArchivedThreadContextMenu(
+                          scopeThreadRef(thread.environmentId, thread.id),
+                          {
+                            x: event.clientX,
+                            y: event.clientY,
+                          },
+                        ),
+                      );
+                      if (result._tag === "Failure") {
+                        const error = squashAtomCommandFailure(result);
+                        toastManager.add(
+                          stackedThreadToast({
+                            type: "error",
+                            title: "Archived thread action failed",
+                            description:
+                              error instanceof Error ? error.message : "An error occurred.",
+                          }),
+                        );
+                      }
+                    })();
+                  }}
+                  title={thread.title}
+                  description={
+                    <>
+                      Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+                      {" \u00b7 Created "}
+                      {formatRelativeTimeLabel(thread.createdAt)}
+                    </>
+                  }
+                  control={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                      onClick={() => {
+                        void (async () => {
+                          const result = await unarchiveThread(
+                            scopeThreadRef(thread.environmentId, thread.id),
+                          );
+                          if (result._tag === "Success") {
+                            refreshArchivedThreads();
+                            return;
+                          }
+                          if (!isAtomCommandInterrupted(result)) {
+                            const error = squashAtomCommandFailure(result);
+                            toastManager.add(
+                              stackedThreadToast({
+                                type: "error",
+                                title: "Failed to unarchive thread",
+                                description:
+                                  error instanceof Error ? error.message : "An error occurred.",
+                              }),
+                            );
+                          }
+                        })();
+                      }}
+                    >
+                      <ArchiveX className="size-3.5" />
+                      <span>Unarchive</span>
+                    </Button>
+                  }
+                />
+              ))}
+            </SettingsSection>
+          ))}
+        </>
       )}
+      <Dialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Delete all archived threads?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes {archivedThreadRefs.length} archived
+              {archivedThreadRefs.length === 1 ? " thread" : " threads"} and their conversation
+              history. Erebus checks the full set before changing any state in each environment.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isDeletingAll}
+              onClick={() => setDeleteAllOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isDeletingAll}
+              onClick={() => void handleDeleteAllArchived()}
+            >
+              {isDeletingAll ? "Deleting…" : "Delete all"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </SettingsPageContainer>
   );
 }

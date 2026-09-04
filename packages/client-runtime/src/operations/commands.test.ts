@@ -24,6 +24,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
   createProject,
+  deleteArchivedThreads,
   settleThread,
   stopThreadSession,
   unsettleThread,
@@ -136,6 +137,26 @@ describe("environment commands", () => {
           type: "thread.archive",
           commandId: "archive-command",
           threadId: "thread-1",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches archived thread deletion as one command", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* deleteArchivedThreads({
+        commandId: CommandId.make("delete-all-archived"),
+        threadIds: [ThreadId.make("thread-1"), ThreadId.make("thread-2")],
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.archived.delete-all",
+          commandId: "delete-all-archived",
+          threadIds: ["thread-1", "thread-2"],
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

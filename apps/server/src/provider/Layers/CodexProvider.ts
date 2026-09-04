@@ -42,6 +42,8 @@ const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnErro
 
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
 const PROTEUS_STATUS_PROBE_TIMEOUT = "5 seconds" as const;
+export const CODEX_PROVIDER_STATUS_TIMEOUT_MESSAGE =
+  "Timed out while checking Codex app-server provider status.";
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -792,9 +794,9 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       probe: {
         installed: true,
         version: null,
-        status: "error",
+        status: "warning",
         auth: { status: "unknown" },
-        message: "Timed out while checking Codex app-server provider status.",
+        message: CODEX_PROVIDER_STATUS_TIMEOUT_MESSAGE,
       },
     });
   }

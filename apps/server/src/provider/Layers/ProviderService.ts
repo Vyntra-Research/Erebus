@@ -35,6 +35,7 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -267,6 +268,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const revokeMcpCredential =
     options?.revokeMcpCredential ?? McpSessionRegistry.revokeActiveMcpThread;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  // Account routing is global. Serialize session lifecycle changes so two
+  // threads cannot race separate account handoffs through shared Codex state.
+  const sessionLifecycleLock = yield* Semaphore.make(1);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   /** Attach only the MCP capabilities this exact provider session needs. */
   /**
@@ -620,20 +624,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                     provider: adapter.provider,
                   }),
                 ),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("provider.session.stop-stale-failed", {
-                    threadId: input.threadId,
-                    provider: adapter.provider,
-                    cause,
-                  }),
-                ),
               );
             }),
       { discard: true },
     );
   });
 
-  const startSession: ProviderServiceMethod<"startSession"> = Effect.fn("startSession")(
+  const startSessionUnlocked: ProviderServiceMethod<"startSession"> = Effect.fn("startSession")(
     function* (threadId, rawInput) {
       const parsed = yield* decodeInputOrValidationError({
         operation: "ProviderService.startSession",
@@ -674,14 +671,25 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        const persistedInstanceId = persistedBinding?.providerInstanceId;
+        const persistedInstanceInfo =
+          persistedInstanceId === undefined || persistedInstanceId === resolvedInstanceId
+            ? instanceInfo
+            : Option.getOrUndefined(
+                yield* registry.getInstanceInfo(persistedInstanceId).pipe(Effect.option),
+              );
+        const canContinuePersistedSession =
+          persistedBinding !== undefined &&
+          persistedInstanceInfo !== undefined &&
+          persistedInstanceInfo.driverKind === instanceInfo.driverKind &&
+          persistedInstanceInfo.continuationIdentity.continuationKey ===
+            instanceInfo.continuationIdentity.continuationKey;
         const effectiveResumeCursor =
           input.resumeCursor ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? persistedBinding.resumeCursor
-            : undefined);
+          (canContinuePersistedSession ? persistedBinding.resumeCursor : undefined);
         const effectiveCwd =
           input.cwd ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
+          (canContinuePersistedSession
             ? readPersistedCwd(persistedBinding.runtimePayload)
             : undefined);
         yield* Effect.annotateCurrentSpan({
@@ -689,21 +697,32 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.resume_cursor.source":
             input.resumeCursor !== undefined
               ? "request"
-              : effectiveResumeCursor !== undefined &&
-                  persistedBinding?.providerInstanceId === resolvedInstanceId
-                ? "persisted"
+              : effectiveResumeCursor !== undefined && canContinuePersistedSession
+                ? persistedInstanceId === resolvedInstanceId
+                  ? "persisted"
+                  : "persisted-compatible-instance"
                 : "none",
           "provider.resume_cursor.present": effectiveResumeCursor !== undefined,
           "provider.cwd.source":
             input.cwd !== undefined
               ? "request"
-              : effectiveCwd !== undefined &&
-                  persistedBinding?.providerInstanceId === resolvedInstanceId
-                ? "persisted"
+              : effectiveCwd !== undefined && canContinuePersistedSession
+                ? persistedInstanceId === resolvedInstanceId
+                  ? "persisted"
+                  : "persisted-compatible-instance"
                 : "none",
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
+
+        // A Codex rollout permits only one writer. When account routing moves a
+        // thread to another provider instance, the old app-server must release
+        // the rollout before the new instance tries to resume it. Starting the
+        // replacement first creates a deterministic active-writer collision.
+        yield* stopStaleSessionsForThread({
+          threadId,
+          currentInstanceId: resolvedInstanceId,
+        });
         yield* prepareMcpSession({
           threadId,
           providerInstanceId: resolvedInstanceId,
@@ -733,11 +752,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...session,
           providerInstanceId: resolvedInstanceId,
         };
-
-        yield* stopStaleSessionsForThread({
-          threadId,
-          currentInstanceId: resolvedInstanceId,
-        });
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
           ...(resolvedProvider === "codex" &&
@@ -784,6 +798,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
     },
   );
+
+  const startSession: ProviderServiceMethod<"startSession"> = (threadId, rawInput) =>
+    sessionLifecycleLock.withPermits(1)(startSessionUnlocked(threadId, rawInput));
 
   const sendTurn: ProviderServiceMethod<"sendTurn"> = Effect.fn("sendTurn")(function* (rawInput) {
     const parsed = yield* decodeInputOrValidationError({
@@ -1029,7 +1046,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
-  const stopSession: ProviderServiceMethod<"stopSession"> = Effect.fn("stopSession")(
+  const stopSessionUnlocked: ProviderServiceMethod<"stopSession"> = Effect.fn("stopSession")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
         operation: "ProviderService.stopSession",
@@ -1076,6 +1093,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
     },
   );
+
+  const stopSession: ProviderServiceMethod<"stopSession"> = (input) =>
+    sessionLifecycleLock.withPermits(1)(stopSessionUnlocked(input));
 
   const listSessions: ProviderServiceMethod<"listSessions"> = Effect.fn("listSessions")(
     function* () {

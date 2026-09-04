@@ -54,6 +54,7 @@ import {
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
+import { CODEX_PROVIDER_STATUS_TIMEOUT_MESSAGE } from "./CodexProvider.ts";
 
 const loadProviders = (
   providerSources: ReadonlyArray<ProviderSnapshotSource>,
@@ -129,10 +130,24 @@ export const mergeProviderSnapshot = (
 ): ServerProvider =>
   !previousProvider
     ? nextProvider
-    : {
-        ...nextProvider,
-        models: mergeProviderModels(nextProvider, previousProvider.models, nextProvider.models),
-      };
+    : nextProvider.driver === ProviderDriverKind.make("codex") &&
+        nextProvider.installed &&
+        nextProvider.status === "warning" &&
+        nextProvider.message === CODEX_PROVIDER_STATUS_TIMEOUT_MESSAGE &&
+        previousProvider.enabled &&
+        previousProvider.installed &&
+        previousProvider.status === "ready"
+      ? {
+          ...previousProvider,
+          checkedAt: nextProvider.checkedAt,
+          ...(nextProvider.updateState !== undefined
+            ? { updateState: nextProvider.updateState }
+            : {}),
+        }
+      : {
+          ...nextProvider,
+          models: mergeProviderModels(nextProvider, previousProvider.models, nextProvider.models),
+        };
 
 export const mergeProviderSnapshots = (
   previousProviders: ReadonlyArray<ServerProvider>,

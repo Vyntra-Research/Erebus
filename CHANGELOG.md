@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0 - 2026-09-04
+
+### Added
+
+- Added one confirmed action to permanently delete the current archived-task set, with full server validation before each environment commits the batch.
+
+### Changed
+
+- Defined native subagents as vertical helpers within one task and co-agent tasks as separate horizontal dives into distinct sinks or surfaces.
+- Completed co-agent tasks are now discarded after their result is collected instead of moving into the archive.
+- Co-agent coordination now appears as a quiet task card instead of a user message.
+- Context compaction now appears as ordinary live work and folds with the completed turn.
+- Research rules now require sustained work on real, high-ROI sinks while plausible paths remain, regardless of time or complexity.
+
+### Fixed
+
+- Mark the exact last live user steer or co-agent message as historical after context compaction, including when Codex replays it below the compacted summary.
+- Route isolated Observer and Judge evaluations through Codex account routing, retry on another account after quota exhaustion, retain a safe failure reason when review remains blocked, and keep full evaluator prompts out of failure logs.
+- Replace the stop action with send steering whenever a running task has content ready to send.
+- Release the prior Codex app-server before a routed account resumes the same thread, serialize session handoffs, and reuse compatible persisted resume state after restart.
+- Preserve the last healthy Codex provider state when a bounded status probe times out instead of marking the account unavailable.
+
 ## 0.2.6 - 2026-09-03
 
 ### Fixed

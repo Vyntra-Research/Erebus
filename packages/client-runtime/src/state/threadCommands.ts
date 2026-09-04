@@ -11,6 +11,7 @@ import {
   type ArchiveThreadInput,
   type CreateThreadInput,
   type DeleteThreadInput,
+  type DeleteArchivedThreadsInput,
   type InterruptThreadTurnInput,
   type RespondToThreadApprovalInput,
   type RespondToThreadUserInputInput,
@@ -31,6 +32,7 @@ import {
   archiveThread,
   createThread,
   deleteThread,
+  deleteArchivedThreads,
   interruptThreadTurn,
   respondToThreadApproval,
   respondToThreadUserInput,
@@ -55,6 +57,7 @@ export type {
   ArchiveThreadInput,
   CreateThreadInput,
   DeleteThreadInput,
+  DeleteArchivedThreadsInput,
   InterruptThreadTurnInput,
   RespondToThreadApprovalInput,
   RespondToThreadUserInputInput,
@@ -95,6 +98,16 @@ export function createThreadEnvironmentAtoms<R, E>(
       execute: (input: DeleteThreadInput) => deleteThread(input),
       scheduler,
       concurrency,
+    }),
+    deleteArchived: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:delete-archived",
+      execute: (input: DeleteArchivedThreadsInput) => deleteArchivedThreads(input),
+      scheduler,
+      concurrency: {
+        mode: "serial" as const,
+        key: ({ environmentId }: { environmentId: string }) =>
+          JSON.stringify([environmentId, "archived-threads"]),
+      },
     }),
     archive: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:archive",

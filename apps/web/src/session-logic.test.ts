@@ -1832,7 +1832,7 @@ describe("deriveWorkLogEntries", () => {
 });
 
 describe("deriveTimelineEntries", () => {
-  it("promotes compaction activity into a visible timeline marker", () => {
+  it("keeps completed compaction inside the work timeline", () => {
     const entries = deriveTimelineEntries(
       [],
       [],
@@ -1851,43 +1851,46 @@ describe("deriveTimelineEntries", () => {
     expect(entries).toEqual([
       {
         id: "compaction-1",
-        kind: "compaction",
+        kind: "work",
         createdAt: "2026-03-17T19:12:28.000Z",
-        status: "completed",
-        turnId: TurnId.make("turn-1"),
+        entry: expect.objectContaining({
+          label: "Context compacted",
+        }),
       },
     ]);
   });
 
-  it("replaces the live compaction marker once completion arrives", () => {
-    const entries = deriveTimelineEntries(
-      [],
-      [],
-      [
-        {
-          id: "compaction-started",
-          createdAt: "2026-03-17T19:12:27.000Z",
-          turnId: TurnId.make("turn-1"),
-          label: "Compacting context",
-          tone: "info",
-          sourceActivityKind: "context-compaction.started",
-        },
-        {
-          id: "compaction-completed",
-          createdAt: "2026-03-17T19:12:28.000Z",
-          turnId: TurnId.make("turn-1"),
-          label: "Context compacted",
-          tone: "info",
-          sourceActivityKind: "context-compaction",
-        },
-      ],
-    );
+  it("collapses compaction start and completion into one settled work item", () => {
+    const workEntries = deriveWorkLogEntries([
+      makeActivity({
+        id: "compaction-started",
+        createdAt: "2026-03-17T19:12:27.000Z",
+        turnId: "turn-1",
+        kind: "context-compaction.started",
+        summary: "Compacting context",
+        tone: "info",
+        payload: { itemId: "compaction-1" },
+      }),
+      makeActivity({
+        id: "compaction-completed",
+        createdAt: "2026-03-17T19:12:28.000Z",
+        turnId: "turn-1",
+        kind: "context-compaction",
+        summary: "Context compacted",
+        tone: "info",
+        payload: { itemId: "compaction-1" },
+      }),
+    ]);
+    const entries = deriveTimelineEntries([], [], workEntries);
 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      id: "compaction-completed",
-      kind: "compaction",
-      status: "completed",
+      id: "compaction-started",
+      kind: "work",
+      entry: {
+        label: "Context compacted",
+        toolLifecycleStatus: "completed",
+      },
     });
   });
 
@@ -1895,40 +1898,42 @@ describe("deriveTimelineEntries", () => {
     const entries = deriveTimelineEntries(
       [],
       [],
-      [
-        {
+      deriveWorkLogEntries([
+        makeActivity({
           id: "compaction-a-started",
           createdAt: "2026-03-17T19:12:27.000Z",
-          turnId: TurnId.make("turn-1"),
-          label: "Compacting context",
+          turnId: "turn-1",
+          kind: "context-compaction.started",
+          summary: "Compacting context",
           tone: "info",
-          sourceActivityKind: "context-compaction.started",
-          compactionItemId: "compaction-a",
-        },
-        {
+          payload: { itemId: "compaction-a" },
+        }),
+        makeActivity({
           id: "compaction-b-started",
           createdAt: "2026-03-17T19:12:28.000Z",
-          turnId: TurnId.make("turn-1"),
-          label: "Compacting context",
+          turnId: "turn-1",
+          kind: "context-compaction.started",
+          summary: "Compacting context",
           tone: "info",
-          sourceActivityKind: "context-compaction.started",
-          compactionItemId: "compaction-b",
-        },
-        {
+          payload: { itemId: "compaction-b" },
+        }),
+        makeActivity({
           id: "compaction-a-completed",
           createdAt: "2026-03-17T19:12:29.000Z",
-          turnId: TurnId.make("turn-1"),
-          label: "Context compacted",
+          turnId: "turn-1",
+          kind: "context-compaction",
+          summary: "Context compacted",
           tone: "info",
-          sourceActivityKind: "context-compaction",
-          compactionItemId: "compaction-a",
-        },
-      ],
+          payload: { itemId: "compaction-a" },
+        }),
+      ]),
     );
 
-    expect(entries).toEqual([
-      expect.objectContaining({ id: "compaction-b-started", status: "running" }),
-      expect.objectContaining({ id: "compaction-a-completed", status: "completed" }),
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.kind)).toEqual(["work", "work"]);
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "compaction-a-started",
+      "compaction-b-started",
     ]);
   });
 
@@ -1961,8 +1966,11 @@ describe("deriveTimelineEntries", () => {
 
     expect(entries[0]).toMatchObject({
       id: "stale-compaction-started",
-      kind: "compaction",
-      status: "completed",
+      kind: "work",
+      entry: {
+        label: "Context compacted",
+        toolLifecycleStatus: "completed",
+      },
     });
   });
 

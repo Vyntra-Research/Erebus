@@ -612,6 +612,97 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("moves a resumable Codex thread between accounts without overlapping writers", () =>
+  Effect.gen(function* () {
+    const primaryInstanceId = ProviderInstanceId.make("codex");
+    const secondaryInstanceId = ProviderInstanceId.make("codex-2");
+    const primary = makeFakeCodexAdapter();
+    const secondary = makeFakeCodexAdapter();
+    const unsupported = () => new ProviderUnsupportedError({ provider: CODEX_DRIVER });
+    const adapters = new Map([
+      [primaryInstanceId, primary.adapter],
+      [secondaryInstanceId, secondary.adapter],
+    ] as const);
+    const registry: ProviderAdapterRegistry.ProviderAdapterRegistry["Service"] = {
+      getByInstance: (instanceId) => {
+        const adapter = adapters.get(instanceId);
+        return adapter ? Effect.succeed(adapter) : Effect.fail(unsupported());
+      },
+      getInstanceInfo: (instanceId) =>
+        adapters.has(instanceId)
+          ? Effect.succeed({
+              instanceId,
+              driverKind: CODEX_DRIVER,
+              displayName: String(instanceId),
+              enabled: true,
+              continuationIdentity: {
+                driverKind: CODEX_DRIVER,
+                continuationKey: "codex:C:/Users/example/.erebus/shared",
+              },
+            })
+          : Effect.fail(unsupported()),
+      listInstances: () => Effect.succeed([primaryInstanceId, secondaryInstanceId]),
+      listProviders: () => Effect.succeed([CODEX_DRIVER] as const),
+      streamChanges: Stream.empty,
+      subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
+        PubSub.subscribe(pubsub),
+      ),
+    };
+    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+      Layer.provide(directoryLayer),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(serverConfigTestLayer),
+      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(
+        Layer.succeed(
+          ProviderEventLoggers.ProviderEventLoggers,
+          ProviderEventLoggers.NoOpProviderEventLoggers,
+        ),
+      ),
+    );
+    const threadId = asThreadId("thread-codex-account-handoff");
+
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const initial = yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: primaryInstanceId,
+        threadId,
+        cwd: "C:/work/project",
+        runtimeMode: "full-access",
+      });
+
+      primary.stopSession.mockClear();
+      secondary.startSession.mockClear();
+      const moved = yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: secondaryInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      assert.equal(moved.providerInstanceId, secondaryInstanceId);
+      assert.deepEqual(primary.stopSession.mock.calls, [[threadId]]);
+      assert.equal(secondary.startSession.mock.calls.length, 1);
+      assert.deepEqual(
+        secondary.startSession.mock.calls[0]?.[0].resumeCursor,
+        initial.resumeCursor,
+      );
+      assert.equal(secondary.startSession.mock.calls[0]?.[0].cwd, "C:/work/project");
+      assert.equal(
+        primary.stopSession.mock.invocationCallOrder[0]! <
+          secondary.startSession.mock.invocationCallOrder[0]!,
+        true,
+      );
+    }).pipe(Effect.provide(providerLayer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 const routing = makeProviderServiceLayer();
 
 it.effect(
@@ -1325,7 +1416,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
-  it.effect("stops stale sessions in other providers after a successful replacement start", () =>
+  it.effect("stops stale sessions before starting a replacement provider", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
       const threadId = asThreadId("thread-provider-replacement");

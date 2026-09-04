@@ -7,6 +7,7 @@ import type {
 
 import type { ObserverAssessment } from "./Services/ResearchEvaluator.ts";
 import type { ObserverCampaignSnapshot } from "./Services/ResearchEvaluator.ts";
+import { isErebusCoagentMessage } from "../provider/codexUserSteering.ts";
 import type { ResearchProjection } from "./researchState.ts";
 import { RESEARCH_OBSERVER_RUNTIME_POLICY } from "./researchPolicy.ts";
 
@@ -37,7 +38,7 @@ type ProjectedConversationMessage = {
 
 export type ObserverTimelineMessage = {
   readonly id: string;
-  readonly source: "userPrompt" | "userSteer" | "principalAssistant";
+  readonly source: "userPrompt" | "userSteer" | "coagentMessage" | "principalAssistant";
   readonly text: string;
   readonly turnId: string | null;
 };
@@ -112,12 +113,18 @@ export function buildObserverTimeline(
         message.text.trim().length > 0 &&
         !isErebusSupervisoryMessage(message),
     );
-  const latestPrompt = eligibleUsers.findLast(({ message }) => message.turnId == null);
-  const steers = eligibleUsers.filter(({ message }) => message.turnId != null);
+  const userAuthored = eligibleUsers.filter(({ message }) => !isErebusCoagentMessage(message.text));
+  const coagentMessages = eligibleUsers.filter(({ message }) =>
+    isErebusCoagentMessage(message.text),
+  );
+  const latestPrompt = userAuthored.findLast(({ message }) => message.turnId == null);
+  const steers = userAuthored.filter(({ message }) => message.turnId != null);
   const lastPriorSteer = steers.findLast(({ index }) => index < firstWindowIndex);
   const laterSteers = steers.filter(({ index }) => index >= firstWindowIndex);
+  const lastPriorCoagentMessage = coagentMessages.findLast(({ index }) => index < firstWindowIndex);
+  const laterCoagentMessages = coagentMessages.filter(({ index }) => index >= firstWindowIndex);
   const selectedUserIndexes = new Set(
-    [latestPrompt, lastPriorSteer, ...laterSteers]
+    [latestPrompt, lastPriorSteer, lastPriorCoagentMessage, ...laterSteers, ...laterCoagentMessages]
       .filter((item) => item !== undefined)
       .map((item) => item.index),
   );
@@ -138,7 +145,11 @@ export function buildObserverTimeline(
     return [
       {
         id: message.id,
-        source: message.turnId == null ? ("userPrompt" as const) : ("userSteer" as const),
+        source: isErebusCoagentMessage(message.text)
+          ? ("coagentMessage" as const)
+          : message.turnId == null
+            ? ("userPrompt" as const)
+            : ("userSteer" as const),
         text: message.text,
         turnId: message.turnId ?? null,
       },

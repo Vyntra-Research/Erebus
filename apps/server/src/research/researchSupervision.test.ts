@@ -125,7 +125,19 @@ it("gives Observer the latest prompt and steers in chronological context", () =>
     { id: "steer-prior", role: "user", text: "Preserve this route", turnId: "turn-1" },
     { id: "a1", role: "assistant", text: "One", turnId: "turn-1" },
     { id: "a2", role: "assistant", text: "Two", turnId: "turn-1" },
+    {
+      id: "coagent-prior",
+      role: "user",
+      text: '<erebus_coagent_message from_thread_id="child-1" from_title="Parser">Prior child update</erebus_coagent_message>',
+      turnId: "turn-1",
+    },
     { id: "steer-live", role: "user", text: "User correction", turnId: "turn-2" },
+    {
+      id: "coagent-live",
+      role: "user",
+      text: '<erebus_coagent_message from_thread_id="child-2" from_title="Cache">Later child update</erebus_coagent_message>',
+      turnId: "turn-2",
+    },
     {
       id: "erebus:observer:1",
       role: "user",
@@ -150,8 +162,35 @@ it("gives Observer the latest prompt and steers in chronological context", () =>
       { id: "steer-prior", source: "userSteer" },
       { id: "a1", source: "principalAssistant" },
       { id: "a2", source: "principalAssistant" },
+      { id: "coagent-prior", source: "coagentMessage" },
       { id: "steer-live", source: "userSteer" },
+      { id: "coagent-live", source: "coagentMessage" },
       { id: "a3", source: "principalAssistant" },
+    ],
+  );
+});
+
+it("keeps co-agent coordination separate from user authority", () => {
+  const timeline = buildObserverTimeline(
+    [{ id: "a1", text: "One" }],
+    [
+      { id: "prompt", role: "user", text: "User objective", turnId: null },
+      {
+        id: "coagent",
+        role: "user",
+        text: '<erebus_coagent_message from_thread_id="child" from_title="Child">Status</erebus_coagent_message>',
+        turnId: null,
+      },
+      { id: "a1", role: "assistant", text: "One", turnId: "turn-1" },
+    ],
+  );
+
+  assert.deepStrictEqual(
+    timeline.map(({ id, source }) => ({ id, source })),
+    [
+      { id: "prompt", source: "userPrompt" },
+      { id: "coagent", source: "coagentMessage" },
+      { id: "a1", source: "principalAssistant" },
     ],
   );
 });

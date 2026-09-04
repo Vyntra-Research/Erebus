@@ -184,13 +184,6 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
-    }
-  | {
-      id: string;
-      kind: "compaction";
-      createdAt: string;
-      status: "running" | "completed";
-      turnId: TurnId | null;
     };
 
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
@@ -1022,6 +1015,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (!toolLifecycleStatus && activity.kind === "tool.completed") {
     toolLifecycleStatus = "completed";
   }
+  if (activity.kind === "context-compaction.started") {
+    toolLifecycleStatus = "inProgress";
+    entry.label = "Compacting context…";
+  } else if (activity.kind === "context-compaction") {
+    toolLifecycleStatus = "completed";
+    entry.label = "Context compacted";
+  }
   if (toolLifecycleStatus) {
     entry.toolLifecycleStatus = toolLifecycleStatus;
   }
@@ -1102,7 +1102,27 @@ function collapseDerivedWorkLogEntries(
   // rows (live-test finding, thread 7ac7ef05).
   const groupKeyByTaskId = new Map<string, string>();
   const toolLifecycleRowIndex = new Map<string, number>();
+  const compactionRowIndex = new Map<string, number>();
   for (const entry of entries) {
+    if (
+      entry.sourceActivityKind === "context-compaction" ||
+      entry.sourceActivityKind === "context-compaction.started"
+    ) {
+      const compactionKey = entry.compactionItemId ?? `turn:${entry.turnId ?? "unknown"}`;
+      const existingIndex = compactionRowIndex.get(compactionKey);
+      if (existingIndex !== undefined) {
+        const existing = collapsed[existingIndex]!;
+        collapsed[existingIndex] = {
+          ...mergeDerivedWorkLogEntries(existing, entry),
+          id: existing.id,
+          createdAt: existing.createdAt,
+        };
+        continue;
+      }
+      compactionRowIndex.set(compactionKey, collapsed.length);
+      collapsed.push(entry);
+      continue;
+    }
     const isTaskRow =
       entry.taskId !== undefined &&
       !entry.isBackgroundTask &&
@@ -1872,88 +1892,30 @@ export function deriveTimelineEntries(
     createdAt: turnPlan.createdAt,
     turnPlan,
   }));
-  const compactionEntries = workEntries.filter(
-    (entry) =>
-      entry.sourceActivityKind === "context-compaction" ||
-      entry.sourceActivityKind === "context-compaction.started",
-  );
-  const completedCompactions = compactionEntries.filter(
-    (entry) => entry.sourceActivityKind === "context-compaction",
-  );
-  const startedCompactions = compactionEntries.filter(
-    (entry) => entry.sourceActivityKind === "context-compaction.started",
-  );
-  const completedStartIds = new Set<string>();
-  for (const completed of completedCompactions) {
-    const matchingStart = completed.compactionItemId
-      ? startedCompactions.find(
-          (started) =>
-            !completedStartIds.has(started.id) &&
-            started.compactionItemId === completed.compactionItemId,
-        )
-      : startedCompactions
-          .filter(
-            (started) =>
-              !completedStartIds.has(started.id) &&
-              started.turnId === completed.turnId &&
-              started.createdAt <= completed.createdAt,
-          )
-          .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    if (matchingStart) {
-      completedStartIds.add(matchingStart.id);
-    }
-  }
   const conversationRows = [...messageRows, ...proposedPlanRows, ...turnPlanRows];
-  const compactionRows: TimelineEntry[] = [];
-  for (const entry of workEntries) {
-    if (entry.sourceActivityKind === "context-compaction") {
-      compactionRows.push({
-        id: entry.id,
-        kind: "compaction",
-        createdAt: entry.createdAt,
-        status: "completed",
-        turnId: entry.turnId ?? null,
-      });
-      continue;
-    }
-    if (entry.sourceActivityKind !== "context-compaction.started") {
-      continue;
-    }
-    if (completedStartIds.has(entry.id)) {
-      continue;
-    }
-    // Older Erebus builds persisted the start but ignored Codex's item-level
-    // completion. Any later conversation row proves that compaction finished,
-    // so repair those historical markers while rendering them.
-    const hasLaterConversationRow = conversationRows.some((row) => row.createdAt > entry.createdAt);
-    compactionRows.push({
-      id: entry.id,
-      kind: "compaction",
-      createdAt: entry.createdAt,
-      status: hasLaterConversationRow ? "completed" : "running",
-      turnId: entry.turnId ?? null,
-    });
-  }
-  const workRows: TimelineEntry[] = workEntries.flatMap((entry) =>
-    entry.sourceActivityKind === "context-compaction" ||
-    entry.sourceActivityKind === "context-compaction.started"
-      ? []
-      : [
-          {
-            id: entry.id,
-            kind: "work" as const,
-            createdAt: entry.createdAt,
-            entry,
-          },
-        ],
+  const workRows: TimelineEntry[] = workEntries.map((entry) => {
+    // Older builds could persist only the start marker. Later conversation
+    // proves the operation completed, so render it as settled work instead
+    // of leaving an endless live row in historical turns.
+    const repairedEntry =
+      entry.sourceActivityKind === "context-compaction.started" &&
+      conversationRows.some((row) => row.createdAt > entry.createdAt)
+        ? {
+            ...entry,
+            label: "Context compacted",
+            toolLifecycleStatus: "completed" as const,
+          }
+        : entry;
+    return {
+      id: repairedEntry.id,
+      kind: "work" as const,
+      createdAt: repairedEntry.createdAt,
+      entry: repairedEntry,
+    };
+  });
+  return [...messageRows, ...proposedPlanRows, ...turnPlanRows, ...workRows].toSorted((a, b) =>
+    a.createdAt.localeCompare(b.createdAt),
   );
-  return [
-    ...messageRows,
-    ...proposedPlanRows,
-    ...turnPlanRows,
-    ...workRows,
-    ...compactionRows,
-  ].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function inferCheckpointTurnCountByTurnId(
