@@ -173,6 +173,41 @@ export function pendingObserverWindowCount(
   );
 }
 
+export type ObserverWindowBounds = {
+  readonly start: number;
+  readonly end: number;
+  readonly skippedMessageCount: number;
+};
+
+/**
+ * Select one fresh Observer window without replaying an unbounded backlog.
+ *
+ * Under normal event delivery the pending count is exactly one window. If an
+ * evaluator failed or the app restarted, retain the cadence but observe the
+ * newest complete window after the next assistant message instead of replaying
+ * stale windows that can no longer produce timely steering.
+ */
+export function selectObserverWindowBounds(input: {
+  readonly completedMessageCount: number;
+  readonly cursor: number;
+  readonly messageWindow: number;
+}): ObserverWindowBounds | null {
+  const completedMessageCount = Math.max(0, Math.floor(input.completedMessageCount));
+  const cursor = Math.min(completedMessageCount, Math.max(0, Math.floor(input.cursor)));
+  const messageWindow = Math.max(1, Math.floor(input.messageWindow));
+  const pendingMessageCount = completedMessageCount - cursor;
+  if (pendingMessageCount < messageWindow) return null;
+
+  const end =
+    pendingMessageCount === messageWindow ? cursor + messageWindow : completedMessageCount;
+  const start = end - messageWindow;
+  return {
+    start,
+    end,
+    skippedMessageCount: Math.max(0, start - cursor),
+  };
+}
+
 export function shouldObserverIntervene(
   assessment: ObserverAssessment,
   observerPolicy = RESEARCH_OBSERVER_RUNTIME_POLICY,

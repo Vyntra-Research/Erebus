@@ -19,6 +19,7 @@ import {
   queuedJudgeFollowUps,
   queuedObserverInterventions,
   resolveCompletedAssistantMessageText,
+  selectObserverWindowBounds,
   shouldObserverIntervene,
 } from "./researchSupervision.ts";
 
@@ -195,10 +196,28 @@ it("keeps co-agent coordination separate from user authority", () => {
   );
 });
 
-it("schedules exact five-message observer windows, including after restart", () => {
+it("counts exact five-message Observer windows", () => {
   assert.equal(pendingObserverWindowCount(projection(4, 0)), 0);
   assert.equal(pendingObserverWindowCount(projection(5, 0)), 1);
   assert.equal(pendingObserverWindowCount(projection(16, 5)), 2);
+});
+
+it("selects the newest bounded Observer window instead of replaying stale backlog", () => {
+  assert.isNull(
+    selectObserverWindowBounds({ completedMessageCount: 4, cursor: 0, messageWindow: 5 }),
+  );
+  assert.deepStrictEqual(
+    selectObserverWindowBounds({ completedMessageCount: 5, cursor: 0, messageWindow: 5 }),
+    { start: 0, end: 5, skippedMessageCount: 0 },
+  );
+  assert.deepStrictEqual(
+    selectObserverWindowBounds({ completedMessageCount: 101, cursor: 0, messageWindow: 5 }),
+    { start: 96, end: 101, skippedMessageCount: 96 },
+  );
+  assert.deepStrictEqual(
+    selectObserverWindowBounds({ completedMessageCount: 11, cursor: 5, messageWindow: 5 }),
+    { start: 6, end: 11, skippedMessageCount: 1 },
+  );
 });
 
 it("uses the configured harness cadence and confidence threshold", () => {
