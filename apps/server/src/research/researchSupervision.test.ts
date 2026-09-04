@@ -21,6 +21,7 @@ import {
   resolveCompletedAssistantMessageText,
   selectObserverWindowBounds,
   shouldObserverIntervene,
+  unjudgedFindings,
 } from "./researchSupervision.ts";
 
 const contract = {
@@ -326,6 +327,7 @@ it("recovers only unjudged findings and queued interventions", () => {
   } satisfies ResearchProjection;
 
   assert.deepStrictEqual(pendingJudgeFindings(state), [finding]);
+  assert.deepStrictEqual(unjudgedFindings(state), []);
   assert.deepStrictEqual(queuedInterventions(state), [queued, judgeFollowUp]);
   assert.deepStrictEqual(queuedObserverInterventions(state), [queued]);
   assert.deepStrictEqual(queuedJudgeFollowUps(state), [judgeFollowUp]);
@@ -374,5 +376,19 @@ it("retries only the latest logical finding revision and suppresses stale Judge 
   } satisfies ResearchProjection;
 
   assert.deepStrictEqual(pendingJudgeFindings(state), [revision2]);
+  assert.deepStrictEqual(unjudgedFindings(state), []);
   assert.deepStrictEqual(queuedJudgeFollowUps(state), [current]);
+});
+
+it("recovers a finding that never reached the Judge", () => {
+  const finding = {
+    findingId: "finding-unjudged",
+    revision: 1,
+  } as ResearchProjection["findings"][number];
+  const state = {
+    ...projection(0, 0),
+    findings: [finding],
+  } satisfies ResearchProjection;
+
+  assert.deepStrictEqual(unjudgedFindings(state), [finding]);
 });
