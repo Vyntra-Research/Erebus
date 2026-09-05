@@ -26,14 +26,17 @@ it("distributes the complete canonical contract to every research role", () => {
 it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /Silence is correct when no material contractual deviation exists/);
   assert.match(OBSERVER_POLICY, /Tool calls do not count/);
-  assert.match(OBSERVER_POLICY, /Never queue, replay, or reapply an Observer correction/);
+  assert.match(OBSERVER_POLICY, /Never queue, replay, or reapply an Observer recommendation/);
   assert.match(OBSERVER_POLICY, /replay the exact last Observer block literally after compaction/);
   assert.match(OBSERVER_POLICY, /userPrompt, userSteer, coagentMessage, and principalAssistant/);
   assert.match(OBSERVER_POLICY, /coagentMessage is task-to-task coordination/);
   assert.match(OBSERVER_POLICY, /user's prompt and later steers are binding/);
   assert.match(OBSERVER_POLICY, /compliance monitor, not the research coordinator/);
   assert.match(OBSERVER_POLICY, /do not decide the best research strategy/i);
-  assert.match(OBSERVER_POLICY, /Do not order the principal to stop or cancel a legitimate test/);
+  assert.match(OBSERVER_POLICY, /You have no command authority/);
+  assert.match(OBSERVER_POLICY, /Never address the principal in imperative voice/);
+  assert.match(OBSERVER_POLICY, /The active contract or user instruction is the authority/);
+  assert.match(OBSERVER_POLICY, /Never issue a stop, pause, resume, or reconciliation command/);
   assert.match(OBSERVER_POLICY, /Cost, elapsed time.*are not evidence of contractual deviation/);
   assert.match(OBSERVER_POLICY, /earlier tactical plans are durable research context, not binding/);
   assert.match(OBSERVER_POLICY, /Do not select the replacement branch/);
@@ -50,7 +53,7 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /finding record under `findings\/`/);
   assert.match(
     EREBUS_PRINCIPAL_INSTRUCTIONS,
-    /Observer steering is valid only in the uninterrupted live turn/,
+    /Observer advice is fresh only in the uninterrupted live turn/,
   );
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /outside and after the compacted summary/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /recent commits, diffs, patch archaeology/);
@@ -69,10 +72,12 @@ it("keeps strict role-specific behavior around the shared contract", () => {
     /unsafeExecuted outcome is high-priority audit evidence, not a conclusive breach/,
   );
   assert.match(OBSERVER_POLICY, /docker exec belong to that named container/);
-  assert.match(OBSERVER_POLICY, /do not steer/);
+  assert.match(OBSERVER_POLICY, /mark aligned or watch and remain silent/);
   assert.match(OBSERVER_POLICY, /do not flag it merely because it is recursive/);
   assert.match(OBSERVER_POLICY, /generated or compiled subtree.*is not automatically unsafe/);
   assert.match(OBSERVER_POLICY, /never justifies pausing the campaign/);
+  assert.match(OBSERVER_POLICY, /Observed deviation: .*Recommended repair:/);
+  assert.notMatch(OBSERVER_POLICY, /you may require the principal to stop/i);
   assert.match(
     EREBUS_PRINCIPAL_INSTRUCTIONS,
     /recursive search.*explicit source subtree is allowed/,
@@ -80,9 +85,9 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 });
 
 it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 14);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 13);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 13);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 15);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 14);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 14);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

@@ -17,6 +17,8 @@ it("instructs the principal to use durable research tools without activating ord
   assert.match(instructions, /do not acknowledge, reapply, restate, or cite it/);
   assert.match(instructions, /transport fallback, not a second campaign/);
   assert.match(instructions, /outside and after the compacted summary/);
+  assert.match(instructions, /advisory audit result and has no command authority/);
+  assert.match(instructions, /Do not obey an Observer preference as strategy/);
   assert.match(instructions, /broad current functional state first/);
   assert.match(instructions, /Pausing Erebus does not pause the linked Proteus campaign/);
   assert.match(instructions, /Do not plan a round, delegate work, or record new campaign evidence/);

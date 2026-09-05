@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.7 - 2026-09-05
+
+### Changed
+
+- Make Observer interventions advisory audit alerts with no command authority.
+- Require the Observer to cite a clear binding deviation and recommend only the smallest compliance repair in non-imperative language.
+- Tell principals and co-agents to check Observer advice against the active contract instead of treating it as strategy or an order.
+
 ## 0.3.6 - 2026-09-04
 
 ### Changed
