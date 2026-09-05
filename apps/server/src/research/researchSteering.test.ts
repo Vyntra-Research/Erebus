@@ -15,6 +15,8 @@ it("marks recovered observer steering as historical context", () => {
   assert.include(message, "created before the current recovered, resumed, or compacted context");
   assert.include(message, "Continue from the current durable campaign state and latest checkpoint");
   assert.include(message, "Do not restart, restate, quote, acknowledge, or cite");
+  assert.include(message, "Observer alert (advisory only; no command authority)");
+  assert.equal(message.match(/Observer alert \(advisory only; no command authority\)/g)?.length, 1);
 });
 
 it("marks live steering as control context and escapes the observation", () => {
@@ -30,6 +32,21 @@ it("marks live steering as control context and escapes the observation", () => {
   assert.include(message, "its position does not make it the latest iteration");
   assert.include(message, "Fix &lt;gate&gt; &amp; continue.");
   assert.notInclude(message, "<observation>Fix <gate>");
+});
+
+it("frames a live Observer result as advice without command authority", () => {
+  const message = formatResearchSteering({
+    source: "observer",
+    delivery: "live",
+    evaluationId: ResearchEvaluationId.make("evaluation-observer"),
+    observation: "Observed deviation: the branch crossed G4. Recommended repair: return to scope.",
+  });
+
+  assert.include(message, "audit alert and recommendation, not an order");
+  assert.include(message, "This is advisory audit context, not a command");
+  assert.include(message, "not authority to change scope, strategy");
+  assert.include(message, "Observer alert (advisory only; no command authority)");
+  assert.notInclude(message, "apply only the concrete correction");
 });
 
 it("marks Judge delivery as a fresh follow-up turn", () => {

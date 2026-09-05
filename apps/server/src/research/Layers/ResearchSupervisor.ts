@@ -57,7 +57,7 @@ import {
   RESEARCH_INTERNAL_POLICY,
   researchObserverPolicyFromSettings,
 } from "../researchPolicy.ts";
-import { formatResearchSteering } from "../researchSteering.ts";
+import { formatObserverAdvisory, formatResearchSteering } from "../researchSteering.ts";
 
 const decodeMessage = Schema.decodeUnknownEffect(ThreadMessageSentPayload);
 const decodeSession = Schema.decodeUnknownEffect(ThreadSessionSetPayload);
@@ -156,7 +156,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
     readonly expectedTurnId: TurnId | null;
     readonly targetThreadId: ThreadId;
   }) {
-    // Observer steering is valid only against the exact live turn it evaluated.
+    // Observer advice is relevant only to the exact live turn it evaluated.
     // The durable evaluation remains the audit record when that turn has ended.
     if (!input.expectedTurnId) return;
 
@@ -212,8 +212,8 @@ const makeResearchSupervisor = Effect.gen(function* () {
       kind: "research.observer.intervention",
       summary:
         delivered._tag === "Success"
-          ? "Observer course correction delivered"
-          : "Observer correction expired before delivery",
+          ? "Observer advisory delivered"
+          : "Observer advisory expired before delivery",
       detail: input.observation,
       tone: delivered._tag === "Success" ? "info" : "error",
       payload: {
@@ -534,6 +534,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
     } as const;
     const cleanStrings = (values: ReadonlyArray<string>) =>
       values.map((value) => value.trim()).filter((value) => value.length > 0);
+    const observerRecommendation = assessment.recommendedSteering?.trim();
     const evaluation = {
       evaluationId,
       campaignId,
@@ -546,7 +547,9 @@ const makeResearchSupervisor = Effect.gen(function* () {
       contractClauses: cleanStrings(assessment.contractClauses),
       evidence: cleanStrings(assessment.evidence),
       risk: assessment.risk?.trim() || null,
-      recommendedSteering: assessment.recommendedSteering?.trim() || null,
+      recommendedSteering: observerRecommendation
+        ? formatObserverAdvisory(observerRecommendation)
+        : null,
       runtime: evaluationRuntime,
       evaluatedAt,
     } as const;
@@ -893,7 +896,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
           if (!campaign || campaign.status !== "active") return;
           const contract = activeResearchContract(projection);
           if (!contract) return;
-          // Observer steering is useful only while the triggering research is
+          // Observer advice is useful only while the triggering research is
           // current. Never replay missed Observer windows during bootstrap.
           // The next completed assistant message selects one fresh bounded
           // window and advances past any stale backlog.
