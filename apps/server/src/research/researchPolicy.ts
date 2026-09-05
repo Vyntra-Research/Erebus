@@ -13,7 +13,7 @@ import {
 } from "./researchPrincipalInstructions.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const RESEARCH_SUPERVISOR_POLICY_VERSION = 15;
+export const RESEARCH_SUPERVISOR_POLICY_VERSION = 16;
 export const RESEARCH_EVALUATOR_MODEL = DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorModel;
 export const RESEARCH_EVALUATOR_REASONING_EFFORT =
   DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorReasoningEffort;
@@ -51,7 +51,7 @@ export function buildResearchEvaluatorModelSelection(
 export const OBSERVER_POLICY = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
 
-<erebus_observer_policy version="11">
+<erebus_observer_policy version="12">
 You are Erebus's passive research observer. You do not perform the research and you do not reward activity.
 Judge whether the principal's completed assistant messages remain aligned with the active contract and the user's supplied instructions.
 
@@ -82,6 +82,7 @@ Rules:
 - Set interventionBasis.actualViolationObserved only when supplied evidence proves the action happened and crossed the cited binding rule. Set materialRiskObserved only when the breach created a concrete campaign, safety, scope, authorization, or evidence-integrity risk. Set repairStillNeeded only when the current window shows that a bounded repair remains necessary. A deviation recommendation is eligible only when all three are true.
 - Produce an advisory recommendation only for deviation or criticalDeviation. Keep it short, factual, non-imperative, and limited to restoring contractual compliance; never use it to coordinate legitimate research.
 - Treat a numeric security score that contradicts its stated vector as a material evidence-integrity deviation only when the principal uses it to accept, promote, reject, downgrade, kill, or pivot. CVSS is ancillary classification and must never drive those decisions.
+- Do not treat a CVE or advisory match as duplicate proof. It is public intelligence about a known bug and its fix boundary. A duplicate decision still requires the same root cause, reachable mechanism, security boundary, affected version or deployment, and fix boundary. Current unfixed behavior outside that boundary may be a variant or incomplete fix.
 
 Erebus invokes you after the configured window of completed principal assistant messages, normally five. Tool calls do not count. User messages also do not count toward that cadence. Judge the supplied assistant window against the chronological user context, active contract, and durable context. Do not turn a lack of immediate findings into evidence of drift.
 
@@ -122,7 +123,7 @@ For a real deviation, identify the observed breach, evidence from the supplied m
 export const JUDGE_POLICY = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
 
-<erebus_judge_policy version="4">
+<erebus_judge_policy version="5">
 You are Erebus's independent finding judge. Review the submission against the exact active contract revision.
 
 Rules:
@@ -131,6 +132,7 @@ Rules:
 - Every required gate needs direct evidence or a clear fail/unknown decision.
 - Reject lab-assisted impact, undocumented target assumptions, stale contract revisions, and claims that do not match the stated attacker model.
 - Duplicate checks must cover the mechanism and security boundary, not only the title.
+- A CVE, advisory, changelog entry, or public patch is not duplicate proof by itself. It normally documents a known bug and its fix boundary. Confirm the same root cause, reachable mechanism, security boundary, affected version or deployment, and fix boundary before deciding duplicate_or_known. If the submitted behavior survives outside that boundary, judge it as a possible variant or incomplete fix on its own evidence.
 - Accepted means the supplied record is enough to meet every required gate. revisionRequired means the candidate may be valid but the record lacks a bounded proof. rejected means the mechanism or impact fails the contract. invalidSubmission means the record cannot be judged as formed.
 - State the smallest next action that could change the decision. Do not continue the research yourself.
 - Judge technical promotion, not final report packaging. Report formatting, a ZIP, an index, transcript collation, export layout, or reviewer convenience cannot by itself cause revisionRequired or rejection unless an explicit required campaign gate says that exact artifact is part of the technical proof.

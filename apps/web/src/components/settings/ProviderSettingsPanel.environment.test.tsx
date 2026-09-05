@@ -91,9 +91,9 @@ const environmentId = EnvironmentId.make("remote-device");
 const codexId = ProviderInstanceId.make("codex");
 const customId = ProviderInstanceId.make("codex_work");
 
-function provider(): ServerProvider {
+function provider(instanceId: ProviderInstanceId = codexId): ServerProvider {
   return {
-    instanceId: codexId,
+    instanceId,
     driver: ProviderDriverKind.make("codex"),
     enabled: true,
     installed: true,
@@ -176,6 +176,43 @@ describe("EnvironmentProviderSettings routing", () => {
       environmentId,
       input: { provider: ProviderDriverKind.make("codex"), instanceId: codexId },
     });
+  });
+
+  it("offers one shared Codex runtime update on the primary account", () => {
+    settingsState.value = {
+      ...DEFAULT_UNIFIED_SETTINGS,
+      providerInstances: {
+        [customId]: {
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+        },
+      },
+      codexAccountRouting: {
+        ...DEFAULT_UNIFIED_SETTINGS.codexAccountRouting,
+        primaryInstanceId: customId,
+      },
+    };
+    atoms.providers = [provider(), provider(customId)];
+    let panel = renderPanel();
+
+    const customRow = visitElements(
+      panel,
+      (element) => element.props.instanceId === customId && element.props.mode === "list",
+    );
+    (customRow?.props.onSelect as (() => void) | undefined)?.();
+    panel = renderPanel();
+
+    const defaultEditor = visitElements(
+      panel,
+      (element) => element.props.instanceId === codexId && element.props.mode === "editor",
+    );
+    const customEditor = visitElements(
+      panel,
+      (element) => element.props.instanceId === customId && element.props.mode === "editor",
+    );
+    expect(defaultEditor).toBeNull();
+    expect(customEditor?.props.showRuntimeUpdate).toBe(true);
+    expect(customEditor?.props.onRunUpdate).toBeTypeOf("function");
   });
 
   it("keeps provider selection available while write controls are read only", () => {

@@ -1,7 +1,7 @@
-export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 3;
+export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 4;
 
 export const EREBUS_RESEARCH_BASE_CONTRACT = `
-<erebus_research_contract version="3">
+<erebus_research_contract version="4">
 # Continuous offensive research base contract
 
 This contract is not a set of suggestions. It defines the campaign laws, research boundaries, and minimum quality bar for every hypothesis, pivot, checkpoint, and finding.
@@ -94,6 +94,8 @@ For source-code research, recent commits, diffs, patch archaeology, changelog mi
 ## 8. Dedupe, pivots, and real research cost
 
 Do not anchor on recently discovered vulnerabilities. Do not reanalyze fixed, discussed, cataloged, or rejected scenarios unless a concrete change justifies reopening them.
+
+Never use a published CVE or advisory as dedupe by itself. Publication normally describes a known bug and the boundary of its fix, not proof that a current unfixed behavior is the same finding. Use advisories as intelligence. Dedupe only after matching the exact root cause, reachable mechanism, security boundary, affected version or deployment, and fix boundary. When current behavior survives outside that boundary, treat it as a possible variant or incomplete fix until direct evidence proves otherwise.
 
 Pivots into duplicate targets, areas, or hypotheses are costly deviations. The same is true for pivots that begin with low ROI and no plausible elevation path.
 

@@ -6,6 +6,7 @@ import {
   ContainerIcon,
   FolderPlusIcon,
   Globe2Icon,
+  EllipsisIcon,
   LoaderIcon,
   BotIcon,
   SearchIcon,
@@ -1501,6 +1502,71 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [deleteProject],
   );
 
+  const archiveProjectThreads = useCallback(async () => {
+    const entries = projectThreads.flatMap((thread) => {
+      if (thread.archivedAt !== null) return [];
+      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+      return [{ threadKey: scopedThreadKey(threadRef), threadRef, thread }];
+    });
+    if (entries.length === 0) {
+      toastManager.add({
+        type: "info",
+        title: "No threads to archive",
+        description: `Every thread in ${project.displayName} is already archived.`,
+      });
+      return;
+    }
+
+    const runningCount = entries.filter(
+      ({ thread }) => thread.session?.status === "running" && thread.session.activeTurnId != null,
+    ).length;
+    if (runningCount > 0) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Project has active threads",
+          description: `Wait for or interrupt ${runningCount} active thread${runningCount === 1 ? "" : "s"} before archiving this project.`,
+        }),
+      );
+      return;
+    }
+
+    const api = readLocalApi();
+    if (!api) return;
+    if (appSettingsConfirmThreadArchive) {
+      const confirmed = await api.dialogs.confirm(
+        `Archive ${entries.length} thread${entries.length === 1 ? "" : "s"} in "${project.displayName}"?`,
+      );
+      if (!confirmed) return;
+    }
+
+    const outcome = await archiveSelectedThreadEntries({
+      entries,
+      archive: ({ threadRef }, onArchived) => archiveThread(threadRef, { onArchived }),
+    });
+    for (const failure of outcome.followupFailures) {
+      if (isAtomCommandInterrupted(failure)) continue;
+      const error = squashAtomCommandFailure(failure);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Thread archived, but navigation failed",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+    if (outcome.mutationFailure && !isAtomCommandInterrupted(outcome.mutationFailure)) {
+      const error = squashAtomCommandFailure(outcome.mutationFailure);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to archive project threads",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  }, [appSettingsConfirmThreadArchive, archiveThread, project.displayName, projectThreads]);
+
   const handleRemoveProject = useCallback(
     async (member: SidebarProjectGroupMember) => {
       const api = readLocalApi();
@@ -1630,10 +1696,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [memberThreadCountByPhysicalKey, removeProject],
   );
 
-  const handleProjectButtonContextMenu = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      suppressProjectClickForContextMenuRef.current = true;
+  const showProjectActions = useCallback(
+    (position: { x: number; y: number }) => {
       void (async () => {
         const api = readLocalApi();
         if (!api) return;
@@ -1708,34 +1772,65 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         const clicked = await api.contextMenu.show(
           [
             buildTargetedItem("rename", "Rename"),
+            {
+              id: "archive-threads",
+              label: `Archive threads (${visibleProjectThreads.length})`,
+              disabled:
+                visibleProjectThreads.length === 0 ||
+                visibleProjectThreads.some(
+                  (thread) =>
+                    thread.session?.status === "running" && thread.session.activeTurnId != null,
+                ),
+            },
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
-            buildTargetedItem("delete", "Remove", {
+            buildTargetedItem("delete", "Delete folder", {
               destructive: true,
             }),
           ],
-          {
-            x: event.clientX,
-            y: event.clientY,
-          },
+          position,
         );
 
         if (!clicked) {
           return;
         }
 
+        if (clicked === "archive-threads") {
+          await archiveProjectThreads();
+          return;
+        }
         await actionHandlers.get(clicked)?.();
       })();
     },
     [
+      archiveProjectThreads,
       copyPathToClipboard,
       handleRemoveProject,
       openProjectGroupingDialog,
       openProjectRenameDialog,
       project.groupedProjectCount,
       project.memberProjects,
-      suppressProjectClickForContextMenuRef,
+      visibleProjectThreads,
     ],
+  );
+
+  const handleProjectButtonContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      suppressProjectClickForContextMenuRef.current = true;
+      showProjectActions({ x: event.clientX, y: event.clientY });
+    },
+    [showProjectActions, suppressProjectClickForContextMenuRef],
+  );
+
+  const handleProjectActionsClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const bounds = event.currentTarget.getBoundingClientRect();
+      showProjectActions({ x: bounds.right, y: bounds.bottom });
+    },
+    [showProjectActions],
   );
 
   const navigateToThread = useCallback(
@@ -2275,7 +2370,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       <div className="group/project-header relative">
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
-          className={`pr-8 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground max-sm:pr-14 ${
+          className={`pr-14 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
@@ -2359,10 +2454,26 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             </TooltipPopup>
           </Tooltip>
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+        <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 flex -translate-y-1/2 items-center opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`Project actions for ${project.displayName}`}
+                  data-testid="project-actions-button"
+                  className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                  onClick={handleProjectActionsClick}
+                >
+                  <EllipsisIcon className="size-3.5" />
+                </button>
+              }
+            />
+            <TooltipPopup side="top">Project actions</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
                 <button
                   type="button"
                   aria-label={`Create new thread in ${project.displayName}`}
@@ -2372,13 +2483,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 >
                   <SquarePenIcon className="size-3.5" />
                 </button>
-              </div>
-            }
-          />
-          <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
-          </TooltipPopup>
-        </Tooltip>
+              }
+            />
+            <TooltipPopup side="top">
+              {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
       </div>
 
       <SidebarProjectThreadList

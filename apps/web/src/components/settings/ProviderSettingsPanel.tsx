@@ -593,8 +593,8 @@ export function EnvironmentProviderSettings({
     () => collectProviderUpdateCandidates(serverProviders),
     [serverProviders],
   );
-  const providerUpdateCandidateByInstanceId = useMemo(
-    () => new Map(providerUpdateCandidates.map((candidate) => [candidate.instanceId, candidate])),
+  const providerUpdateCandidateByDriver = useMemo(
+    () => new Map(providerUpdateCandidates.map((candidate) => [candidate.driver, candidate])),
     [providerUpdateCandidates],
   );
   const visibleProviderSettings = PROVIDER_SETTINGS.filter(
@@ -946,9 +946,10 @@ export function EnvironmentProviderSettings({
     const liveProvider = serverProviders.find(
       (candidate) => candidate.instanceId === row.instanceId,
     );
-    const updateCandidate = liveProvider
-      ? providerUpdateCandidateByInstanceId.get(liveProvider.instanceId)
-      : undefined;
+    const driverUpdateCandidate = providerUpdateCandidateByDriver.get(row.driver);
+    const isRuntimeUpdateOwner =
+      row.driver !== "codex" || row.instanceId === primaryCodexInstanceId;
+    const updateCandidate = isRuntimeUpdateOwner ? driverUpdateCandidate : undefined;
     const isDriverUpdateRunning =
       updateCandidate !== undefined &&
       (updatingProviderDrivers.has(updateCandidate.driver) ||
@@ -1035,6 +1036,7 @@ export function EnvironmentProviderSettings({
             : undefined
         }
         isUpdating={mode === "editor" && showInlineUpdateButton ? isDriverUpdateRunning : undefined}
+        showRuntimeUpdate={isRuntimeUpdateOwner}
         onLogin={
           mode === "editor" && row.driver === "codex"
             ? () => void startCodexLogin(row.instanceId)

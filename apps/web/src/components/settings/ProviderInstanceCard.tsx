@@ -369,6 +369,8 @@ interface ProviderInstanceCardProps {
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
   readonly onRunUpdate?: (() => void) | undefined;
   readonly isUpdating?: boolean | undefined;
+  /** Only one account should expose an update for a driver-level shared binary. */
+  readonly showRuntimeUpdate?: boolean | undefined;
   readonly onLogin?: (() => void) | undefined;
   readonly isLoggingIn?: boolean | undefined;
   readonly isPrimaryAccount?: boolean | undefined;
@@ -414,6 +416,7 @@ export function ProviderInstanceCard({
   onModelOrderChange,
   onRunUpdate,
   isUpdating = false,
+  showRuntimeUpdate = true,
   onLogin,
   isLoggingIn = false,
   isPrimaryAccount = false,
@@ -680,7 +683,7 @@ export function ProviderInstanceCard({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {titleHeadNode}
             {versionCodeNode}
-            {versionAdvisory ? (
+            {versionAdvisory && showRuntimeUpdate ? (
               <Popover>
                 <PopoverTrigger
                   render={
@@ -720,6 +723,11 @@ export function ProviderInstanceCard({
                       >
                         {versionAdvisory.detail}
                       </p>
+                      {instance.driver === "codex" ? (
+                        <p className="text-xs leading-snug text-muted-foreground">
+                          This updates the shared Codex binary used by every account on this device.
+                        </p>
+                      ) : null}
                     </div>
                     {onRunUpdate ? (
                       <Button

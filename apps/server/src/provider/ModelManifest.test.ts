@@ -23,6 +23,7 @@ describe("isLegacyModel (bundled manifest)", () => {
   it("keeps current Codex models out of legacy models", () => {
     assert.deepStrictEqual(
       [
+        "gpt-6-astra",
         "gpt-5.6-luna",
         "gpt-5.6-terra",
         "gpt-5.6-sol",
@@ -31,6 +32,7 @@ describe("isLegacyModel (bundled manifest)", () => {
         "gpt-5.4",
       ].map((model) => [model, isLegacyModel(BUNDLED_MODEL_MANIFEST, CODEX, model)]),
       [
+        ["gpt-6-astra", false],
         ["gpt-5.6-luna", false],
         ["gpt-5.6-terra", false],
         ["gpt-5.6-sol", false],
@@ -95,7 +97,7 @@ describe("classifyModels", () => {
 });
 
 const REMOTE_MANIFEST: ModelManifestData = {
-  version: 1,
+  version: 2,
   currentModels: {
     codex: ["gpt-5.4"],
     claudeAgent: ["claude-fable-5"],
