@@ -19,6 +19,11 @@ const Confidence = Schema.Number.check(Schema.isFinite()).pipe(
 export const ObserverAssessment = Schema.Struct({
   verdict: Schema.Literals(["aligned", "watch", "deviation", "criticalDeviation"]),
   confidence: Confidence,
+  interventionBasis: Schema.Struct({
+    actualViolationObserved: Schema.Boolean,
+    materialRiskObserved: Schema.Boolean,
+    repairStillNeeded: Schema.Boolean,
+  }),
   contractClauses: Schema.Array(Schema.String),
   evidence: Schema.Array(Schema.String),
   risk: Schema.NullOr(Schema.String),

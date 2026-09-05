@@ -385,6 +385,11 @@ it("uses the configured harness cadence and confidence threshold", () => {
   const assessment = {
     verdict: "deviation",
     confidence: 0.9,
+    interventionBasis: {
+      actualViolationObserved: true,
+      materialRiskObserved: true,
+      repairStillNeeded: true,
+    },
     contractClauses: ["impactThreshold"],
     evidence: ["The principal switched to an excluded branch."],
     risk: null,
@@ -409,6 +414,11 @@ it("steers only for a confident deviation with a concrete correction", () => {
   const assessment = {
     verdict: "deviation",
     confidence: 0.9,
+    interventionBasis: {
+      actualViolationObserved: true,
+      materialRiskObserved: true,
+      repairStillNeeded: true,
+    },
     contractClauses: ["impactThreshold"],
     evidence: ["The principal switched to an availability-only branch."],
     risk: null,
@@ -417,6 +427,24 @@ it("steers only for a confident deviation with a concrete correction", () => {
   assert.isTrue(shouldObserverIntervene(assessment));
   assert.isFalse(shouldObserverIntervene({ ...assessment, verdict: "watch" }));
   assert.isFalse(shouldObserverIntervene({ ...assessment, confidence: 0.79 }));
+  assert.isFalse(
+    shouldObserverIntervene({
+      ...assessment,
+      interventionBasis: { ...assessment.interventionBasis, actualViolationObserved: false },
+    }),
+  );
+  assert.isFalse(
+    shouldObserverIntervene({
+      ...assessment,
+      interventionBasis: { ...assessment.interventionBasis, materialRiskObserved: false },
+    }),
+  );
+  assert.isFalse(
+    shouldObserverIntervene({
+      ...assessment,
+      interventionBasis: { ...assessment.interventionBasis, repairStillNeeded: false },
+    }),
+  );
   assert.isFalse(shouldObserverIntervene({ ...assessment, evidence: [] }));
   assert.isFalse(shouldObserverIntervene({ ...assessment, recommendedSteering: " " }));
 });

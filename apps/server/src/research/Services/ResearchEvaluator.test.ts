@@ -23,6 +23,11 @@ it("emits provider-compatible confidence schemas and preserves range validation"
   const observer = {
     verdict: "aligned",
     confidence: 0.5,
+    interventionBasis: {
+      actualViolationObserved: false,
+      materialRiskObserved: false,
+      repairStillNeeded: false,
+    },
     contractClauses: [],
     evidence: [],
     risk: null,
