@@ -70,6 +70,22 @@ function payloadString(payload: unknown, key: string): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function canonicalCommand(payload: unknown): string | null {
+  if (!Predicate.isObject(payload) || Array.isArray(payload)) return null;
+  const data = payload.data;
+  if (Predicate.isObject(data) && !Array.isArray(data)) {
+    const item = data.item;
+    if (Predicate.isObject(item) && !Array.isArray(item) && Array.isArray(item.commandActions)) {
+      const commands = item.commandActions.flatMap((action) => {
+        const command = payloadString(action, "command");
+        return command ? [command] : [];
+      });
+      if (commands.length > 0) return commands.join("; ");
+    }
+  }
+  return payloadString(payload, "command") ?? payloadString(payload, "detail");
+}
+
 export function buildObserverCommandAudit(
   assistantMessages: ReadonlyArray<{
     readonly id?: string;
@@ -149,9 +165,7 @@ export function buildObserverCommandAudit(
       ) {
         return [];
       }
-      const command =
-        payloadString(activity.payload, "command") ??
-        payloadString(activity.payload, deniedActivity ? "command" : "detail");
+      const command = canonicalCommand(activity.payload);
       if (!command) return [];
       const commandToolCallId = toolCallId(activity);
       if (seenToolCalls.has(commandToolCallId)) return [];

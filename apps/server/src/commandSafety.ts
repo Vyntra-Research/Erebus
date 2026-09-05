@@ -141,9 +141,27 @@ function resolveFromCwd(candidate: string, cwd: string): string {
   );
 }
 
+function assignedPowerShellString(command: string, variable: string): string | null {
+  const match = /^\$([A-Za-z_][A-Za-z0-9_]*)$/u.exec(variable);
+  const name = match?.[1];
+  if (!name) return null;
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const assignments = [
+    ...command.matchAll(
+      new RegExp(
+        `\\$${escapedName}\\s*=\\s*(?:"([^"\\r\\n]+)"|'([^'\\r\\n]+)')(?=\\s*(?:;|$))`,
+        "giu",
+      ),
+    ),
+  ].map((assignment) => assignment[1] ?? assignment[2] ?? "");
+  const unique = [...new Set(assignments.filter((assignment) => assignment.length > 0))];
+  return unique.length === 1 ? (unique[0] ?? null) : null;
+}
+
 function explicitPowerShellPath(command: string): string | null {
   const match = command.match(/-(?:LiteralPath|Path)\s+(?:"([^"]+)"|'([^']+)'|([^\s;|]+))/iu);
-  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+  const explicit = match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+  return explicit ? (assignedPowerShellString(command, explicit) ?? explicit) : null;
 }
 
 function containsUnresolvedOrBroadPath(value: string): boolean {

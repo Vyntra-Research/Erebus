@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.6 - 2026-09-04
+
+### Changed
+
+- Allow bounded recursive searches across relevant, versioned compiled source without treating the operation as a campaign-level safety breach.
+- Require the Observer to confirm that a command audit matches the real command and target before steering or pausing research.
+
+### Fixed
+
+- Resolve simple PowerShell path variables assigned in the same command before classifying recursive searches.
+- Audit the agent's canonical command instead of the absolute PowerShell launcher used to run it.
+
 ## 0.3.5 - 2026-09-04
 
 ### Changed

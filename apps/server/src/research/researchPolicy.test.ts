@@ -71,6 +71,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /docker exec belong to that named container/);
   assert.match(OBSERVER_POLICY, /do not steer/);
   assert.match(OBSERVER_POLICY, /do not flag it merely because it is recursive/);
+  assert.match(OBSERVER_POLICY, /generated or compiled subtree.*is not automatically unsafe/);
+  assert.match(OBSERVER_POLICY, /never justifies pausing the campaign/);
   assert.match(
     EREBUS_PRINCIPAL_INSTRUCTIONS,
     /recursive search.*explicit source subtree is allowed/,
