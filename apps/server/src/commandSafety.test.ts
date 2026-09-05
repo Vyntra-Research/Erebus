@@ -43,6 +43,18 @@ describe("evaluateCommandSafety", () => {
         ),
       ),
     ).toEqual({ decision: "allow" });
+    expect(
+      evaluateCommandSafety(
+        context(
+          "$src='C:\\Users\\researcher\\other-repo\\packages\\app\\src'; Get-ChildItem -LiteralPath $src -Recurse -File | Select-String -Pattern handler",
+        ),
+      ),
+    ).toEqual({ decision: "allow" });
+    expect(
+      evaluateCommandSafety(
+        context("$src='C:\\Users\\researcher'; Get-ChildItem -LiteralPath $src -Recurse -File"),
+      ),
+    ).toMatchObject({ decision: "block", code: "broad-recursive-search" });
   });
 
   it("does not mistake an absolute shell executable for a mutation target", () => {

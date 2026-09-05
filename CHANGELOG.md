@@ -5,7 +5,7 @@
 ### Changed
 
 - Treat the workspace as a safety boundary, not an instruction to create a lab. Agents now reuse the existing target and campaign environment unless a concrete writable test needs isolation or persistent evidence.
-- Allow bounded recursive source searches while continuing to block system-wide roots, dependency trees, and followed links or junctions.
+- Allow bounded recursive source searches, including relevant compiled source, while continuing to block system-wide roots, dependency trees, and followed links or junctions.
 - Tell the Observer not to flag a bounded test directory or a task-owned container cleanup by itself, while retaining review of redundant copies, unsafe placement, unbounded resource use, and broken provenance.
 
 ### Fixed

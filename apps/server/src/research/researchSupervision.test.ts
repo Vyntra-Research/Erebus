@@ -240,6 +240,44 @@ it("gives Observer a bounded redacted command audit for the monitored turns", ()
   assert.isFalse(audit.entries[0]?.command.includes("hidden") ?? true);
 });
 
+it("classifies the canonical command instead of its absolute shell launcher", () => {
+  const audit = buildObserverCommandAudit(
+    [{ turnId: "turn-1" }],
+    [
+      {
+        id: "tool-1",
+        kind: "tool.started",
+        tone: "tool",
+        summary: "Ran command started",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "call-1",
+          command:
+            '"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "$src=\'C:\\workspace\\src\'; Get-ChildItem -LiteralPath $src -Recurse -File"',
+          data: {
+            item: {
+              commandActions: [
+                {
+                  command:
+                    "$src='C:\\Users\\researcher\\work\\target\\src'; Get-ChildItem -LiteralPath $src -Recurse -File",
+                  type: "unknown",
+                },
+              ],
+            },
+          },
+        },
+        turnId: "turn-1",
+        createdAt: contract.createdAt,
+      },
+    ] as never,
+    "C:\\Users\\researcher\\work\\target",
+  );
+
+  assert.equal(audit.entries[0]?.outcome, "executed");
+  assert.isFalse(audit.entries[0]?.command.includes("WindowsPowerShell") ?? true);
+  assert.match(audit.entries[0]?.command ?? "", /Get-ChildItem/);
+});
+
 it("records a denied command as blocked even when denial follows tool start", () => {
   const audit = buildObserverCommandAudit(
     [{ turnId: "turn-parent" }],
