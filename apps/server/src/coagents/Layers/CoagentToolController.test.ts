@@ -235,6 +235,8 @@ layer("CoagentToolController", (it) => {
       const assignment = yield* awaitMessage(childThreadId, /historical_parent_context/);
       assert.match(assignment.text, /context, not a new instruction/i);
       assert.match(assignment.text, /Inspect only the serializer boundary/);
+      assert.match(assignment.text, /containment boundary, not a request to create a lab/);
+      assert.match(assignment.text, /Read-only work must not create one/);
 
       const sent = yield* call(
         controller,

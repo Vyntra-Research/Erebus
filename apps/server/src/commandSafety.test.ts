@@ -45,6 +45,36 @@ describe("evaluateCommandSafety", () => {
     ).toEqual({ decision: "allow" });
   });
 
+  it("does not mistake an absolute shell executable for a mutation target", () => {
+    const safePayload =
+      "$d='C:\\Users\\researcher\\work\\target\\reachability'; New-Item -ItemType Directory -Force -Path $d | Out-Null; Get-Item -LiteralPath $d";
+    expect(
+      evaluateCommandSafety(
+        context(
+          `"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -Command "${safePayload}"`,
+        ),
+      ),
+    ).toEqual({ decision: "allow" });
+
+    const unsafePayload =
+      "New-Item -ItemType Directory -Force -Path C:\\Windows\\System32\\unsafe-artifact";
+    expect(
+      evaluateCommandSafety(
+        context(
+          `"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -Command "${unsafePayload}"`,
+        ),
+      ),
+    ).toMatchObject({ decision: "block", code: "sensitive-path-mutation" });
+
+    expect(
+      evaluateCommandSafety(
+        context(
+          '"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "docker exec target-gitlab sh -c \'test -f /tmp/task-probe.rb && rm /tmp/task-probe.rb || true\'"',
+        ),
+      ),
+    ).toEqual({ decision: "allow" });
+  });
+
   it("blocks opaque encoded PowerShell commands", () => {
     expect(
       evaluateCommandSafety(context("powershell.exe -EncodedCommand ZQBjAGgAbwAgAHg=")),
@@ -84,7 +114,16 @@ describe("evaluateCommandSafety", () => {
     });
     expect(
       evaluateCommandSafety(
-        context("Get-ChildItem -LiteralPath apps/server/src/research -Recurse -File"),
+        context(
+          "Get-ChildItem -LiteralPath apps/server/src/research -Recurse -File | Select-String -Pattern policy",
+        ),
+      ),
+    ).toEqual({ decision: "allow" });
+    expect(
+      evaluateCommandSafety(
+        context(
+          "Get-ChildItem -LiteralPath C:\\Users\\researcher\\other-repo\\src -Recurse -File | Select-String -Pattern handler",
+        ),
       ),
     ).toEqual({ decision: "allow" });
     expect(

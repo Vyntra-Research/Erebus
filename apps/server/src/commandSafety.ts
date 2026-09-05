@@ -162,15 +162,23 @@ function isDriveOrFilesystemRoot(value: string): boolean {
   return normalized === normalizedPath(pathApi(value).parse(value).root || "/");
 }
 
+function withoutLeadingAbsoluteExecutable(command: string): string {
+  return command.replace(
+    /^\s*(?:&\s*)?(?:"(?:[A-Za-z]:[\\/]|\/(?!\/))[^"\r\n]+"|'(?:[A-Za-z]:[\\/]|\/(?!\/))[^'\r\n]+'|(?:[A-Za-z]:[\\/]|\/(?!\/))[^\s;|&"']+)(?=\s|$)/u,
+    "",
+  );
+}
+
 function commandAbsolutePaths(command: string): ReadonlyArray<string> {
+  const argumentsAndPayload = withoutLeadingAbsoluteExecutable(command);
   const paths = new Set<string>();
-  for (const match of command.matchAll(/["']([A-Za-z]:[\\/][^"']+)["']/gu)) {
+  for (const match of argumentsAndPayload.matchAll(/["']([A-Za-z]:[\\/][^"']+)["']/gu)) {
     if (match[1]) paths.add(match[1]);
   }
-  for (const match of command.matchAll(/(?:^|\s)([A-Za-z]:[\\/][^\s;|&"']+)/gu)) {
+  for (const match of argumentsAndPayload.matchAll(/(?:^|\s)([A-Za-z]:[\\/][^\s;|&"']+)/gu)) {
     if (match[1]) paths.add(match[1]);
   }
-  for (const match of command.matchAll(/(?:^|\s|["'])(\/(?!\/)[^\s;|&"']+)/gu)) {
+  for (const match of argumentsAndPayload.matchAll(/(?:^|\s|["'])(\/(?!\/)[^\s;|&"']+)/gu)) {
     if (match[1] && !/^\/[A-Za-z](?::\d+)?$/u.test(match[1])) paths.add(match[1]);
   }
   return [...paths];
@@ -486,7 +494,7 @@ function evaluateCommandSafetyAtDepth(
       return block(
         "sensitive-path-mutation",
         "The command mutates a protected host path, filesystem root, or a loose file directly in the user-home root.",
-        "Use the assigned workspace as the host lab, use system temp for disposable scratch data, or target one explicitly scoped external project path.",
+        "Use the assigned workspace as the containment boundary, use system temp for disposable scratch data, or target one explicitly scoped external project path.",
       );
     }
   }

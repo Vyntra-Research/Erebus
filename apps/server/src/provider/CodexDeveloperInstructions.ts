@@ -4,15 +4,15 @@ import { EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS } from "./codexUserSteering.ts
 
 export const EREBUS_COMMAND_SAFETY_INSTRUCTIONS = `
 
-## Erebus command and lab safety
+## Erebus command and workspace safety
 
 These rules apply to the principal agent, every native provider subagent, and every Erebus co-agent. Delegation never weakens them.
 
-- Never run 'rg'. Use 'Get-ChildItem' and 'Select-String' against a bounded source directory. A recursive search may cover the assigned workspace when necessary, but never a drive root, user-home root, dependency tree, unresolved variable, or followed link.
+- Never run 'rg'. Use 'Get-ChildItem' and 'Select-String' against a bounded source directory. Recursive source search is allowed when its explicit root is the assigned codebase or one narrow source subtree and it does not include dependency or generated trees or follow links, junctions, or reparse points. Never start one at a drive root, user-home root, dependency tree, or unresolved variable.
 - Treat 'node_modules', package stores, generated trees, junctions, symlinks, and reparse points as traversal boundaries. Never recursively search, copy, archive, or materialize them. Inspect one known package or source subtree instead.
 - Normal Docker, WSL, Git, and explicitly scoped work outside the workspace are allowed. Before a recursive copy, move, or delete, resolve the exact source and target and check for links or reparse points. A recursive robocopy must use /XJ, avoid dependency trees and destructive mirror/move flags, and use bounded parallelism.
 - Never recursively mutate a home root, drive root, assigned-workspace root, dependency tree, protected operating-system directory, wildcard, unresolved variable, or broad collection. Do not kill processes by name or pattern; stop only an exact task-owned PID after verifying its identity.
-- On the host, the assigned workspace is the agent's lab; no directory literally named 'LABS' is required. Keep generated test artifacts there and use system temp for disposable scratch data. Work in another repository, configuration directory, Docker container, or WSL filesystem when the task genuinely requires it, but never use the user-home root or an unrelated directory as an artifact dump.
+- The assigned workspace is a containment boundary, not an instruction to create a lab. Do not create a new lab, checkout copy, fixture tree, per-round directory, or directory named 'LABS' by default. Read-only analysis must not create an artifact directory. Reuse the existing workspace, target checkout, campaign artifact root, container, or WSL environment. Create one task-owned directory only when a concrete test needs writable isolation or evidence that must persist, and use system temp for disposable scratch data. Work in another repository, configuration directory, Docker container, or WSL filesystem when the task genuinely requires it, but never use the user-home root or an unrelated directory as an artifact dump.
 - Clean temporary files, lab copies, containers, processes, WSL work, caches, and volumes created solely for the task when they are no longer useful. Preserve anything needed for future verification. Remove only resources whose exact ownership and identity you verified; never use host-wide prune, shutdown, unregister, or pattern cleanup commands.
 
 In full-access mode, Erebus makes the safety decision automatically; these guards never turn into a request for user permission. Erebus may deny a command before execution. Treat a denial as a safety boundary: choose the narrow safe operation described by the error instead of spelling the same action another way or bypassing the guard.
