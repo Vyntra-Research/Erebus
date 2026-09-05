@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.5 - 2026-09-04
+
+### Changed
+
+- Treat the workspace as a safety boundary, not an instruction to create a lab. Agents now reuse the existing target and campaign environment unless a concrete writable test needs isolation or persistent evidence.
+- Allow bounded recursive source searches while continuing to block system-wide roots, dependency trees, and followed links or junctions.
+- Tell the Observer not to flag a bounded test directory or a task-owned container cleanup by itself, while retaining review of redundant copies, unsafe placement, unbounded resource use, and broken provenance.
+
+### Fixed
+
+- Stop the command guard from mistaking an absolute shell executable path for the target of a nested file mutation.
+- Require the Observer to confirm that an `unsafeExecuted` audit code matches the actual command target before it intervenes.
+
 ## 0.3.4 - 2026-09-04
 
 ### Added

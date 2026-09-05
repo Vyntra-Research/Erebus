@@ -57,12 +57,30 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /never add lab glue/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /contract\.target.*required plain string/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /supply every required field/);
+  assert.match(
+    EREBUS_PRINCIPAL_INSTRUCTIONS,
+    /containment boundary, not a request to create a lab/,
+  );
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /read-only work must not create one/i);
+  assert.match(OBSERVER_POLICY, /creating one bounded task-owned directory.*is not itself unsafe/);
+  assert.match(OBSERVER_POLICY, /leading shell executable.*is not the mutation target/);
+  assert.match(
+    OBSERVER_POLICY,
+    /unsafeExecuted outcome is high-priority audit evidence, not a conclusive breach/,
+  );
+  assert.match(OBSERVER_POLICY, /docker exec belong to that named container/);
+  assert.match(OBSERVER_POLICY, /do not steer/);
+  assert.match(OBSERVER_POLICY, /do not flag it merely because it is recursive/);
+  assert.match(
+    EREBUS_PRINCIPAL_INSTRUCTIONS,
+    /recursive search.*explicit source subtree is allowed/,
+  );
 });
 
 it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 13);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 12);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 12);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 14);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 13);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 13);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);
