@@ -1,11 +1,23 @@
 # Changelog
 
+## 0.3.6 - 2026-09-04
+
+### Changed
+
+- Allow bounded recursive searches across relevant, versioned compiled source without treating the operation as a campaign-level safety breach.
+- Require the Observer to confirm that a command audit matches the real command and target before steering or pausing research.
+
+### Fixed
+
+- Resolve simple PowerShell path variables assigned in the same command before classifying recursive searches.
+- Audit the agent's canonical command instead of the absolute PowerShell launcher used to run it.
+
 ## 0.3.5 - 2026-09-04
 
 ### Changed
 
 - Treat the workspace as a safety boundary, not an instruction to create a lab. Agents now reuse the existing target and campaign environment unless a concrete writable test needs isolation or persistent evidence.
-- Allow bounded recursive source searches, including relevant compiled source, while continuing to block system-wide roots, dependency trees, and followed links or junctions.
+- Allow bounded recursive source searches while continuing to block system-wide roots, dependency trees, and followed links or junctions.
 - Tell the Observer not to flag a bounded test directory or a task-owned container cleanup by itself, while retaining review of redundant copies, unsafe placement, unbounded resource use, and broken provenance.
 
 ### Fixed
