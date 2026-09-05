@@ -27,4 +27,6 @@ it("instructs the principal to use durable research tools without activating ord
   assert.match(instructions, /Gates are laws/);
   assert.match(instructions, /contract attestation/);
   assert.match(instructions, /next highest-ROI move/);
+  assert.match(instructions, /advisory.*is intelligence, not dedupe evidence/i);
+  assert.match(instructions, /variant or incomplete-fix candidate/);
 });

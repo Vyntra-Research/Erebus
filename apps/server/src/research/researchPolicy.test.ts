@@ -46,10 +46,12 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /earlier tactical plans are durable research context, not binding/);
   assert.match(OBSERVER_POLICY, /Do not select the replacement branch/);
   assert.match(OBSERVER_POLICY, /Do not infer that a wider sink.*is exhausted/);
+  assert.match(OBSERVER_POLICY, /Do not treat a CVE or advisory match as duplicate proof/);
   assert.match(JUDGE_POLICY, /Your job is not to help the finding pass/);
   assert.match(JUDGE_POLICY, /maximum impact currently proved/);
   assert.match(JUDGE_POLICY, /CVSS is an ancillary classification, never a validity gate/);
   assert.match(JUDGE_POLICY, /finding record under findings\/ and its working PoC under pocs\//);
+  assert.match(JUDGE_POLICY, /advisory.*is not duplicate proof by itself/i);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /A finding stated in ordinary prose is not approved/);
   assert.match(
     EREBUS_PRINCIPAL_INSTRUCTIONS,
@@ -90,9 +92,9 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 });
 
 it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 15);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 15);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 15);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 16);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 16);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 16);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

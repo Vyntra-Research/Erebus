@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 - 2026-09-05
+
+### Added
+
+- Add a project actions menu to the sidebar with rename, thread archive, grouping, path copy, and folder removal actions.
+
+### Changed
+
+- Treat CVEs and advisories as research intelligence rather than duplicate proof without an exact mechanism and fix-boundary match.
+- Show Codex runtime updates once per shared binary instead of once per account.
+
+### Fixed
+
+- Keep GPT-6 Astra in the current model list.
+
 ## 0.3.8 - 2026-09-05
 
 ### Fixed

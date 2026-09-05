@@ -129,7 +129,7 @@ const findingInputSchema = objectSchema(
     ),
     duplicateCheck: described(
       nonEmptyStringSchema,
-      "Required summary of the Proteus and local findings/REPORTS duplicate check.",
+      "Required summary of the Proteus and local findings/REPORTS duplicate check. A CVE, advisory, changelog entry, or public patch is intelligence, not duplicate proof by itself; any duplicate claim must match the exact root cause, reachable mechanism, security boundary, affected version or deployment, and fix boundary.",
     ),
     gateClaims: {
       type: "array",

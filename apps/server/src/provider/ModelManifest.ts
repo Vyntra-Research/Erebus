@@ -43,13 +43,14 @@ const MANIFEST_RETRY_MS = 5 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 10_000;
 
 /**
- * `version` gates breaking schema changes: a build only accepts remote
- * manifests whose version it understands, and keeps its bundled copy
- * otherwise. `currentModels` is keyed by driver kind; kinds absent from the
- * map have no legacy concept and their models are left unflagged.
+ * `version` gates schema and classification revisions: a build only accepts
+ * remote manifests whose version it understands, and keeps its bundled copy
+ * otherwise. Increment it when a shipped classification must invalidate an
+ * older disk cache. `currentModels` is keyed by driver kind; kinds absent from
+ * the map have no legacy concept and their models are left unflagged.
  */
 const ModelManifestSchema = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
   currentModels: Schema.Record(Schema.String, Schema.Array(Schema.String)),
 });
 export type ModelManifestData = typeof ModelManifestSchema.Type;
