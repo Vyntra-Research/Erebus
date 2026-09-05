@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.8 - 2026-09-05
+
+### Fixed
+
+- Suppress Observer intervention when an operation is only hypothetically risky, remains bounded, or has already been repaired.
+- Require direct evidence of an actual violation, material risk, and a still-needed repair before delivering an Observer advisory.
+
 ## 0.3.7 - 2026-09-05
 
 ### Changed

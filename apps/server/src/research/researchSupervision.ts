@@ -381,6 +381,9 @@ export function shouldObserverIntervene(
   return (
     (assessment.verdict === "deviation" || assessment.verdict === "criticalDeviation") &&
     assessment.confidence >= observerPolicy.interventionConfidence &&
+    assessment.interventionBasis.actualViolationObserved &&
+    assessment.interventionBasis.materialRiskObserved &&
+    assessment.interventionBasis.repairStillNeeded &&
     assessment.contractClauses.some((clause) => clause.trim().length > 0) &&
     assessment.evidence.some((evidence) => evidence.trim().length > 0) &&
     Boolean(assessment.recommendedSteering?.trim())

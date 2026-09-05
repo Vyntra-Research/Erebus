@@ -512,6 +512,11 @@ const makeResearchSupervisor = Effect.gen(function* () {
         : {
             verdict: "deviation" as const,
             confidence: 1,
+            interventionBasis: {
+              actualViolationObserved: true,
+              materialRiskObserved: true,
+              repairStillNeeded: true,
+            },
             contractClauses: [
               "G13: Evidence must support the exact impact without speculative or inconsistent claims.",
             ],

@@ -37,6 +37,11 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /Never address the principal in imperative voice/);
   assert.match(OBSERVER_POLICY, /The active contract or user instruction is the authority/);
   assert.match(OBSERVER_POLICY, /Never issue a stop, pause, resume, or reconciliation command/);
+  assert.match(OBSERVER_POLICY, /Possibility is not observation/);
+  assert.match(OBSERVER_POLICY, /Repetition does not make a safe, bounded action unsafe/);
+  assert.match(OBSERVER_POLICY, /merely could enter its versioned src\/compiled subtree/);
+  assert.match(OBSERVER_POLICY, /actually started at a drive or user-home root/);
+  assert.match(OBSERVER_POLICY, /If any element is missing, use aligned or watch/);
   assert.match(OBSERVER_POLICY, /Cost, elapsed time.*are not evidence of contractual deviation/);
   assert.match(OBSERVER_POLICY, /earlier tactical plans are durable research context, not binding/);
   assert.match(OBSERVER_POLICY, /Do not select the replacement branch/);
@@ -86,8 +91,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 
 it("records a new policy revision and digest for persisted evaluations", () => {
   assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 15);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 14);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 14);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 15);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 15);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);
