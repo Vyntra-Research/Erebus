@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 - 2026-09-05
+
+### Fixed
+
+- Keep the project actions menu visible in the sidebar.
+- Refresh every Codex account after updating the shared runtime and show one consistent runtime version across accounts.
+
 ## 0.4.0 - 2026-09-05
 
 ### Added

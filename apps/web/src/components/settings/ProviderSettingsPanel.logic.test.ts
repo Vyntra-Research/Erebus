@@ -1,4 +1,10 @@
-import { AuthOrchestrationOperateScope, EnvironmentId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  EnvironmentId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -7,6 +13,7 @@ import {
   resolvePrimaryOperateAccess,
   resolveRemoteOperateAccess,
   resolveSelectedProviderEnvironmentId,
+  withSharedCodexRuntimePresentation,
 } from "./ProviderSettingsPanel.logic";
 
 const primaryId = EnvironmentId.make("primary");
@@ -18,6 +25,58 @@ const environments = [
   { environmentId: relayId, label: "Alpha Relay" },
   { environmentId: primaryId, label: "This device" },
 ] as const;
+
+function providerSnapshot(input: {
+  readonly instanceId: string;
+  readonly driver?: string;
+  readonly version: string;
+  readonly checkedAt: string;
+}): ServerProvider {
+  return {
+    instanceId: ProviderInstanceId.make(input.instanceId),
+    driver: ProviderDriverKind.make(input.driver ?? "codex"),
+    enabled: true,
+    installed: true,
+    version: input.version,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: input.checkedAt,
+    models: [],
+    slashCommands: [],
+    skills: [],
+  };
+}
+
+describe("shared Codex runtime presentation", () => {
+  it("shows the primary account runtime version on every Codex account", () => {
+    const primary = providerSnapshot({
+      instanceId: "codex",
+      version: "0.153.4",
+      checkedAt: "2026-09-05T14:00:00.000Z",
+    });
+    const secondary = providerSnapshot({
+      instanceId: "codex_2",
+      version: "0.153.2",
+      checkedAt: "2026-09-05T13:00:00.000Z",
+    });
+
+    expect(
+      withSharedCodexRuntimePresentation(secondary, [primary, secondary], primary.instanceId)
+        ?.version,
+    ).toBe("0.153.4");
+  });
+
+  it("does not change another provider driver", () => {
+    const opencode = providerSnapshot({
+      instanceId: "opencode",
+      driver: "opencode",
+      version: "1.2.3",
+      checkedAt: "2026-09-05T14:00:00.000Z",
+    });
+
+    expect(withSharedCodexRuntimePresentation(opencode, [opencode], null)).toBe(opencode);
+  });
+});
 
 describe("provider environment selection", () => {
   it("sorts the primary environment first and the rest by label", () => {
