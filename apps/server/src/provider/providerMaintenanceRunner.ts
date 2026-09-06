@@ -30,6 +30,7 @@ const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
+const CODEX_DRIVER = ProviderDriverKind.make("codex");
 
 export interface ProviderMaintenanceCommandResult {
   readonly stdout: string;
@@ -224,7 +225,10 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       Effect.map((providers) => {
         const instanceIds: Array<ProviderInstanceId> = [];
         for (const candidate of providers) {
-          if (candidate.driver === provider && candidate.instanceId === instanceId) {
+          if (
+            candidate.driver === provider &&
+            (provider === CODEX_DRIVER || candidate.instanceId === instanceId)
+          ) {
             instanceIds.push(candidate.instanceId);
           }
         }
@@ -244,7 +248,9 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       ),
       Effect.flatMap((providers) => {
         const refreshedProviders = providers.filter(
-          (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
+          (candidate) =>
+            candidate.driver === provider &&
+            (provider === CODEX_DRIVER || candidate.instanceId === instanceId),
         );
         if (refreshedProviders.length === 0) {
           return Effect.succeed<VerifiedProviderRefresh>({

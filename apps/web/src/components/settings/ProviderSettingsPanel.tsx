@@ -114,6 +114,7 @@ import {
   resolvePrimaryOperateAccess,
   resolveRemoteOperateAccess,
   resolveSelectedProviderEnvironmentId,
+  withSharedCodexRuntimePresentation,
 } from "./ProviderSettingsPanel.logic";
 
 function withoutProviderInstanceKey<V>(
@@ -943,8 +944,13 @@ export function EnvironmentProviderSettings({
 
   const renderProviderInstance = (row: InstanceRow, mode: "list" | "editor") => {
     const driverOption = getDriverOption(row.driver);
-    const liveProvider = serverProviders.find(
+    const rawLiveProvider = serverProviders.find(
       (candidate) => candidate.instanceId === row.instanceId,
+    );
+    const liveProvider = withSharedCodexRuntimePresentation(
+      rawLiveProvider,
+      serverProviders,
+      primaryCodexInstanceId,
     );
     const driverUpdateCandidate = providerUpdateCandidateByDriver.get(row.driver);
     const isRuntimeUpdateOwner =

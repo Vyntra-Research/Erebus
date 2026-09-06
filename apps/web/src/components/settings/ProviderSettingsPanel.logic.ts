@@ -3,7 +3,46 @@ import {
   AuthOrchestrationOperateScope,
   type AuthSessionState,
   type EnvironmentId,
+  type ProviderInstanceId,
+  type ServerProvider,
 } from "@t3tools/contracts";
+
+const CODEX_DRIVER = "codex";
+
+/**
+ * Codex accounts isolate authentication, not the executable. Present the
+ * runtime metadata from one canonical account so a stale account probe cannot
+ * make the shared binary look like two separate installs.
+ */
+export function withSharedCodexRuntimePresentation(
+  provider: ServerProvider | undefined,
+  providers: ReadonlyArray<ServerProvider>,
+  primaryInstanceId: ProviderInstanceId | null,
+): ServerProvider | undefined {
+  if (!provider || provider.driver !== CODEX_DRIVER) return provider;
+
+  const codexProvidersWithVersion = providers.filter(
+    (candidate) => candidate.driver === CODEX_DRIVER && candidate.version !== null,
+  );
+  const sharedRuntime =
+    codexProvidersWithVersion.find((candidate) => candidate.instanceId === primaryInstanceId) ??
+    codexProvidersWithVersion.toSorted((left, right) =>
+      right.checkedAt.localeCompare(left.checkedAt),
+    )[0];
+  if (!sharedRuntime) return provider;
+
+  const { versionAdvisory: _providerVersionAdvisory, ...providerWithoutVersionAdvisory } = provider;
+  return sharedRuntime.versionAdvisory
+    ? {
+        ...providerWithoutVersionAdvisory,
+        version: sharedRuntime.version,
+        versionAdvisory: sharedRuntime.versionAdvisory,
+      }
+    : {
+        ...providerWithoutVersionAdvisory,
+        version: sharedRuntime.version,
+      };
+}
 
 export interface ProviderEnvironmentOptionLike {
   readonly environmentId: EnvironmentId;
