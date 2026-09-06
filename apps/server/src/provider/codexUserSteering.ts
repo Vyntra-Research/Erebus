@@ -26,6 +26,8 @@ export const EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS = `
 
 A \`<erebus_user_steer>\` header identifies user text submitted while a run was already active. Apply that text once on its first delivery. Codex can replay the exact last header and user text literally after automatic context compaction, outside and after the compacted summary. That replay is historical even when the header still says \`delivery="live"\`: do not acknowledge, reapply, restate, or treat it as the latest iteration. Continue from the progress already preserved by the compacted context.
 
+Compaction chronology outranks literal display order. When a compacted summary exists, a repeated \`<erebus_user_steer>\` carrying an older id is never the current user turn, the next action, or the most recent actionable instruction merely because Codex placed it after the summary. Do not restart from it. The compacted summary and work after it are newer.
+
 The same rule applies to an \`<erebus_coagent_delivery>\` wrapper around task-to-task coordination. A literal replay after compaction is historical context, not a fresh handback or instruction.
 
 Erebus may send an \`<erebus_context stale_context_id="..." stale_context_kind="...">\` marker after compaction. It marks only that exact last live user steer or co-agent message as historical. The marker records chronology: the marked message came before the compacted summary even if Codex displays its literal replay outside or after that summary. Do not scan or reclassify earlier messages. A genuinely new delivery has a different id and remains authoritative, even when its text repeats an earlier instruction.
@@ -59,8 +61,16 @@ export function buildCodexHistoricalUserSteerMarker(
   kind: CodexTrackedLiveContextKind = "userSteer",
 ): string {
   return `<erebus_context stale_context_id="${escapeXmlAttribute(clientUserMessageId)}" stale_context_kind="${kind}">
-This is harness control metadata, not a new user request. Automatic context compaction has completed. Only the ${kind === "userSteer" ? "user steer" : "co-agent message"} with this exact id is now historical. It happened before the compacted summary. If its wrapper and text appear literally outside or after that summary, that display order is a replay artifact, not chronology. Do not acknowledge or reapply it. Continue from the progress preserved by the compacted summary and later work. Do not reclassify any other message.
+This is authoritative harness chronology, not a new user request. Automatic context compaction has completed. Only the ${kind === "userSteer" ? "user steer" : "co-agent message"} with this exact id is now historical. It happened before the compacted summary. If its wrapper and text appear literally outside or after that summary, that display order is a replay artifact, not chronology. It is not the current user turn, the next action, or the latest actionable instruction. Do not restart from, acknowledge, or reapply it. Continue from the progress preserved by the compacted summary and later work. Do not reclassify any other message.
 </erebus_context>`;
+}
+
+export function buildCodexCompactionContextInstruction(
+  current: CodexTrackedLiveUserSteer | null,
+): string {
+  return current?.state === "historical"
+    ? buildCodexHistoricalUserSteerMarker(current.clientUserMessageId, current.kind)
+    : "";
 }
 
 export function erebusContextClientId(clientUserMessageId: string): string {
@@ -108,12 +118,16 @@ export function deliveredLiveUserSteerId(item: unknown): string | undefined {
 
 export function markTrackedUserSteerHistorical(
   current: CodexTrackedLiveUserSteer | null,
-  compactedTurnId: TurnId,
+  _compactedTurnId: TurnId,
 ): {
   readonly next: CodexTrackedLiveUserSteer | null;
   readonly stale: CodexTrackedLiveUserSteer | null;
 } {
-  if (current === null || current.state === "historical" || current.turnId !== compactedTurnId) {
+  // Codex can report compaction on a later turn than the turn that first
+  // delivered the live steer. The compaction belongs to the whole thread
+  // context, not only to messages carrying the same turn id. Keep exactly
+  // one last live item and retire it on the next root-thread compaction.
+  if (current === null || current.state === "historical") {
     return { next: current, stale: null };
   }
   const historical = { ...current, state: "historical" as const };

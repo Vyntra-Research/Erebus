@@ -49,6 +49,7 @@ import {
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import {
   buildCodexHistoricalUserSteerMarker,
+  buildCodexCompactionContextInstruction,
   buildCodexLiveCoagentMessagePrompt,
   buildCodexLiveUserSteerPrompt,
   contextCompactionTurnId,
@@ -1834,18 +1835,16 @@ export const makeCodexSessionRuntime = (
             payload.turn.status === "failed" && "error" in payload.turn && payload.turn.error
               ? payload.turn.error.message
               : undefined;
-          const completedTurnId = TurnId.make(payload.turn.id);
-          return Ref.update(lastLiveUserSteerRef, (current) =>
-            current?.turnId === completedTurnId ? null : current,
-          ).pipe(
-            Effect.andThen(
-              updateSession(sessionRef, {
-                status: payload.turn.status === "failed" ? "error" : "ready",
-                activeTurnId: undefined,
-                ...(lastError ? { lastError } : {}),
-              }),
-            ),
-          );
+          // Keep the exact last live steer across turn completion. Codex can
+          // compact the thread on a later turn and then replay that older
+          // user-role item after the summary. The root compaction handler
+          // retires it and keeps the hidden chronology marker available to
+          // later turns until a genuinely new live item replaces it.
+          return updateSession(sessionRef, {
+            status: payload.turn.status === "failed" ? "error" : "ready",
+            activeTurnId: undefined,
+            ...(lastError ? { lastError } : {}),
+          });
         }),
       ),
     );
@@ -2326,6 +2325,15 @@ export const makeCodexSessionRuntime = (
           const additionalDeveloperInstructions = options.getAdditionalDeveloperInstructions
             ? yield* options.getAdditionalDeveloperInstructions()
             : "";
+          const compactionContextInstruction = buildCodexCompactionContextInstruction(
+            yield* Ref.get(lastLiveUserSteerRef),
+          );
+          const turnDeveloperInstructions = [
+            additionalDeveloperInstructions,
+            compactionContextInstruction,
+          ]
+            .filter((value) => value.length > 0)
+            .join("\n\n");
           const isLiveUserSteer =
             input.delivery === "live-user-steer" &&
             input.clientUserMessageId !== undefined &&
@@ -2358,7 +2366,9 @@ export const makeCodexSessionRuntime = (
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.
             browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
-            ...(additionalDeveloperInstructions ? { additionalDeveloperInstructions } : {}),
+            ...(turnDeveloperInstructions
+              ? { additionalDeveloperInstructions: turnDeveloperInstructions }
+              : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

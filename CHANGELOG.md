@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2 - 2026-09-06
+
+### Fixed
+
+- Show project actions in the active sidebar and keep thread rows compact.
+- Preserve the exact last pre-compaction user steer as historical context without treating it as the latest request.
+- Keep the Observer silent for bounded reads of target-owned generated or compiled source unless current evidence proves material harm.
+
 ## 0.4.1 - 2026-09-05
 
 ### Fixed
