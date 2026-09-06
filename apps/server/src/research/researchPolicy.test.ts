@@ -39,7 +39,10 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /Never issue a stop, pause, resume, or reconciliation command/);
   assert.match(OBSERVER_POLICY, /Possibility is not observation/);
   assert.match(OBSERVER_POLICY, /Repetition does not make a safe, bounded action unsafe/);
-  assert.match(OBSERVER_POLICY, /merely could enter its versioned src\/compiled subtree/);
+  assert.match(
+    OBSERVER_POLICY,
+    /repeated bounded searches are rooted at packages\/next\/src and enter its versioned src\/compiled subtree/,
+  );
   assert.match(OBSERVER_POLICY, /actually started at a drive or user-home root/);
   assert.match(OBSERVER_POLICY, /If any element is missing, use aligned or watch/);
   assert.match(OBSERVER_POLICY, /Cost, elapsed time.*are not evidence of contractual deviation/);
@@ -83,6 +86,11 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /do not flag it merely because it is recursive/);
   assert.match(OBSERVER_POLICY, /generated or compiled subtree.*is not automatically unsafe/);
   assert.match(OBSERVER_POLICY, /never justifies pausing the campaign/);
+  assert.match(
+    OBSERVER_POLICY,
+    /Hard no-intervention rule:.*packages\/next\/src\/compiled.*recommendedSteering set to null/,
+  );
+  assert.match(OBSERVER_POLICY, /prior Observer advisories because advisories are not binding/);
   assert.match(OBSERVER_POLICY, /Observed deviation: .*Recommended repair:/);
   assert.notMatch(OBSERVER_POLICY, /you may require the principal to stop/i);
   assert.match(
@@ -93,8 +101,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 
 it("records a new policy revision and digest for persisted evaluations", () => {
   assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 16);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 16);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 16);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 17);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 17);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

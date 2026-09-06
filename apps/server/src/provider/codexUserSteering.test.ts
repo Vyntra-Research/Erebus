@@ -5,6 +5,7 @@ import { describe, it } from "vite-plus/test";
 
 import {
   buildCodexHistoricalUserSteerMarker,
+  buildCodexCompactionContextInstruction,
   buildCodexLiveCoagentMessagePrompt,
   buildCodexLiveUserSteerPrompt,
   contextCompactionTurnId,
@@ -35,6 +36,7 @@ describe("Codex user steering across compaction", () => {
     NodeAssert.match(marker, /stale_context_id="message-7"/);
     NodeAssert.match(marker, /stale_context_kind="userSteer"/);
     NodeAssert.match(marker, /Only the user steer with this exact id/);
+    NodeAssert.match(marker, /not the current user turn/);
     NodeAssert.match(marker, /Do not reclassify any other message/);
 
     const last = {
@@ -43,13 +45,20 @@ describe("Codex user steering across compaction", () => {
       kind: "userSteer" as const,
       state: "fresh" as const,
     };
-    const unrelatedCompaction = markTrackedUserSteerHistorical(last, TurnId.make("turn-6"));
-    NodeAssert.strictEqual(unrelatedCompaction.next, last);
-    NodeAssert.equal(unrelatedCompaction.stale, null);
+    const laterTurnCompaction = markTrackedUserSteerHistorical(last, TurnId.make("turn-8"));
+    NodeAssert.equal(laterTurnCompaction.next?.state, "historical");
+    NodeAssert.equal(laterTurnCompaction.stale?.clientUserMessageId, "message-7");
 
-    const matchingCompaction = markTrackedUserSteerHistorical(last, TurnId.make("turn-7"));
-    NodeAssert.equal(matchingCompaction.next?.state, "historical");
-    NodeAssert.equal(matchingCompaction.stale?.clientUserMessageId, "message-7");
+    const repeatedSignal = markTrackedUserSteerHistorical(
+      laterTurnCompaction.next,
+      TurnId.make("turn-8"),
+    );
+    NodeAssert.equal(repeatedSignal.stale, null);
+    NodeAssert.equal(buildCodexCompactionContextInstruction(last), "");
+    NodeAssert.match(
+      buildCodexCompactionContextInstruction(laterTurnCompaction.next),
+      /stale_context_id="message-7"/,
+    );
   });
 
   it("recognizes both Codex compaction signals and ignores unrelated items", () => {
