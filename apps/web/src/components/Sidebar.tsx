@@ -975,7 +975,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
-  const driverKind = providerEntry?.driverKind ?? null;
   const showInstanceBadge =
     providerEntry !== null &&
     shouldShowInstanceBadge(providerEntry, props.providerEntryByInstanceId.values());
@@ -4146,15 +4145,21 @@ export default function Sidebar() {
                           <span className="pointer-events-none absolute right-8 shrink-0 text-[10px] font-normal tabular-nums text-sidebar-muted-foreground/60">
                             {projectThreads.length}
                           </span>
-                          <button
-                            type="button"
-                            aria-label={`Project actions for ${project.displayName}`}
-                            title={`Project actions for ${project.displayName}`}
-                            onClick={(event) => void showProjectFolderMenu(event, project)}
-                            className="absolute right-1 inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                          >
-                            <EllipsisIcon aria-hidden className="size-4" />
-                          </button>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <button
+                                  type="button"
+                                  aria-label={`Project actions for ${project.displayName}`}
+                                  onClick={(event) => void showProjectFolderMenu(event, project)}
+                                  className="absolute right-1 inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                                >
+                                  <EllipsisIcon aria-hidden className="size-4" />
+                                </button>
+                              }
+                            />
+                            <TooltipPopup side="right">Project actions</TooltipPopup>
+                          </Tooltip>
                         </div>
                         {projectExpanded ? (
                           <ul
