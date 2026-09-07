@@ -9,6 +9,8 @@ import {
   RESEARCH_EVALUATOR_MODEL,
   RESEARCH_EVALUATOR_REASONING_EFFORT,
   RESEARCH_INTERNAL_POLICY,
+  RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS,
+  RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS,
   RESEARCH_OBSERVER_RUNTIME_POLICY,
   RESEARCH_SUPERVISOR_POLICY_VERSION,
 } from "./researchPolicy.ts";
@@ -55,6 +57,12 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(JUDGE_POLICY, /CVSS is an ancillary classification, never a validity gate/);
   assert.match(JUDGE_POLICY, /finding record under findings\/ and its working PoC under pocs\//);
   assert.match(JUDGE_POLICY, /advisory.*is not duplicate proof by itself/i);
+  assert.match(JUDGE_POLICY, /skeptical triager and an informed lay reviewer/);
+  assert.match(JUDGE_POLICY, /Never fill a gap with your own research/);
+  assert.match(JUDGE_POLICY, /bounded desk review.*not a new practical validation run/);
+  assert.match(JUDGE_POLICY, /hard wall-clock budget of 180 seconds/);
+  assert.match(JUDGE_POLICY, /reserve the final 30 seconds/);
+  assert.match(JUDGE_POLICY, /Missing evidence or explanation.*submission gap/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /A finding stated in ordinary prose is not approved/);
   assert.match(
     EREBUS_PRINCIPAL_INSTRUCTIONS,
@@ -101,8 +109,12 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 
 it("records a new policy revision and digest for persisted evaluations", () => {
   assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 16);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 17);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 17);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 18);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 18);
+  assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 180);
+  assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 30);
+  assert.equal(RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds, 180);
+  assert.equal(RESEARCH_INTERNAL_POLICY.judgeOutputReserveSeconds, 30);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);
