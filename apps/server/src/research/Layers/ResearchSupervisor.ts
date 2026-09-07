@@ -708,19 +708,17 @@ const makeResearchSupervisor = Effect.gen(function* () {
         (yield* serverSettings.getSettings).researchSupervision,
       );
       const assessmentResult = yield* Effect.result(
-        evaluator
-          .evaluateJudge({
-            cwd: context.cwd,
-            modelSelection: evaluatorModelSelection,
-            contract,
-            finding: event.finding,
-            priorEvaluations: projection.judgeEvaluations.filter(
-              (evaluation) =>
-                evaluation.findingId === event.finding.findingId &&
-                (evaluation.findingRevision ?? 1) === (event.finding.revision ?? 1),
-            ),
-          })
-          .pipe(Effect.retry({ times: 2 })),
+        evaluator.evaluateJudge({
+          cwd: context.cwd,
+          modelSelection: evaluatorModelSelection,
+          contract,
+          finding: event.finding,
+          priorEvaluations: projection.judgeEvaluations.filter(
+            (evaluation) =>
+              evaluation.findingId === event.finding.findingId &&
+              (evaluation.findingRevision ?? 1) === (event.finding.revision ?? 1),
+          ),
+        }),
       );
       if (assessmentResult._tag === "Failure") {
         const failureDetail = assessmentResult.failure.detail;
@@ -741,7 +739,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
           gates: contract.gates.map((gate) => ({
             gateId: gate.id,
             status: "unknown" as const,
-            reason: `The independent Judge did not complete after bounded retries. ${failureDetail}`,
+            reason: `The independent Judge did not complete its bounded review. ${failureDetail}`,
             evidence: [],
           })),
           summary: `Review blocked by a harness or evaluator failure. ${failureDetail} No technical verdict exists and the finding remains preserved.`,

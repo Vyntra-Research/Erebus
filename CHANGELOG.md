@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.3 - 2026-09-06
+
+### Changed
+
+- Give the Judge one three-minute review window and require it to reserve time for its structured verdict.
+- Make the Judge assess the delivered record as a skeptical triager instead of repeating practical validation or filling evidence gaps itself.
+
+### Fixed
+
+- Stop one finding review from holding the evaluator through repeated ten-minute attempts.
+
 ## 0.4.2 - 2026-09-06
 
 ### Fixed

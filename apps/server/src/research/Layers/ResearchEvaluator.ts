@@ -17,7 +17,7 @@ import {
 } from "../Services/ResearchEvaluator.ts";
 import { RESEARCH_INTERNAL_POLICY } from "../researchPolicy.ts";
 
-const RESEARCH_EVALUATOR_TIMEOUT_MS = 600_000;
+const RESEARCH_OBSERVER_TIMEOUT_MS = 600_000;
 
 const likelyEvidencePath =
   /(?:[A-Za-z]:[\\/][^;|\n]+|(?:\.{1,2}[\\/])?[^;|\n]*[\\/][^;|\n]+|[^;|\n]+\.(?:zip|json|jsonl|txt|md|log|html|js|ts|tsx|mjs|cjs|yaml|yml|xml|csv))/giu;
@@ -99,7 +99,10 @@ const makeResearchEvaluator = Effect.gen(function* () {
           prompt: input.prompt,
           outputSchema: input.schema,
           modelSelection,
-          timeoutMs: RESEARCH_EVALUATOR_TIMEOUT_MS,
+          timeoutMs:
+            operation === "judge"
+              ? RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds * 1_000
+              : RESEARCH_OBSERVER_TIMEOUT_MS,
         }).pipe(
           Effect.mapError(
             (cause) =>
@@ -156,6 +159,10 @@ const makeResearchEvaluator = Effect.gen(function* () {
         const environmentJson = encodeJson({
           workspaceRoot: input.cwd,
           filesystemMode: "read-only",
+          reviewMode: "bounded-submission-audit",
+          wallClockBudgetSeconds: RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds,
+          outputReserveSeconds: RESEARCH_INTERNAL_POLICY.judgeOutputReserveSeconds,
+          practicalRevalidationAllowed: false,
           relativeEvidencePathsResolveFrom: input.cwd,
           localEvidenceManifest: evidenceManifest,
           proteusReadPolicy:
@@ -168,7 +175,7 @@ const makeResearchEvaluator = Effect.gen(function* () {
           cwd: input.cwd,
           modelSelection: input.modelSelection,
           schema: JudgeAssessment,
-          prompt: `${RESEARCH_INTERNAL_POLICY.judgeInstructions}\n\nJUDGE ENVIRONMENT:\n${environmentJson}\n\nThe manifest is a path-discovery aid, not the evidence itself. Inspect referenced files and Proteus records when they are needed for a gate decision. A listed path that exists is accessible; choosing not to inspect it is not an access failure. Do not demand that already accessible evidence be copied into a ZIP, index, or different format.\n\nPRIOR REVIEW AUDIT:\n${priorEvaluationsJson}\n\nPrior evaluations are audit context, not authoritative verdicts. If the latest prior evaluation is reviewBlocked, independently retry the same immutable submission. Do not treat branch status, checkpoints, or research actions caused solely by the superseded faulty verdict as evidence against the finding.\n\nACTIVE CONTRACT:\n${contractJson}\n\nFINDING SUBMISSION:\n${findingJson}`,
+          prompt: `${RESEARCH_INTERNAL_POLICY.judgeInstructions}\n\nJUDGE ENVIRONMENT:\n${environmentJson}\n\nFinish within the stated wall-clock budget. Judge whether the delivered state is already correct, complete, internally consistent, and sufficient for each gate. Do not perform a fresh practical validation or complete missing work for the principal. Use only short, targeted read-only checks of cited evidence when they are necessary for the decision. If the delivery itself lacks a required fact or proof, record that gap under the correct gate and verdict instead of searching for or creating it.\n\nThe manifest is a path-discovery aid, not the evidence itself. A listed path that exists is accessible; choosing not to inspect optional material is not an access failure. Do not demand that already accessible evidence be copied into a ZIP, index, or different format.\n\nPRIOR REVIEW AUDIT:\n${priorEvaluationsJson}\n\nPrior evaluations are audit context, not authoritative verdicts. If the latest prior evaluation is reviewBlocked, independently review the same immutable submission within this same bounded desk-review role. Do not treat branch status, checkpoints, or research actions caused solely by the superseded faulty verdict as evidence against the finding.\n\nACTIVE CONTRACT:\n${contractJson}\n\nFINDING SUBMISSION:\n${findingJson}`,
         });
       }),
   });
