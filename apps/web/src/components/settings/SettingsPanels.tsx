@@ -510,6 +510,11 @@ function AboutProteusSection() {
   }, [environmentId, isUpdating, refreshProteusStatus, updateProteus]);
 
   const version = proteusStatus?.version ?? (isProteusStatusPending ? "Checking…" : "Unavailable");
+  const latestVersion = proteusStatus?.latestVersion ?? null;
+  const updateAvailable = proteusStatus?.updateAvailable === true && latestVersion !== null;
+  const description = updateAvailable
+    ? `Proteus ${latestVersion} is available.`
+    : (proteusStatus?.updateCheckError ?? proteusStatusError ?? "Managed research runtime.");
   return (
     <SettingsRow
       title={
@@ -518,7 +523,7 @@ function AboutProteusSection() {
           <code className="text-[11px] font-medium text-muted-foreground">{version}</code>
         </span>
       }
-      description={proteusStatusError ?? "Managed research runtime."}
+      description={description}
       control={
         <Button
           size="xs"
@@ -526,7 +531,11 @@ function AboutProteusSection() {
           disabled={environmentId === null || isUpdating || isProteusStatusPending}
           onClick={() => void handleUpdate()}
         >
-          {isUpdating ? "Updating…" : "Check for Updates"}
+          {isUpdating
+            ? "Updating…"
+            : updateAvailable
+              ? `Update to ${latestVersion}`
+              : "Check for Updates"}
         </Button>
       }
     />

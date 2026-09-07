@@ -40,6 +40,13 @@ export interface ManagedProteusRuntime {
   readonly pluginRoot: string;
 }
 
+export interface ManagedProteusUpdateStatus {
+  readonly version: string;
+  readonly latestVersion: string;
+  readonly updateAvailable: boolean;
+  readonly checkedAt: number;
+}
+
 interface ProteusPackageJson {
   readonly name?: unknown;
   readonly version?: unknown;
@@ -330,18 +337,89 @@ async function writeUpdateState(
   await NodeFSP.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
+async function readUpdateState(managedRuntimeRoot: string): Promise<ProteusUpdateState | null> {
+  return NodeFSP.readFile(NodePath.join(managedRuntimeRoot, "update-state.json"), "utf8")
+    .then((value) => JSON.parse(value) as ProteusUpdateState)
+    .catch(() => null);
+}
+
+function latestReleaseVersion(release: GitHubLatestRelease): string {
+  if (release.draft === true || release.prerelease === true) {
+    throw new Error("The latest Proteus release is not a stable published release.");
+  }
+  const tag = typeof release.tag_name === "string" ? release.tag_name : "";
+  const version = tag.startsWith("v") ? tag.slice(1) : "";
+  if (!parseVersion(version)) throw new Error("The latest Proteus release tag is invalid.");
+  return version;
+}
+
+async function inspectRuntimeUpdate(
+  managedRuntimeRoot: string,
+  options: ManagedProteusOptions,
+  now: number,
+): Promise<ManagedProteusUpdateStatus> {
+  const current = await resolveRuntime(managedRuntimeRoot);
+  const state = await readUpdateState(managedRuntimeRoot);
+  if (
+    options.forceUpdateCheck !== true &&
+    typeof state?.checkedAt === "number" &&
+    Number.isFinite(state.checkedAt) &&
+    now - state.checkedAt >= 0 &&
+    now - state.checkedAt < PROTEUS_UPDATE_CHECK_INTERVAL_MS &&
+    typeof state.latestVersion === "string" &&
+    parseVersion(state.latestVersion)
+  ) {
+    return {
+      version: current.version,
+      latestVersion: state.latestVersion,
+      updateAvailable: compareVersions(state.latestVersion, current.version) > 0,
+      checkedAt: state.checkedAt,
+    };
+  }
+
+  const fetchImplementation = options.fetch ?? globalThis.fetch;
+  const releaseResponse = await fetchWithTimeout(
+    fetchImplementation,
+    PROTEUS_RELEASE_API,
+    "application/vnd.github+json",
+  );
+  const release = (await releaseResponse.json()) as GitHubLatestRelease;
+  const latestVersion = latestReleaseVersion(release);
+  if (compareVersions(latestVersion, current.version) > 0) {
+    exactReleaseAsset(release, latestVersion);
+  }
+  await writeUpdateState(managedRuntimeRoot, { checkedAt: now, latestVersion });
+  return {
+    version: current.version,
+    latestVersion,
+    updateAvailable: compareVersions(latestVersion, current.version) > 0,
+    checkedAt: now,
+  };
+}
+
+export const inspectManagedProteusUpdate = Effect.fn("ProteusRuntime.inspectUpdate")(function* (
+  managedRuntimeRoot: string,
+  options: ManagedProteusOptions = {},
+) {
+  const currentTime = options.now?.() ?? (yield* Clock.currentTimeMillis);
+  return yield* Effect.tryPromise({
+    try: () => inspectRuntimeUpdate(NodePath.resolve(managedRuntimeRoot), options, currentTime),
+    catch: (cause) =>
+      new ProteusRuntimeError({
+        operation: "update",
+        detail: "Erebus could not check the latest Proteus release.",
+        cause,
+      }),
+  });
+});
+
 async function refreshRuntime(
   managedRuntimeRoot: string,
   options: ManagedProteusOptions,
   now: number,
 ): Promise<ManagedProteusRuntime> {
   const current = await resolveRuntime(managedRuntimeRoot);
-  const state = await NodeFSP.readFile(
-    NodePath.join(managedRuntimeRoot, "update-state.json"),
-    "utf8",
-  )
-    .then((value) => JSON.parse(value) as ProteusUpdateState)
-    .catch(() => null);
+  const state = await readUpdateState(managedRuntimeRoot);
   if (
     options.forceUpdateCheck !== true &&
     typeof state?.checkedAt === "number" &&
@@ -366,9 +444,7 @@ async function refreshRuntime(
     "application/vnd.github+json",
   );
   const release = (await releaseResponse.json()) as GitHubLatestRelease;
-  const tag = typeof release.tag_name === "string" ? release.tag_name : "";
-  const version = tag.startsWith("v") ? tag.slice(1) : "";
-  if (!parseVersion(version)) throw new Error("The latest Proteus release tag is invalid.");
+  const version = latestReleaseVersion(release);
 
   if (compareVersions(version, current.version) > 0) {
     const asset = exactReleaseAsset(release, version);
