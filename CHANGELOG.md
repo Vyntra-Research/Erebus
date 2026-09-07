@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 - 2026-09-07
+
+### Added
+
+- Detect verified Proteus releases in the background and show an update notice with the current and available versions.
+
+### Changed
+
+- Keep the crucial research-quality rules in Erebus while routing detailed methods through the installed Proteus skills.
+- Reference Proteus skills by name instead of copying their full text into research prompts and handoffs.
+- Bundle Proteus 2.1.9 as the offline fallback while retaining independent verified updates.
+
 ## 0.4.4 - 2026-09-07
 
 ### Changed

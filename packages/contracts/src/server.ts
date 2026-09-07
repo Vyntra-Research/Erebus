@@ -675,6 +675,10 @@ export class ServerProviderUpdateError extends Schema.TaggedErrorClass<ServerPro
 
 export const ServerProteusStatus = Schema.Struct({
   version: TrimmedNonEmptyString,
+  latestVersion: Schema.NullOr(TrimmedNonEmptyString),
+  updateAvailable: Schema.Boolean,
+  checkedAt: Schema.NullOr(Schema.Number),
+  updateCheckError: Schema.NullOr(TrimmedNonEmptyString),
 });
 export type ServerProteusStatus = typeof ServerProteusStatus.Type;
 

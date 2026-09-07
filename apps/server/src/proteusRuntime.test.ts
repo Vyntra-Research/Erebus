@@ -13,11 +13,16 @@ import * as Tar from "tar";
 
 import {
   installManagedProteusForCodex,
+  inspectManagedProteusUpdate,
   refreshManagedProteusRuntime,
   resolveManagedProteusRuntime,
 } from "./proteusRuntime.ts";
 
 const count = (value: string, needle: string): number => value.split(needle).length - 1;
+const nextPatchVersion = (version: string): string => {
+  const [major, minor, patch] = version.split(".").map(Number);
+  return `${major}.${minor}.${(patch ?? 0) + 1}`;
+};
 const tomlString = (value: string): string =>
   `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 
@@ -174,7 +179,7 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
       const packageRoot = path.join(packageParent, "package");
       const archivePath = path.join(root, "proteus.tgz");
       const bundled = yield* resolveManagedProteusRuntime(path.join(root, "empty-runtime"));
-      const futureVersion = "2.1.9";
+      const futureVersion = nextPatchVersion(bundled.version);
 
       const archive = yield* Effect.promise(async () => {
         await NodeFSP.mkdir(packageParent, { recursive: true });
@@ -265,7 +270,7 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
       const codexHome = path.join(root, "codex-home");
       const managedRuntimeRoot = path.join(root, "managed-runtime");
       const bundled = yield* resolveManagedProteusRuntime(path.join(root, "empty-runtime"));
-      const futureVersion = "2.1.9";
+      const futureVersion = nextPatchVersion(bundled.version);
       const assetUrl = `https://github.com/Vyntra-Research/Proteus/releases/download/v${futureVersion}/vyntra-research-proteus-${futureVersion}.tgz`;
       const corruptArchive = new Uint8Array([1, 2, 3]);
       let requests = 0;
@@ -299,6 +304,59 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
 
       expect(installed.version).toBe(bundled.version);
       expect(requests).toBe(2);
+      expect(
+        yield* fileSystem.exists(path.join(managedRuntimeRoot, "packages", futureVersion)),
+      ).toBe(false);
+    }),
+  );
+
+  it.effect("detects an available Proteus release without downloading it", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "erebus-proteus-inspect-update-",
+      });
+      const managedRuntimeRoot = path.join(root, "managed-runtime");
+      const bundled = yield* resolveManagedProteusRuntime(path.join(root, "empty-runtime"));
+      const futureVersion = nextPatchVersion(bundled.version);
+      const checkedAt = Date.UTC(2026, 8, 7);
+      const assetUrl = `https://github.com/Vyntra-Research/Proteus/releases/download/v${futureVersion}/vyntra-research-proteus-${futureVersion}.tgz`;
+      let requests = 0;
+      const fetchMock = (async (_input: string | URL | Request) => {
+        requests += 1;
+        return Response.json({
+          tag_name: `v${futureVersion}`,
+          draft: false,
+          prerelease: false,
+          assets: [
+            {
+              name: `vyntra-research-proteus-${futureVersion}.tgz`,
+              browser_download_url: assetUrl,
+              digest: `sha256:${"0".repeat(64)}`,
+              size: 123,
+            },
+          ],
+        });
+      }) as typeof globalThis.fetch;
+
+      const first = yield* inspectManagedProteusUpdate(managedRuntimeRoot, {
+        fetch: fetchMock,
+        now: () => checkedAt,
+      });
+      const second = yield* inspectManagedProteusUpdate(managedRuntimeRoot, {
+        fetch: fetchMock,
+        now: () => checkedAt,
+      });
+
+      expect(first).toEqual({
+        version: bundled.version,
+        latestVersion: futureVersion,
+        updateAvailable: true,
+        checkedAt,
+      });
+      expect(second).toEqual(first);
+      expect(requests).toBe(1);
       expect(
         yield* fileSystem.exists(path.join(managedRuntimeRoot, "packages", futureVersion)),
       ).toBe(false);

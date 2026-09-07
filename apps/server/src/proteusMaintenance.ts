@@ -10,6 +10,8 @@ import * as Schema from "effect/Schema";
 
 import {
   installManagedProteusForCodex,
+  inspectManagedProteusUpdate,
+  type ManagedProteusOptions,
   refreshManagedProteusRuntime,
   resolveManagedProteusRuntime,
 } from "./proteusRuntime.ts";
@@ -17,6 +19,7 @@ import { resolveCodexHomeLayout } from "./provider/Drivers/CodexHomeLayout.ts";
 import { deriveProviderInstanceConfigMap } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 
 const decodeCodexSettings = Schema.decodeUnknownEffect(CodexSettings);
+const automaticallyCheckedRuntimeRoots = new Set<string>();
 
 const proteusError =
   (operation: "status" | "update", detail: string) =>
@@ -28,12 +31,35 @@ const managedRuntimeRoot = (path: Path.Path, stateDir: string): string =>
 
 export const getProteusStatus = Effect.fn("ProteusMaintenance.status")(function* (
   stateDir: string,
+  options: ManagedProteusOptions = {},
 ) {
   const path = yield* Path.Path;
-  const runtime = yield* resolveManagedProteusRuntime(managedRuntimeRoot(path, stateDir)).pipe(
+  const runtimeRoot = managedRuntimeRoot(path, stateDir);
+  const runtime = yield* resolveManagedProteusRuntime(runtimeRoot).pipe(
     Effect.mapError(proteusError("status", "Erebus could not read the managed Proteus version.")),
   );
-  return { version: runtime.version } as const;
+  const shouldForceAutomaticCheck =
+    options.forceUpdateCheck === undefined && !automaticallyCheckedRuntimeRoots.has(runtimeRoot);
+  automaticallyCheckedRuntimeRoots.add(runtimeRoot);
+  const updateStatus = yield* Effect.result(
+    inspectManagedProteusUpdate(runtimeRoot, {
+      ...options,
+      forceUpdateCheck: options.forceUpdateCheck ?? shouldForceAutomaticCheck,
+    }),
+  );
+  if (updateStatus._tag === "Failure") {
+    return {
+      version: runtime.version,
+      latestVersion: null,
+      updateAvailable: false,
+      checkedAt: null,
+      updateCheckError: updateStatus.failure.detail,
+    } as const;
+  }
+  return {
+    ...updateStatus.success,
+    updateCheckError: null,
+  } as const;
 });
 
 export const updateProteus = Effect.fn("ProteusMaintenance.update")(function* (

@@ -82,8 +82,9 @@ it("keeps strict role-specific behavior around the shared contract", () => {
     /Observer advice is fresh only in the uninterrupted live turn/,
   );
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /outside and after the compacted summary/);
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /recent commits, diffs, patch archaeology/);
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /never add lab glue/);
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /Recent commits, diffs, patch archaeology/);
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /lab must not lend the exploit/);
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /Do not paste their complete text/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /contract\.target.*required plain string/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /supply every required field/);
   assert.match(
@@ -111,9 +112,9 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 });
 
 it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 16);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 19);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 19);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 17);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 20);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 20);
   assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 180);
   assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 30);
   assert.equal(RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds, 180);

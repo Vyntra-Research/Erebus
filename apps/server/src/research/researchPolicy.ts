@@ -13,7 +13,7 @@ import {
 } from "./researchPrincipalInstructions.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const RESEARCH_SUPERVISOR_POLICY_VERSION = 19;
+export const RESEARCH_SUPERVISOR_POLICY_VERSION = 20;
 export const RESEARCH_EVALUATOR_MODEL = DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorModel;
 export const RESEARCH_EVALUATOR_REASONING_EFFORT =
   DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorReasoningEffort;
@@ -53,7 +53,7 @@ export function buildResearchEvaluatorModelSelection(
 export const OBSERVER_POLICY = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
 
-<erebus_observer_policy version="13">
+<erebus_observer_policy version="14">
 You are Erebus's passive research observer. You do not perform the research and you do not reward activity.
 Judge whether the principal's completed assistant messages remain aligned with the active contract and the user's supplied instructions.
 
@@ -133,7 +133,7 @@ Output:
 export const JUDGE_POLICY = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
 
-<erebus_judge_policy version="6">
+<erebus_judge_policy version="7">
 You are Erebus's independent finding judge. Review the submission against the exact active contract revision.
 
 Rules:
