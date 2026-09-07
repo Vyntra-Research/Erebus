@@ -20,6 +20,9 @@ import {
 } from "./researchPrincipalInstructions.ts";
 
 it("distributes the complete canonical contract to every research role", () => {
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Post-AI Blind-Spot Heuristics/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /total\s+coverage is a closure invariant/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /remains open while any reachable natural edge/);
   assert.include(EREBUS_PRINCIPAL_INSTRUCTIONS, EREBUS_RESEARCH_BASE_CONTRACT);
   assert.include(OBSERVER_POLICY, EREBUS_RESEARCH_BASE_CONTRACT);
   assert.include(JUDGE_POLICY, EREBUS_RESEARCH_BASE_CONTRACT);
@@ -60,6 +63,12 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /bounded measurement.*the user requested.*is legitimate/);
   assert.match(OBSERVER_POLICY, /request to "finish the tests".*closes the current dynamic test/);
   assert.match(OBSERVER_POLICY, /prior aligned evaluation.*require new material evidence/);
+  assert.match(OBSERVER_POLICY, /Post-AI Blind-Spot closure invariant/);
+  assert.match(OBSERVER_POLICY, /only when the principal actually kills, downgrades, abandons/);
+  assert.match(
+    OBSERVER_POLICY,
+    /Do not intervene merely because active exploration has not completed total coverage/,
+  );
   assert.match(JUDGE_POLICY, /Your job is not to help the finding pass/);
   assert.match(JUDGE_POLICY, /maximum impact currently proved/);
   assert.match(JUDGE_POLICY, /CVSS is an ancillary classification, never a validity gate/);
@@ -68,9 +77,14 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(JUDGE_POLICY, /skeptical triager and an informed lay reviewer/);
   assert.match(JUDGE_POLICY, /Never fill a gap with your own research/);
   assert.match(JUDGE_POLICY, /bounded desk review.*not a new practical validation run/);
-  assert.match(JUDGE_POLICY, /hard wall-clock budget of 180 seconds/);
-  assert.match(JUDGE_POLICY, /reserve the final 30 seconds/);
+  assert.match(JUDGE_POLICY, /hard wall-clock budget of 600 seconds/);
+  assert.match(JUDGE_POLICY, /reserve the final 60 seconds/);
+  assert.match(JUDGE_POLICY, /ten-minute ceiling is latency tolerance.*not a research budget/);
+  assert.match(JUDGE_POLICY, /verify the submission's stated facts and claims/);
+  assert.match(JUDGE_POLICY, /Do not explore the wider codebase/);
   assert.match(JUDGE_POLICY, /Missing evidence or explanation.*submission gap/);
+  assert.match(JUDGE_POLICY, /Finding acceptance and sink closure are separate decisions/);
+  assert.match(JUDGE_POLICY, /Do not require total coverage of unclaimed alternate chains/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /A finding stated in ordinary prose is not approved/);
   assert.match(
     EREBUS_PRINCIPAL_INSTRUCTIONS,
@@ -112,13 +126,13 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 });
 
 it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 17);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 20);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 20);
-  assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 180);
-  assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 30);
-  assert.equal(RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds, 180);
-  assert.equal(RESEARCH_INTERNAL_POLICY.judgeOutputReserveSeconds, 30);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 19);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 22);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 22);
+  assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 600);
+  assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 60);
+  assert.equal(RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds, 600);
+  assert.equal(RESEARCH_INTERNAL_POLICY.judgeOutputReserveSeconds, 60);
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
   assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

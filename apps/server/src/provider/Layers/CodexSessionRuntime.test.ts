@@ -18,6 +18,7 @@ import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnSteerParams,
   buildTurnStartParams,
+  automaticCodexCommandApproval,
   describeMcpElicitation,
   handleDynamicToolCallForProviderThread,
   hasConfiguredMcpServer,
@@ -151,7 +152,40 @@ function makeThreadOpenResponse(
 }
 
 describe("buildTurnStartParams", () => {
-  it.effect("keeps full access prompt-free", () =>
+  it("automatically accepts only guard-approved full-access command reviews", () => {
+    NodeAssert.deepStrictEqual(
+      automaticCodexCommandApproval({
+        command: "Get-Content -LiteralPath package.json",
+        cwd: "C:\\repo",
+        workspaceRoot: "C:\\repo",
+        runtimeMode: "full-access",
+        reason: undefined,
+      }).decision,
+      "accept",
+    );
+    NodeAssert.deepStrictEqual(
+      automaticCodexCommandApproval({
+        command: "rg --files C:\\Users\\researcher",
+        cwd: "C:\\repo",
+        workspaceRoot: "C:\\repo",
+        runtimeMode: "full-access",
+        reason: undefined,
+      }).decision,
+      "decline",
+    );
+    NodeAssert.equal(
+      automaticCodexCommandApproval({
+        command: "Get-Content -LiteralPath package.json",
+        cwd: "C:\\repo",
+        workspaceRoot: "C:\\repo",
+        runtimeMode: "approval-required",
+        reason: undefined,
+      }).decision,
+      null,
+    );
+  });
+
+  it.effect("routes full-access command reviews through the automatic handler", () =>
     Effect.gen(function* () {
       const params = yield* buildTurnStartParams({
         threadId: "provider-thread-1",
@@ -159,7 +193,7 @@ describe("buildTurnStartParams", () => {
         prompt: "Run a safe command",
       });
 
-      NodeAssert.equal(params.approvalPolicy, "never");
+      NodeAssert.equal(params.approvalPolicy, "on-request");
       NodeAssert.equal(params.approvalsReviewer, "user");
       NodeAssert.deepStrictEqual(params.sandboxPolicy, { type: "dangerFullAccess" });
     }),
@@ -218,7 +252,7 @@ describe("buildTurnStartParams", () => {
 
     NodeAssert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
-      approvalPolicy: "never",
+      approvalPolicy: "on-request",
       approvalsReviewer: "user",
       sandboxPolicy: {
         type: "dangerFullAccess",
@@ -885,7 +919,7 @@ describe("openCodexThread", () => {
         dynamicTools,
       });
 
-      NodeAssert.equal(startPayload?.approvalPolicy, "never");
+      NodeAssert.equal(startPayload?.approvalPolicy, "on-request");
       NodeAssert.equal(startPayload?.sandbox, "danger-full-access");
       NodeAssert.deepStrictEqual(startPayload?.dynamicTools, dynamicTools);
     }),

@@ -7,7 +7,7 @@ import {
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { selectCodexAccount } from "./CodexAccountRouter.ts";
+import { selectCodexAccount, selectCodexFailoverAccount } from "./CodexAccountRouter.ts";
 
 const decodeProvider = Schema.decodeUnknownSync(ServerProvider);
 
@@ -97,6 +97,37 @@ describe("selectCodexAccount", () => {
         providers: [account(primary, 0), account(fallback, 1)],
         policy,
         activeInstanceId: fallback,
+      }),
+    ).toBe(fallback);
+  });
+
+  it("selects another authenticated account after a live usage-limit failure", () => {
+    expect(
+      selectCodexFailoverAccount({
+        providers: [account(primary, 0), account(fallback, 42)],
+        policy,
+        exhaustedInstanceIds: new Set([primary]),
+      }),
+    ).toBe(fallback);
+  });
+
+  it("does not fail over when account routing is disabled", () => {
+    expect(
+      selectCodexFailoverAccount({
+        providers: [account(primary, 0), account(fallback, 42)],
+        policy: { ...policy, enabled: false },
+        exhaustedInstanceIds: new Set([primary]),
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps a usage-limited account excluded while cached quota is stale", () => {
+    expect(
+      selectCodexAccount({
+        providers: [account(primary, 75), account(fallback, 42)],
+        policy,
+        activeInstanceId: fallback,
+        exhaustedInstanceIds: new Set([primary]),
       }),
     ).toBe(fallback);
   });

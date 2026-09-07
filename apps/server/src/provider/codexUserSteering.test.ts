@@ -4,6 +4,7 @@ import { TurnId } from "@t3tools/contracts";
 import { describe, it } from "vite-plus/test";
 
 import {
+  buildCodexCompactionBoundaryMarker,
   buildCodexHistoricalUserSteerMarker,
   buildCodexCompactionContextInstruction,
   buildCodexLiveCoagentMessagePrompt,
@@ -59,6 +60,15 @@ describe("Codex user steering across compaction", () => {
       buildCodexCompactionContextInstruction(laterTurnCompaction.next),
       /stale_context_id="message-7"/,
     );
+  });
+
+  it("marks one chronological boundary without enumerating replayed steers", () => {
+    const marker = buildCodexCompactionBoundaryMarker(TurnId.make('turn-"9"'));
+
+    NodeAssert.match(marker, /after_compaction_turn_id="turn-&quot;9&quot;"/);
+    NodeAssert.match(marker, /Every `<erebus_user_steer>` and `<erebus_coagent_delivery>`/);
+    NodeAssert.match(marker, /appears before this boundary is historical/);
+    NodeAssert.match(marker, /genuinely new delivery that appears after this boundary is fresh/);
   });
 
   it("recognizes both Codex compaction signals and ignores unrelated items", () => {

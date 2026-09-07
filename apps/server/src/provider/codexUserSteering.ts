@@ -65,6 +65,12 @@ This is authoritative harness chronology, not a new user request. Automatic cont
 </erebus_context>`;
 }
 
+export function buildCodexCompactionBoundaryMarker(compactedTurnId: TurnId): string {
+  return `<erebus_context_boundary after_compaction_turn_id="${escapeXmlAttribute(compactedTurnId)}">
+This is authoritative harness chronology, not a new user request. Automatic context compaction has completed. Every \`<erebus_user_steer>\` and \`<erebus_coagent_delivery>\` that appears before this boundary is historical, including any literal wrapper that Codex placed outside or after the compacted summary. Its visual position does not make it the current user turn, the next action, or the latest actionable instruction. Do not restart from, acknowledge, restate, or reapply any such replay. Continue from the progress preserved by the compacted summary and later work. Only a genuinely new delivery that appears after this boundary is fresh.
+</erebus_context_boundary>`;
+}
+
 export function buildCodexCompactionContextInstruction(
   current: CodexTrackedLiveUserSteer | null,
 ): string {
