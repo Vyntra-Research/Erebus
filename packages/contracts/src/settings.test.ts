@@ -333,7 +333,7 @@ describe("ServerSettings Codex account routing", () => {
 describe("ServerSettings research supervision", () => {
   it("provides conservative Observer and Judge defaults for legacy settings", () => {
     expect(decodeServerSettings({}).researchSupervision).toEqual({
-      observerMessageWindow: 5,
+      observerMessageWindow: 10,
       observerInterventionConfidence: 0.8,
       observerCooldownMessages: 5,
       observerMaxInterventionsPerTurn: null,

@@ -42,7 +42,12 @@ type ProjectedConversationMessage = {
 
 export type ObserverTimelineMessage = {
   readonly id: string;
-  readonly source: "userPrompt" | "userSteer" | "coagentMessage" | "principalAssistant";
+  readonly source:
+    | "userPrompt"
+    | "userSteer"
+    | "pendingUserSteer"
+    | "coagentMessage"
+    | "principalAssistant";
   readonly text: string;
   readonly turnId: string | null;
 };
@@ -270,6 +275,28 @@ export function buildObserverTimeline(
 
   const firstWindowIndex = indexedAssistants[0]!.index;
   const lastWindowIndex = indexedAssistants.at(-1)!.index;
+  const previousAssistantTurnByIndex: Array<string | null> = [];
+  let previousAssistantTurn: string | null = null;
+  for (let index = 0; index <= lastWindowIndex; index += 1) {
+    previousAssistantTurnByIndex[index] = previousAssistantTurn;
+    const message = projectedMessages[index];
+    if (message?.role === "assistant" && message.turnId != null) {
+      previousAssistantTurn = message.turnId;
+    }
+  }
+  const nextAssistantTurnByIndex: Array<string | null> = [];
+  const laterAssistantCountByIndex: Array<number> = [];
+  let nextAssistantTurn: string | null = null;
+  let laterAssistantCount = 0;
+  for (let index = lastWindowIndex; index >= 0; index -= 1) {
+    nextAssistantTurnByIndex[index] = nextAssistantTurn;
+    laterAssistantCountByIndex[index] = laterAssistantCount;
+    const message = projectedMessages[index];
+    if (message?.role === "assistant" && message.turnId != null) {
+      nextAssistantTurn = message.turnId;
+      laterAssistantCount += 1;
+    }
+  }
   const eligibleUsers = projectedMessages
     .map((message, index) => ({ message, index }))
     .filter(
@@ -278,13 +305,35 @@ export function buildObserverTimeline(
         message.role === "user" &&
         message.text.trim().length > 0 &&
         !isErebusSupervisoryMessage(message),
-    );
-  const userAuthored = eligibleUsers.filter(({ message }) => !isErebusCoagentMessage(message.text));
+    )
+    .map(({ message, index }) => {
+      if (isErebusCoagentMessage(message.text)) {
+        return { message, index, source: "coagentMessage" as const };
+      }
+
+      const isSteer =
+        message.turnId != null ||
+        (previousAssistantTurnByIndex[index] != null &&
+          nextAssistantTurnByIndex[index] === previousAssistantTurnByIndex[index]);
+      if (!isSteer) return { message, index, source: "userPrompt" as const };
+
+      return {
+        message,
+        index,
+        source:
+          (laterAssistantCountByIndex[index] ?? 0) <= 1
+            ? ("pendingUserSteer" as const)
+            : ("userSteer" as const),
+      };
+    });
+  const userAuthored = eligibleUsers.filter(({ source }) => source !== "coagentMessage");
   const coagentMessages = eligibleUsers.filter(({ message }) =>
     isErebusCoagentMessage(message.text),
   );
-  const latestPrompt = userAuthored.findLast(({ message }) => message.turnId == null);
-  const steers = userAuthored.filter(({ message }) => message.turnId != null);
+  const latestPrompt = userAuthored.findLast(({ source }) => source === "userPrompt");
+  const steers = userAuthored.filter(
+    ({ source }) => source === "userSteer" || source === "pendingUserSteer",
+  );
   const lastPriorSteer = steers.findLast(({ index }) => index < firstWindowIndex);
   const laterSteers = steers.filter(({ index }) => index >= firstWindowIndex);
   const lastPriorCoagentMessage = coagentMessages.findLast(({ index }) => index < firstWindowIndex);
@@ -293,6 +342,11 @@ export function buildObserverTimeline(
     [latestPrompt, lastPriorSteer, lastPriorCoagentMessage, ...laterSteers, ...laterCoagentMessages]
       .filter((item) => item !== undefined)
       .map((item) => item.index),
+  );
+  const selectedUserSources = new Map(
+    eligibleUsers
+      .filter(({ index }) => selectedUserIndexes.has(index))
+      .map(({ index, source }) => [index, source] as const),
   );
 
   return projectedMessages.flatMap<ObserverTimelineMessage>((message, index) => {
@@ -308,18 +362,9 @@ export function buildObserverTimeline(
       ];
     }
     if (!selectedUserIndexes.has(index)) return [];
-    return [
-      {
-        id: message.id,
-        source: isErebusCoagentMessage(message.text)
-          ? ("coagentMessage" as const)
-          : message.turnId == null
-            ? ("userPrompt" as const)
-            : ("userSteer" as const),
-        text: message.text,
-        turnId: message.turnId ?? null,
-      },
-    ];
+    const source = selectedUserSources.get(index);
+    if (!source) return [];
+    return [{ id: message.id, source, text: message.text, turnId: message.turnId ?? null }];
   });
 }
 

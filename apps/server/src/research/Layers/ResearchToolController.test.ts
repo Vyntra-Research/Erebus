@@ -251,7 +251,7 @@ layer("ResearchToolController", (it) => {
 
       assert.isTrue(registered.success);
       assert.deepStrictEqual(projection?.contracts[0]?.observerPolicy, {
-        messageWindow: 5,
+        messageWindow: 10,
         interventionConfidence: 0.8,
         cooldownMessages: 5,
         maxInterventionsPerTurn: null,

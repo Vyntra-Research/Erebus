@@ -650,7 +650,7 @@ export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
 export const MIN_RESEARCH_OBSERVER_MESSAGE_WINDOW = 1;
 export const MAX_RESEARCH_OBSERVER_MESSAGE_WINDOW = 50;
-export const DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW = 5;
+export const DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW = 10;
 export const ResearchObserverMessageWindow = Schema.Int.check(
   Schema.isBetween({
     minimum: MIN_RESEARCH_OBSERVER_MESSAGE_WINDOW,
