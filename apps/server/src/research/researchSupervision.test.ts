@@ -166,9 +166,76 @@ it("gives Observer the latest prompt and steers in chronological context", () =>
       { id: "a1", source: "principalAssistant" },
       { id: "a2", source: "principalAssistant" },
       { id: "coagent-prior", source: "coagentMessage" },
-      { id: "steer-live", source: "userSteer" },
+      { id: "steer-live", source: "pendingUserSteer" },
       { id: "coagent-live", source: "coagentMessage" },
       { id: "a3", source: "principalAssistant" },
+    ],
+  );
+});
+
+it("does not judge an in-flight steer until a full assistant boundary has passed", () => {
+  const projected = [
+    { id: "prompt", role: "user", text: "Initial request", turnId: null },
+    { id: "a1", role: "assistant", text: "One", turnId: "turn-1" },
+    { id: "a2", role: "assistant", text: "Two", turnId: "turn-1" },
+    { id: "steer", role: "user", text: "Finish the tests", turnId: null },
+    { id: "a3", role: "assistant", text: "Already being emitted", turnId: "turn-1" },
+    { id: "a4", role: "assistant", text: "Steer applied", turnId: "turn-1" },
+  ];
+
+  const pendingTimeline = buildObserverTimeline(
+    [
+      { id: "a1", text: "One" },
+      { id: "a2", text: "Two" },
+      { id: "a3", text: "Already being emitted" },
+    ],
+    projected,
+  );
+  assert.deepInclude(
+    pendingTimeline.map(({ id, source }) => ({ id, source })),
+    { id: "steer", source: "pendingUserSteer" },
+  );
+
+  const actionableTimeline = buildObserverTimeline(
+    [
+      { id: "a1", text: "One" },
+      { id: "a2", text: "Two" },
+      { id: "a3", text: "Already being emitted" },
+      { id: "a4", text: "Steer applied" },
+    ],
+    projected,
+  );
+  assert.deepInclude(
+    actionableTimeline.map(({ id, source }) => ({ id, source })),
+    { id: "steer", source: "userSteer" },
+  );
+});
+
+it("distinguishes null-turn prompts from in-flight steers by assistant turn continuity", () => {
+  const timeline = buildObserverTimeline(
+    [
+      { id: "a1", text: "Initial reply" },
+      { id: "a2", text: "Steer applied" },
+      { id: "b1", text: "Follow-up reply" },
+    ],
+    [
+      { id: "prompt", role: "user", text: "Initial request", turnId: null },
+      { id: "a1", role: "assistant", text: "Initial reply", turnId: "turn-1" },
+      { id: "steer", role: "user", text: "Adjust this run", turnId: null },
+      { id: "a2", role: "assistant", text: "Steer applied", turnId: "turn-1" },
+      { id: "follow-up", role: "user", text: "New request", turnId: null },
+      { id: "b1", role: "assistant", text: "Follow-up reply", turnId: "turn-2" },
+    ],
+  );
+
+  assert.deepStrictEqual(
+    timeline.map(({ id, source }) => ({ id, source })),
+    [
+      { id: "a1", source: "principalAssistant" },
+      { id: "steer", source: "userSteer" },
+      { id: "a2", source: "principalAssistant" },
+      { id: "follow-up", source: "userPrompt" },
+      { id: "b1", source: "principalAssistant" },
     ],
   );
 });
@@ -351,10 +418,10 @@ it("bounds command audit by message chronology when one turn emits several messa
   );
 });
 
-it("counts exact five-message Observer windows", () => {
-  assert.equal(pendingObserverWindowCount(projection(4, 0)), 0);
-  assert.equal(pendingObserverWindowCount(projection(5, 0)), 1);
-  assert.equal(pendingObserverWindowCount(projection(16, 5)), 2);
+it("counts exact configured Observer windows", () => {
+  assert.equal(pendingObserverWindowCount(projection(9, 0)), 0);
+  assert.equal(pendingObserverWindowCount(projection(10, 0)), 1);
+  assert.equal(pendingObserverWindowCount(projection(31, 10)), 2);
 });
 
 it("selects the newest bounded Observer window instead of replaying stale backlog", () => {
@@ -402,10 +469,10 @@ it("uses the configured harness cadence and confidence threshold", () => {
 });
 
 it("uses the harness cadence even when a legacy contract stored a different window", () => {
-  const state = projection(10, 0);
+  const state = projection(20, 0);
   const legacyContract = {
     ...contract,
-    observerPolicy: { ...contract.observerPolicy, messageWindow: 10 },
+    observerPolicy: { ...contract.observerPolicy, messageWindow: 3 },
   };
   assert.equal(pendingObserverWindowCount({ ...state, contracts: [legacyContract] }), 2);
 });
@@ -467,7 +534,7 @@ it("builds a bounded durable snapshot for Observer continuity", () => {
   const snapshot = buildObserverCampaignSnapshot(state);
 
   assert.equal(snapshot?.campaign.proteusCampaignId, "proteus-1");
-  assert.equal(snapshot?.runtimeObserverPolicy.messageWindow, 5);
+  assert.equal(snapshot?.runtimeObserverPolicy.messageWindow, 10);
   assert.equal(snapshot?.latestCheckpoint?.proteusCheckpointId, "CP151");
   assert.deepStrictEqual(snapshot?.latestCheckpoint?.killedPaths, ["duplicate branch"]);
 });

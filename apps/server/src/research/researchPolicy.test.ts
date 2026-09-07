@@ -27,10 +27,15 @@ it("distributes the complete canonical contract to every research role", () => {
 
 it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /Silence is correct when no material contractual deviation exists/);
-  assert.match(OBSERVER_POLICY, /Tool calls do not count/);
+  assert.match(OBSERVER_POLICY, /Tool calls and user messages do not count/);
   assert.match(OBSERVER_POLICY, /Never queue, replay, or reapply an Observer recommendation/);
   assert.match(OBSERVER_POLICY, /replay the exact last Observer block literally after compaction/);
-  assert.match(OBSERVER_POLICY, /userPrompt, userSteer, coagentMessage, and principalAssistant/);
+  assert.match(
+    OBSERVER_POLICY,
+    /userPrompt, userSteer, pendingUserSteer, coagentMessage, and principalAssistant/,
+  );
+  assert.match(OBSERVER_POLICY, /pendingUserSteer.*cannot prove noncompliance/);
+  assert.match(OBSERVER_POLICY, /one complete assistant-message boundary/);
   assert.match(OBSERVER_POLICY, /coagentMessage is task-to-task coordination/);
   assert.match(OBSERVER_POLICY, /user's prompt and later steers are binding/);
   assert.match(OBSERVER_POLICY, /compliance monitor, not the research coordinator/);
@@ -38,20 +43,23 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /You have no command authority/);
   assert.match(OBSERVER_POLICY, /Never address the principal in imperative voice/);
   assert.match(OBSERVER_POLICY, /The active contract or user instruction is the authority/);
-  assert.match(OBSERVER_POLICY, /Never issue a stop, pause, resume, or reconciliation command/);
+  assert.match(OBSERVER_POLICY, /Do not say "stop", "pause", "resume", "verify"/);
   assert.match(OBSERVER_POLICY, /Possibility is not observation/);
   assert.match(OBSERVER_POLICY, /Repetition does not make a safe, bounded action unsafe/);
   assert.match(
     OBSERVER_POLICY,
-    /repeated bounded searches are rooted at packages\/next\/src and enter its versioned src\/compiled subtree/,
+    /repeated read-only enumeration rooted at packages\/next\/src.*src\/compiled subtree/,
   );
-  assert.match(OBSERVER_POLICY, /actually started at a drive or user-home root/);
+  assert.match(OBSERVER_POLICY, /from a drive or user-home root.*follows junctions/);
   assert.match(OBSERVER_POLICY, /If any element is missing, use aligned or watch/);
   assert.match(OBSERVER_POLICY, /Cost, elapsed time.*are not evidence of contractual deviation/);
   assert.match(OBSERVER_POLICY, /earlier tactical plans are durable research context, not binding/);
   assert.match(OBSERVER_POLICY, /Do not select the replacement branch/);
   assert.match(OBSERVER_POLICY, /Do not infer that a wider sink.*is exhausted/);
   assert.match(OBSERVER_POLICY, /Do not treat a CVE or advisory match as duplicate proof/);
+  assert.match(OBSERVER_POLICY, /bounded measurement.*the user requested.*is legitimate/);
+  assert.match(OBSERVER_POLICY, /request to "finish the tests".*closes the current dynamic test/);
+  assert.match(OBSERVER_POLICY, /prior aligned evaluation.*require new material evidence/);
   assert.match(JUDGE_POLICY, /Your job is not to help the finding pass/);
   assert.match(JUDGE_POLICY, /maximum impact currently proved/);
   assert.match(JUDGE_POLICY, /CVSS is an ancillary classification, never a validity gate/);
@@ -83,7 +91,7 @@ it("keeps strict role-specific behavior around the shared contract", () => {
     /containment boundary, not a request to create a lab/,
   );
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /read-only work must not create one/i);
-  assert.match(OBSERVER_POLICY, /creating one bounded task-owned directory.*is not itself unsafe/);
+  assert.match(OBSERVER_POLICY, /One bounded task-owned directory.*is not itself unsafe/);
   assert.match(OBSERVER_POLICY, /leading shell executable.*is not the mutation target/);
   assert.match(
     OBSERVER_POLICY,
@@ -92,13 +100,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   assert.match(OBSERVER_POLICY, /docker exec belong to that named container/);
   assert.match(OBSERVER_POLICY, /mark aligned or watch and remain silent/);
   assert.match(OBSERVER_POLICY, /do not flag it merely because it is recursive/);
-  assert.match(OBSERVER_POLICY, /generated or compiled subtree.*is not automatically unsafe/);
-  assert.match(OBSERVER_POLICY, /never justifies pausing the campaign/);
-  assert.match(
-    OBSERVER_POLICY,
-    /Hard no-intervention rule:.*packages\/next\/src\/compiled.*recommendedSteering set to null/,
-  );
-  assert.match(OBSERVER_POLICY, /prior Observer advisories because advisories are not binding/);
+  assert.match(OBSERVER_POLICY, /generated or compiled source.*is not automatically unsafe/);
+  assert.match(OBSERVER_POLICY, /prior Observer advisory cannot turn that safe action/);
   assert.match(OBSERVER_POLICY, /Observed deviation: .*Recommended repair:/);
   assert.notMatch(OBSERVER_POLICY, /you may require the principal to stop/i);
   assert.match(
@@ -109,8 +112,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 
 it("records a new policy revision and digest for persisted evaluations", () => {
   assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 16);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 18);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 18);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 19);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 19);
   assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 180);
   assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 30);
   assert.equal(RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds, 180);
@@ -122,7 +125,7 @@ it("records a new policy revision and digest for persisted evaluations", () => {
 
 it("owns Observer cadence and intervention thresholds in the harness", () => {
   assert.deepStrictEqual(RESEARCH_OBSERVER_RUNTIME_POLICY, {
-    messageWindow: 5,
+    messageWindow: 10,
     interventionConfidence: 0.8,
     cooldownMessages: 5,
     maxInterventionsPerTurn: null,

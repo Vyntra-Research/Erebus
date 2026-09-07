@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.4 - 2026-09-07
+
+### Changed
+
+- Raise the default Observer window from five completed assistant messages to ten.
+- Give user-directed validation and long-running high-ROI work clear protection from strategy-based Observer intervention.
+- Consolidate overlapping Observer rules into one authority, timing, decision, continuity, and command-audit contract.
+
+### Fixed
+
+- Distinguish new prompts from in-flight steers when Codex does not attach a turn ID to user messages.
+- Give an in-flight steer one complete assistant-message boundary before using it as evidence of noncompliance.
+- Keep a request to finish tests from being treated as a request to end separate read-only analysis or the wider campaign.
+
 ## 0.4.3 - 2026-09-06
 
 ### Changed
