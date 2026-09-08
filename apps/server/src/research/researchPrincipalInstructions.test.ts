@@ -32,4 +32,12 @@ it("instructs the principal to use durable research tools without activating ord
   assert.match(instructions, /load the installed `proteus:continuous-vuln-research` skill/);
   assert.match(instructions, /Do not paste their complete text/);
   assert.match(instructions, /Native subagents may help vertically/);
+  assert.match(instructions, /proteus:post-ai-blind-spots/);
+  assert.match(instructions, /after establishing a real sink/);
+  assert.match(instructions, /before killing, downgrading, pivoting away from/);
+  assert.match(instructions, /every real reachable natural path under CIA/);
+  assert.match(instructions, /Post-AI Blind-Spot Heuristics/);
+  assert.match(instructions, /call the Proteus `proteus_calculate_cvss` tool/);
+  assert.match(instructions, /use the lower-impact or higher-complexity value/);
+  assert.match(instructions, /agree exactly with the Proteus calculation/);
 });

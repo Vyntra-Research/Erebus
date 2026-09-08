@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.1 - 2026-09-07
+
+### Changed
+
+- Add the named Post-AI Blind-Spot closure invariant and route established real sinks through the dedicated Proteus skill before terminal coverage decisions.
+- Give the Judge up to ten minutes to read and verify the submitted record while keeping it in a strict desk-review role with one minute reserved for the verdict.
+- Require the principal to validate a conservative CVSS vector with the Proteus calculator before submitting a finding.
+
+### Fixed
+
+- Fail over an interrupted Codex turn to another account after a real usage-limit error while preserving its provider thread, model, effort, and durable research point.
+- Mark all user steers and co-agent deliveries replayed before a Codex compaction boundary as historical context.
+- Route full-access Codex approval requests through the deterministic Erebus guard, automatically accepting safe commands and denying guard violations without user prompts.
+- Require Windows recursive cleanup to use a completed read-only path validation followed by one literal deletion target.
+
 ## 0.5.0 - 2026-09-07
 
 ### Added

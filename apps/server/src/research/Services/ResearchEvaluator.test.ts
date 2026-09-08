@@ -27,6 +27,7 @@ it("emits provider-compatible confidence schemas and preserves range validation"
       actualViolationObserved: false,
       materialRiskObserved: false,
       repairStillNeeded: false,
+      currentWorkAlreadyAddressesIssue: false,
     },
     contractClauses: [],
     evidence: [],

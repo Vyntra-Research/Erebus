@@ -456,6 +456,7 @@ it("uses the configured harness cadence and confidence threshold", () => {
       actualViolationObserved: true,
       materialRiskObserved: true,
       repairStillNeeded: true,
+      currentWorkAlreadyAddressesIssue: false,
     },
     contractClauses: ["impactThreshold"],
     evidence: ["The principal switched to an excluded branch."],
@@ -485,6 +486,7 @@ it("steers only for a confident deviation with a concrete correction", () => {
       actualViolationObserved: true,
       materialRiskObserved: true,
       repairStillNeeded: true,
+      currentWorkAlreadyAddressesIssue: false,
     },
     contractClauses: ["impactThreshold"],
     evidence: ["The principal switched to an availability-only branch."],
@@ -510,6 +512,15 @@ it("steers only for a confident deviation with a concrete correction", () => {
     shouldObserverIntervene({
       ...assessment,
       interventionBasis: { ...assessment.interventionBasis, repairStillNeeded: false },
+    }),
+  );
+  assert.isFalse(
+    shouldObserverIntervene({
+      ...assessment,
+      interventionBasis: {
+        ...assessment.interventionBasis,
+        currentWorkAlreadyAddressesIssue: true,
+      },
     }),
   );
   assert.isFalse(shouldObserverIntervene({ ...assessment, evidence: [] }));

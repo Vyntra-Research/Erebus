@@ -429,6 +429,7 @@ export function shouldObserverIntervene(
     assessment.interventionBasis.actualViolationObserved &&
     assessment.interventionBasis.materialRiskObserved &&
     assessment.interventionBasis.repairStillNeeded &&
+    !assessment.interventionBasis.currentWorkAlreadyAddressesIssue &&
     assessment.contractClauses.some((clause) => clause.trim().length > 0) &&
     assessment.evidence.some((evidence) => evidence.trim().length > 0) &&
     Boolean(assessment.recommendedSteering?.trim())

@@ -2,9 +2,11 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
-  type MessageId,
+  MessageId,
   type ModelSelection,
   type OrchestrationEvent,
+  type ProviderSendTurnInput,
+  type ProviderTurnStartResult,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
@@ -17,6 +19,7 @@ import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shar
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -51,6 +54,8 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
+const MAX_CODEX_USAGE_FAILOVERS_PER_TURN = 8;
+const CODEX_USAGE_FAILOVER_CONTINUATION = `The previous turn stopped only because the active Codex account reached its usage limit. Erebus switched to another authenticated account. Continue from the exact last durable point of the interrupted turn. Do not restart completed work, reinterpret this as a new user request, or wait for the user to repeat the request.`;
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -69,6 +74,19 @@ type ProviderIntentEvent = Extract<
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+export function isCodexUsageLimitDetail(detail: string): boolean {
+  const normalized = detail.toLowerCase();
+  return (
+    normalized.includes("you've hit your usage limit") ||
+    normalized.includes("you have hit your usage limit") ||
+    normalized.includes("usage_limit") ||
+    normalized.includes("usage limit reached") ||
+    normalized.includes("quota exhausted") ||
+    normalized.includes("insufficient_quota") ||
+    (normalized.includes("purchase more credits") && normalized.includes("try again"))
+  );
 }
 
 function mapProviderSessionStatusToOrchestrationStatus(
@@ -800,10 +818,18 @@ const make = Effect.gen(function* () {
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
+    const boundProviderInstanceId = currentThread?.session?.providerInstanceId;
     const activeSession = yield* providerService
       .listSessions()
       .pipe(
-        Effect.map((sessions) => sessions.find((session) => session.threadId === input.threadId)),
+        Effect.map((sessions) =>
+          sessions.find(
+            (session) =>
+              session.threadId === input.threadId &&
+              (boundProviderInstanceId === undefined ||
+                session.providerInstanceId === boundProviderInstanceId),
+          ),
+        ),
       );
     const sessionModelSwitch =
       activeSession === undefined
@@ -818,15 +844,21 @@ const make = Effect.gen(function* () {
               .sessionModelSwitch;
     const requestedModelSelection =
       input.modelSelection ?? threadModelSelections.get(input.threadId) ?? thread.modelSelection;
+    const effectiveRequestedModelSelection =
+      activeSession?.providerInstanceId !== undefined
+        ? { ...requestedModelSelection, instanceId: activeSession.providerInstanceId }
+        : requestedModelSelection;
     const modelForTurn =
       sessionModelSwitch === "unsupported" && input.modelSelection === undefined
         ? activeSession?.model !== undefined
           ? {
-              ...requestedModelSelection,
+              ...effectiveRequestedModelSelection,
               model: activeSession.model,
             }
-          : requestedModelSelection
-        : input.modelSelection;
+          : effectiveRequestedModelSelection
+        : input.modelSelection !== undefined
+          ? effectiveRequestedModelSelection
+          : undefined;
 
     return {
       threadId: input.threadId,
@@ -842,6 +874,75 @@ const make = Effect.gen(function* () {
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     };
   });
+
+  type CodexAccountFailoverError =
+    | ProviderServiceError
+    | Effect.Error<ReturnType<typeof buildSendTurnRequestForThread>>;
+
+  const sendTurnWithCodexAccountFailover = (
+    request: ProviderSendTurnInput,
+    requestedModelSelection: ModelSelection,
+    attempt: number,
+  ): Effect.Effect<ProviderTurnStartResult, CodexAccountFailoverError> =>
+    providerService.sendTurn(request).pipe(
+      Effect.catchCause((cause) => {
+        const detail = formatFailureDetail(cause);
+        if (attempt >= MAX_CODEX_USAGE_FAILOVERS_PER_TURN || !isCodexUsageLimitDetail(detail)) {
+          return Effect.failCause(cause);
+        }
+
+        return Effect.gen(function* () {
+          const [thread, runtimeSessions] = yield* Effect.all([
+            resolveThread(request.threadId),
+            providerService.listSessions(),
+          ]);
+          const runtimeSession = runtimeSessions.find(
+            (session) => session.threadId === request.threadId,
+          );
+          const exhaustedInstanceId =
+            runtimeSession?.providerInstanceId ?? thread?.session?.providerInstanceId;
+          if (exhaustedInstanceId === undefined) {
+            return yield* Effect.failCause(cause);
+          }
+
+          const failoverSelection = yield* codexAccountRouter.failoverAfterUsageLimit(
+            requestedModelSelection,
+            exhaustedInstanceId,
+          );
+          if (failoverSelection === null) {
+            return yield* Effect.failCause(cause);
+          }
+
+          yield* providerRegistry
+            .refreshInstance(exhaustedInstanceId)
+            .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach);
+
+          const retryRequest = yield* buildSendTurnRequestForThread({
+            threadId: request.threadId,
+            messageId: MessageId.make(
+              `${request.clientUserMessageId ?? request.threadId}:usage-failover:${attempt + 1}`,
+            ),
+            messageText: CODEX_USAGE_FAILOVER_CONTINUATION,
+            modelSelection: failoverSelection,
+            ...(request.interactionMode !== undefined
+              ? { interactionMode: request.interactionMode }
+              : {}),
+            createdAt: DateTime.formatIso(yield* DateTime.now),
+          });
+          yield* Effect.logWarning("Retrying Codex turn on another account after usage limit", {
+            threadId: request.threadId,
+            exhaustedInstanceId,
+            failoverInstanceId: failoverSelection.instanceId,
+            attempt: attempt + 1,
+          });
+          return yield* sendTurnWithCodexAccountFailover(
+            retryRequest,
+            failoverSelection,
+            attempt + 1,
+          );
+        });
+      }),
+    );
 
   const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fn(
     "maybeGenerateAndRenameWorktreeBranchForFirstTurn",
@@ -1233,9 +1334,14 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    const requestedModelSelection =
+      event.payload.modelSelection ??
+      threadModelSelections.get(event.payload.threadId) ??
+      thread.modelSelection;
+    yield* sendTurnWithCodexAccountFailover(sendTurnRequest.value, requestedModelSelection, 0).pipe(
+      Effect.catchCause(recoverTurnStartFailure),
+      Effect.forkScoped,
+    );
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (

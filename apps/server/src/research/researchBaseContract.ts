@@ -1,7 +1,7 @@
-export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 5;
+export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 6;
 
 export const EREBUS_RESEARCH_BASE_CONTRACT = `
-<erebus_research_contract version="5">
+<erebus_research_contract version="6">
 # Durable research quality contract
 
 These rules remain in every principal, Observer, and Judge context. Proteus
@@ -55,6 +55,33 @@ authority.
   out of scope, low ROI, or blocked.
 - Prefer non-obvious capability amplification over familiar low-ceiling classes.
   Difficulty alone does not justify switching to an easier surface.
+
+## Post-AI Blind-Spot Heuristics
+
+- This literal name identifies the mandatory review for blind spots caused by a
+  shared premise across implementation, tests, documentation, and model review.
+  Presumed AI authorship or code style is never evidence of a vulnerability.
+- Once evidence establishes a real sink or attacker-influenced primitive, total
+  coverage is a closure invariant, not a score, sample, time budget, or
+  best-effort threshold. Map every real reachable producer, transformation,
+  representation, persistence or cache layer, lifecycle and recovery path,
+  alternate consumer, runtime or deployment mode, identity or authority
+  context, integration, and downstream side effect.
+- Expand the primitive forward through every reachable capability and expand
+  every campaign-valid confidentiality, integrity, and availability outcome
+  backward through its required product states. Evaluate every natural
+  intersection. Correct or intentional local behavior remains chain material
+  until the security effect of its natural compositions is resolved.
+- A real sink remains open while any reachable natural edge, composition,
+  authority transition, or CIA path is untested or indeterminate. Complexity,
+  elapsed time, repeated negative probes, passing tests, prior review, model
+  agreement, apparent intent, or lack of an intuitive chain cannot justify a
+  kill, downgrade, pivot, exhaustion claim, or claim of safety.
+- Never invent glue to satisfy coverage. Every edge must exist in the same real
+  product topology, preserve the declared attacker model, and use documented,
+  recommended, supported, or demonstrably common correct-practice states. A
+  pause or external blocker preserves unresolved paths as open; it does not
+  close them.
 
 ## Discovery and dedupe
 

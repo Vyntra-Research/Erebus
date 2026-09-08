@@ -179,6 +179,13 @@ describe("evaluateCommandSafety", () => {
     ).toEqual({ decision: "allow" });
     expect(
       evaluateCommandSafety(
+        context(
+          "Remove-Item -LiteralPath C:\\Users\\researcher\\AppData\\Local\\Temp\\b249-go-icu-v1.0.2-20260907 -Recurse -Force",
+        ),
+      ),
+    ).toEqual({ decision: "allow" });
+    expect(
+      evaluateCommandSafety(
         context("Remove-Item -LiteralPath .\\work\\old-fixture -Recurse -Force"),
       ),
     ).toEqual({ decision: "allow" });

@@ -480,6 +480,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
       return;
     }
     const timeline = buildObserverTimeline(messages, context.thread.messages);
+    const activeTurnId = context.thread.session?.activeTurnId ?? null;
     const commandAudit = buildObserverCommandAudit(
       messages,
       context.thread.activities,
@@ -501,6 +502,10 @@ const makeResearchSupervisor = Effect.gen(function* () {
         messages: messages.map((message) => ({ id: message.id, text: message.text })),
         timeline,
         commandAudit,
+        turnState: {
+          activeTurnId,
+          windowEndsInActiveTurn: activeTurnId !== null && messages.at(-1)?.turnId === activeTurnId,
+        },
       })
       .pipe(Effect.retry({ times: 2 }));
     const cvssMismatches = messages.flatMap((message) =>
@@ -516,6 +521,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
               actualViolationObserved: true,
               materialRiskObserved: true,
               repairStillNeeded: true,
+              currentWorkAlreadyAddressesIssue: false,
             },
             contractClauses: [
               "G13: Evidence must support the exact impact without speculative or inconsistent claims.",

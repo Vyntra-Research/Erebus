@@ -23,6 +23,7 @@ export const ObserverAssessment = Schema.Struct({
     actualViolationObserved: Schema.Boolean,
     materialRiskObserved: Schema.Boolean,
     repairStillNeeded: Schema.Boolean,
+    currentWorkAlreadyAddressesIssue: Schema.Boolean,
   }),
   contractClauses: Schema.Array(Schema.String),
   evidence: Schema.Array(Schema.String),
@@ -148,6 +149,10 @@ export interface ResearchEvaluatorShape {
     readonly messages: ReadonlyArray<{ readonly id: string; readonly text: string }>;
     readonly timeline: ReadonlyArray<ObserverTimelineMessage>;
     readonly commandAudit: ObserverCommandAudit;
+    readonly turnState: {
+      readonly activeTurnId: string | null;
+      readonly windowEndsInActiveTurn: boolean;
+    };
   }) => Effect.Effect<ObserverAssessment, ResearchEvaluatorError>;
   readonly evaluateJudge: (input: {
     readonly cwd: string;

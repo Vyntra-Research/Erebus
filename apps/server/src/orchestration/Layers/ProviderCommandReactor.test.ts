@@ -63,6 +63,7 @@ import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
+import { CodexAccountRouter } from "../../provider/Services/CodexAccountRouter.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -155,6 +156,11 @@ describe("ProviderCommandReactor", () => {
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
+    readonly sendTurnEffect?: (
+      request: Parameters<ProviderServiceShape["sendTurn"]>[0],
+      callIndex: number,
+    ) => ReturnType<ProviderServiceShape["sendTurn"]>;
+    readonly codexFailoverSelection?: ModelSelection | null;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir =
@@ -231,11 +237,19 @@ describe("ProviderCommandReactor", () => {
         ),
       );
     });
-    const sendTurn = vi.fn((_: unknown) =>
-      Effect.succeed({
-        threadId: ThreadId.make("thread-1"),
-        turnId: asTurnId("turn-1"),
-      }),
+    let sendTurnCallIndex = 0;
+    const sendTurn = vi.fn((request: Parameters<ProviderServiceShape["sendTurn"]>[0]) => {
+      const callIndex = sendTurnCallIndex++;
+      return (
+        input?.sendTurnEffect?.(request, callIndex) ??
+        Effect.succeed({
+          threadId: ThreadId.make("thread-1"),
+          turnId: asTurnId(`turn-${callIndex + 1}`),
+        })
+      );
+    });
+    const failoverAfterUsageLimit = vi.fn(() =>
+      Effect.succeed(input?.codexFailoverSelection ?? null),
     );
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
@@ -406,6 +420,13 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
       Layer.provideMerge(
+        Layer.succeed(CodexAccountRouter, {
+          resolveModelSelection: Effect.succeed,
+          failoverAfterUsageLimit,
+          activeInstanceId: Effect.succeed(null),
+        }),
+      ),
+      Layer.provideMerge(
         Layer.mock(GitWorkflowService.GitWorkflowService)({
           renameBranch,
           pruneWorktrees,
@@ -509,6 +530,7 @@ describe("ProviderCommandReactor", () => {
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       startSession,
       sendTurn,
+      failoverAfterUsageLimit,
       interruptTurn,
       respondToRequest,
       respondToUserInput,
@@ -2089,10 +2111,78 @@ describe("ProviderCommandReactor", () => {
       providerInstanceId: ProviderInstanceId.make("codex_work"),
       resumeCursor: { opaque: "resume-1" },
     });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex_work"),
+        model: "gpt-5-codex",
+      },
+    });
 
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
+  });
+
+  it("retries a usage-limited Codex turn on another compatible account", async () => {
+    const primarySelection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5-codex", [
+      { id: "reasoningEffort", value: "high" },
+    ]);
+    const fallbackSelection = {
+      ...primarySelection,
+      instanceId: ProviderInstanceId.make("codex_work"),
+    };
+    const harness = await createHarness({
+      threadModelSelection: primarySelection,
+      codexFailoverSelection: fallbackSelection,
+      sendTurnEffect: (_request, callIndex) =>
+        callIndex === 0
+          ? Effect.fail(
+              new ProviderAdapterRequestError({
+                provider: "codex",
+                method: "turn/start",
+                detail: "You've hit your usage limit. Purchase more credits or try again later.",
+              }),
+            )
+          : Effect.succeed({
+              threadId: ThreadId.make("thread-1"),
+              turnId: asTurnId("turn-failover"),
+            }),
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-usage-failover"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-usage-failover"),
+          role: "user",
+          text: "continue the research",
+          attachments: [],
+        },
+        modelSelection: primarySelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.failoverAfterUsageLimit).toHaveBeenCalledWith(
+      primarySelection,
+      ProviderInstanceId.make("codex"),
+    );
+    expect(harness.startSession).toHaveBeenCalledTimes(2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      providerInstanceId: ProviderInstanceId.make("codex_work"),
+      modelSelection: fallbackSelection,
+      resumeCursor: { opaque: "resume-1" },
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      input: expect.stringContaining("previous turn stopped only because"),
+      modelSelection: fallbackSelection,
+    });
   });
 
   it("restarts the provider session when the thread workspace changes", async () => {
@@ -3142,7 +3232,7 @@ describe("ProviderCommandReactor", () => {
       ),
     );
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-set-for-user-input-error"),
@@ -3160,7 +3250,7 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.activity.append",
         commandId: CommandId.make("cmd-user-input-requested"),
@@ -3193,7 +3283,7 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.user-input.respond",
         commandId: CommandId.make("cmd-user-input-respond-stale"),

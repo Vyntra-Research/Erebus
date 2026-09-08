@@ -48,7 +48,7 @@ import {
 } from "../../commandSafety.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import {
-  buildCodexHistoricalUserSteerMarker,
+  buildCodexCompactionBoundaryMarker,
   buildCodexCompactionContextInstruction,
   buildCodexLiveCoagentMessagePrompt,
   buildCodexLiveUserSteerPrompt,
@@ -563,14 +563,39 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
     case "full-access":
     default:
       return {
-        // Full access must stay non-interactive. Exec-policy rules used by
-        // Erebus are hard denials; setting this to on-request also enables
-        // ordinary provider approval prompts for otherwise allowed commands.
-        approvalPolicy: "never",
+        // Codex still routes some destructive-looking commands through its
+        // approval protocol under danger-full-access. Keep that protocol
+        // enabled so the deterministic Erebus handler below can accept safe
+        // commands and decline guard violations without opening a user prompt.
+        approvalPolicy: "on-request",
         sandbox: "danger-full-access",
         approvalsReviewer: "user",
       };
   }
+}
+
+export function automaticCodexCommandApproval(input: {
+  readonly command: string;
+  readonly cwd: string;
+  readonly workspaceRoot: string;
+  readonly runtimeMode: RuntimeMode;
+  readonly reason: string | null | undefined;
+}) {
+  const safety = evaluateCommandSafety({
+    command: input.command,
+    cwd: input.cwd,
+    workspaceRoot: input.workspaceRoot,
+  });
+  if (safety.decision === "block") {
+    return { decision: "decline" as const, safety };
+  }
+  if (
+    input.runtimeMode === "full-access" ||
+    input.reason?.includes(EREBUS_COMMAND_GUARD_REASON_MARKER)
+  ) {
+    return { decision: "accept" as const, safety };
+  }
+  return { decision: null, safety };
 }
 
 function buildThreadStartParams(input: {
@@ -1272,6 +1297,7 @@ export const makeCodexSessionRuntime = (
     } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
     const lastLiveUserSteerRef = yield* Ref.make<CodexTrackedLiveUserSteer | null>(null);
+    const lastCompactionBoundaryTurnRef = yield* Ref.make<TurnId | null>(null);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
@@ -1295,31 +1321,35 @@ export const makeCodexSessionRuntime = (
 
     const markLastLiveUserSteerHistorical = (compactedTurnId: TurnId) =>
       Effect.gen(function* () {
-        const stale = yield* Ref.modify(lastLiveUserSteerRef, (current) => {
+        yield* Ref.update(lastLiveUserSteerRef, (current) => {
           const marked = markTrackedUserSteerHistorical(current, compactedTurnId);
-          return [marked.stale, marked.next] as const;
+          return marked.next;
         });
-        if (stale === null) return;
+        const isNewBoundary = yield* Ref.modify(lastCompactionBoundaryTurnRef, (current) =>
+          current === compactedTurnId
+            ? ([false, current] as const)
+            : ([true, compactedTurnId] as const),
+        );
+        if (!isNewBoundary) return;
 
         const providerThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
         if (!providerThreadId) return;
-        const clientUserMessageId = erebusContextClientId(stale.clientUserMessageId);
+        const clientUserMessageId = erebusContextClientId(`compaction-boundary:${compactedTurnId}`);
         yield* client
           .request(
             "turn/steer",
             buildTurnSteerParams(
               providerThreadId,
               compactedTurnId,
-              buildCodexHistoricalUserSteerMarker(stale.clientUserMessageId, stale.kind),
+              buildCodexCompactionBoundaryMarker(compactedTurnId),
               clientUserMessageId,
             ),
           )
           .pipe(
             Effect.catch((cause) =>
-              Effect.logWarning("Failed to mark the last live user steer after compaction.", {
+              Effect.logWarning("Failed to mark the post-compaction context boundary.", {
                 threadId: options.threadId,
                 turnId: compactedTurnId,
-                clientUserMessageId: stale.clientUserMessageId,
                 cause,
               }),
             ),
@@ -1870,11 +1900,14 @@ export const makeCodexSessionRuntime = (
       Effect.gen(function* () {
         const command = payload.command?.trim() ?? "";
         const commandAgent = (yield* Ref.get(collabChildAgentsRef)).get(payload.threadId);
-        const commandSafety = evaluateCommandSafety({
+        const automaticApproval = automaticCodexCommandApproval({
           command,
           cwd: payload.cwd?.trim() || options.cwd,
           workspaceRoot: options.cwd,
+          runtimeMode: options.runtimeMode,
+          reason: payload.reason,
         });
+        const commandSafety = automaticApproval.safety;
         if (commandSafety.decision === "block") {
           yield* emitEvent({
             kind: "notification",
@@ -1895,10 +1928,7 @@ export const makeCodexSessionRuntime = (
           } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;
         }
 
-        const requestedByErebusPolicy = payload.reason?.includes(
-          EREBUS_COMMAND_GUARD_REASON_MARKER,
-        );
-        if (options.runtimeMode === "full-access" || requestedByErebusPolicy) {
+        if (automaticApproval.decision === "accept") {
           return {
             decision: "accept",
           } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;

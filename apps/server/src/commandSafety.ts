@@ -5,8 +5,8 @@ import * as NodePath from "node:path";
 export const EREBUS_COMMAND_GUARD_REASON_MARKER = "[erebus-command-guard]";
 
 export const EREBUS_CODEX_EXEC_POLICY = `# Managed by Erebus. Local user rules belong in other files.
-# Full-access sessions use approvalPolicy=never. These rules are objective hard
-# denials, not approval hooks, so allowed commands remain prompt-free.
+# Full-access sessions route approval requests through Erebus automatically.
+# These rules are objective hard denials, so allowed commands remain prompt-free.
 prefix_rule(pattern=["rg"], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Use a bounded native search instead of rg.")
 prefix_rule(pattern=["rg.exe"], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Use a bounded native search instead of rg.")
 prefix_rule(pattern=[["diskpart", "diskpart.exe"]], decision="forbidden", justification="${EREBUS_COMMAND_GUARD_REASON_MARKER} Disk-wide mutation is blocked.")
