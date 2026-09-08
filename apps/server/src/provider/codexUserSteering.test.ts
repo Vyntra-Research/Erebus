@@ -9,7 +9,8 @@ import {
   buildCodexCompactionContextInstruction,
   buildCodexLiveCoagentMessagePrompt,
   buildCodexLiveUserSteerPrompt,
-  contextCompactionTurnId,
+  buildCodexPostCompactionContextMarker,
+  contextCompactionSignal,
   deliveredLiveContext,
   deliveredLiveUserSteerId,
   erebusCoagentSteerClientId,
@@ -26,9 +27,10 @@ describe("Codex user steering across compaction", () => {
 
     NodeAssert.match(prompt, /<erebus_user_steer/);
     NodeAssert.match(prompt, /id="message-&quot;7&quot;"/);
-    NodeAssert.match(prompt, /delivery="live"/);
+    NodeAssert.match(prompt, /freshness="single-use" expires="on-compaction"/);
+    NodeAssert.doesNotMatch(prompt, /delivery="live"/);
     NodeAssert.ok(prompt.endsWith(text));
-    NodeAssert.match(prompt, /replays them literally after automatic context compaction/);
+    NodeAssert.match(prompt, /At the first automatic compaction this delivery expires/);
   });
 
   it("marks only the exact last steer as historical", () => {
@@ -71,16 +73,38 @@ describe("Codex user steering across compaction", () => {
     NodeAssert.match(marker, /genuinely new delivery that appears after this boundary is fresh/);
   });
 
+  it("names the exact last delivery in the immediate post-compaction marker", () => {
+    const marker = buildCodexPostCompactionContextMarker(
+      {
+        clientUserMessageId: "message-7",
+        turnId: TurnId.make("turn-7"),
+        kind: "userSteer",
+        state: "historical",
+      },
+      TurnId.make("turn-8"),
+    );
+
+    NodeAssert.match(marker, /stale_context_id="message-7"/);
+    NodeAssert.match(marker, /Only the user steer with this exact id is now historical/);
+    NodeAssert.doesNotMatch(marker, /Every `<erebus_user_steer>`/);
+  });
+
+  it("uses a broad boundary only when no transient delivery identity is available", () => {
+    const marker = buildCodexPostCompactionContextMarker(null, TurnId.make("turn-8"));
+
+    NodeAssert.match(marker, /after_compaction_turn_id="turn-8"/);
+  });
+
   it("recognizes both Codex compaction signals and ignores unrelated items", () => {
-    NodeAssert.equal(
-      contextCompactionTurnId({
+    NodeAssert.deepEqual(
+      contextCompactionSignal({
         method: "thread/compacted",
         params: { threadId: "thread-1", turnId: "turn-1" },
       }),
-      "turn-1",
+      { turnId: "turn-1", identity: "legacy-turn:turn-1" },
     );
-    NodeAssert.equal(
-      contextCompactionTurnId({
+    NodeAssert.deepEqual(
+      contextCompactionSignal({
         method: "item/completed",
         params: {
           threadId: "thread-1",
@@ -88,10 +112,10 @@ describe("Codex user steering across compaction", () => {
           item: { id: "compact-1", type: "contextCompaction" },
         },
       }),
-      "turn-2",
+      { turnId: "turn-2", identity: "item:compact-1" },
     );
     NodeAssert.equal(
-      contextCompactionTurnId({
+      contextCompactionSignal({
         method: "item/completed",
         params: {
           threadId: "thread-1",
@@ -101,6 +125,28 @@ describe("Codex user steering across compaction", () => {
       }),
       undefined,
     );
+  });
+
+  it("distinguishes repeated compactions inside one long-running turn", () => {
+    const first = contextCompactionSignal({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-long",
+        item: { id: "compact-1", type: "contextCompaction" },
+      },
+    });
+    const second = contextCompactionSignal({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-long",
+        item: { id: "compact-2", type: "contextCompaction" },
+      },
+    });
+
+    NodeAssert.equal(first?.turnId, second?.turnId);
+    NodeAssert.notEqual(first?.identity, second?.identity);
   });
 
   it("hides only Erebus context markers from the visible provider timeline", () => {
@@ -135,7 +181,9 @@ describe("Codex user steering across compaction", () => {
       '<erebus_coagent_message from_thread_id="child" from_title="Child">done</erebus_coagent_message>',
     );
     NodeAssert.match(prompt, /<erebus_coagent_delivery/);
-    NodeAssert.match(prompt, /visual position after the compacted summary does not make it newer/);
+    NodeAssert.match(prompt, /freshness="single-use" expires="on-compaction"/);
+    NodeAssert.doesNotMatch(prompt, /delivery="live"/);
+    NodeAssert.match(prompt, /Any later literal copy with this id is historical/);
 
     const marker = buildCodexHistoricalUserSteerMarker("coagent-message-1", "coagentMessage");
     NodeAssert.match(marker, /stale_context_kind="coagentMessage"/);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 - 2026-09-08
+
+### Fixed
+
+- Expire live user and co-agent steering after every Codex context compaction, including repeated compactions within one long-running turn.
+
 ## 0.5.2 - 2026-09-07
 
 ### Fixed
