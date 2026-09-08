@@ -48,11 +48,11 @@ import {
 } from "../../commandSafety.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import {
-  buildCodexCompactionBoundaryMarker,
   buildCodexCompactionContextInstruction,
+  buildCodexPostCompactionContextMarker,
   buildCodexLiveCoagentMessagePrompt,
   buildCodexLiveUserSteerPrompt,
-  contextCompactionTurnId,
+  contextCompactionSignal,
   type CodexTrackedLiveUserSteer,
   deliveredLiveContext,
   erebusCoagentSteerClientId,
@@ -1310,7 +1310,7 @@ export const makeCodexSessionRuntime = (
     } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
     const lastLiveUserSteerRef = yield* Ref.make<CodexTrackedLiveUserSteer | null>(null);
-    const lastCompactionBoundaryTurnRef = yield* Ref.make<TurnId | null>(null);
+    const lastCompactionSignalRef = yield* Ref.make<string | null>(null);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
@@ -1332,29 +1332,31 @@ export const makeCodexSessionRuntime = (
         message,
       });
 
-    const markLastLiveUserSteerHistorical = (compactedTurnId: TurnId) =>
+    const markLastLiveUserSteerHistorical = (compactedTurnId: TurnId, compactionIdentity: string) =>
       Effect.gen(function* () {
-        yield* Ref.update(lastLiveUserSteerRef, (current) => {
+        const trackedContext = yield* Ref.modify(lastLiveUserSteerRef, (current) => {
           const marked = markTrackedUserSteerHistorical(current, compactedTurnId);
-          return marked.next;
+          return [marked.next, marked.next] as const;
         });
-        const isNewBoundary = yield* Ref.modify(lastCompactionBoundaryTurnRef, (current) =>
-          current === compactedTurnId
+        const isNewBoundary = yield* Ref.modify(lastCompactionSignalRef, (current) =>
+          current === compactionIdentity
             ? ([false, current] as const)
-            : ([true, compactedTurnId] as const),
+            : ([true, compactionIdentity] as const),
         );
         if (!isNewBoundary) return;
 
         const providerThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
         if (!providerThreadId) return;
-        const clientUserMessageId = erebusContextClientId(`compaction-boundary:${compactedTurnId}`);
+        const clientUserMessageId = erebusContextClientId(
+          `compaction-boundary:${compactionIdentity}`,
+        );
         yield* client
           .request(
             "turn/steer",
             buildTurnSteerParams(
               providerThreadId,
               compactedTurnId,
-              buildCodexCompactionBoundaryMarker(compactedTurnId),
+              buildCodexPostCompactionContextMarker(trackedContext, compactedTurnId),
               clientUserMessageId,
             ),
           )
@@ -1773,13 +1775,13 @@ export const makeCodexSessionRuntime = (
           return;
         }
 
-        const compactedTurnId = contextCompactionTurnId(notification);
+        const compaction = contextCompactionSignal(notification);
         const notificationThreadId = readNotificationThreadId(notification);
         if (
-          compactedTurnId !== undefined &&
+          compaction !== undefined &&
           (notificationThreadId === undefined || notificationThreadId === suppressRootId)
         ) {
-          yield* markLastLiveUserSteerHistorical(compactedTurnId);
+          yield* markLastLiveUserSteerHistorical(compaction.turnId, compaction.identity);
         }
 
         let requestId: ApprovalRequestId | undefined;

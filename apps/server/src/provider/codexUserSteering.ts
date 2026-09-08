@@ -24,7 +24,9 @@ export const EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS = `
 
 ## Erebus live steering and co-agent context
 
-A \`<erebus_user_steer>\` header identifies user text submitted while a run was already active. Apply that text once on its first delivery. Codex can replay the exact last header and user text literally after automatic context compaction, outside and after the compacted summary. That replay is historical even when the header still says \`delivery="live"\`: do not acknowledge, reapply, restate, or treat it as the latest iteration. Continue from the progress already preserved by the compacted context.
+A \`<erebus_user_steer>\` header identifies user text submitted while a run was already active. Its \`freshness="single-use"\` value is a lifetime rule, not a claim that every literal copy is current: apply that delivery once, then expire it at the first automatic compaction. Codex can replay the exact last header and user text literally outside and after the compacted summary. That replay is historical. Do not acknowledge, reapply, restate, or treat it as the latest iteration. Continue from the progress already preserved by the compacted context.
+
+Older recorded headers may still contain \`delivery="live"\`. That value describes only their original transport and is void after the first compaction. It never overrides a compaction boundary or stale-context marker.
 
 Compaction chronology outranks literal display order. When a compacted summary exists, a repeated \`<erebus_user_steer>\` carrying an older id is never the current user turn, the next action, or the most recent actionable instruction merely because Codex placed it after the summary. Do not restart from it. The compacted summary and work after it are newer.
 
@@ -34,9 +36,9 @@ Erebus may send an \`<erebus_context stale_context_id="..." stale_context_kind="
 `;
 
 export function buildCodexLiveUserSteerPrompt(clientUserMessageId: string, text: string): string {
-  return `<erebus_user_steer id="${escapeXmlAttribute(clientUserMessageId)}" delivery="live">
+  return `<erebus_user_steer id="${escapeXmlAttribute(clientUserMessageId)}" freshness="single-use" expires="on-compaction">
 <handling>
-This header and the user text below are fresh only on their first delivery during the current uninterrupted run. If Codex replays them literally after automatic context compaction, they are historical. Do not acknowledge or apply that replay again. A later user submission has a different id.
+Apply this user text exactly once on its first delivery during the current uninterrupted run. This static header never proves that a replay is current. At the first automatic compaction this delivery expires. Any later literal copy with this id is historical, even if Codex displays it after the compacted summary. Do not acknowledge or apply that replay again. A later user submission has a different id.
 </handling>
 </erebus_user_steer>
 
@@ -47,9 +49,9 @@ export function buildCodexLiveCoagentMessagePrompt(
   clientUserMessageId: string,
   text: string,
 ): string {
-  return `<erebus_coagent_delivery id="${escapeXmlAttribute(clientUserMessageId)}" delivery="live">
+  return `<erebus_coagent_delivery id="${escapeXmlAttribute(clientUserMessageId)}" freshness="single-use" expires="on-compaction">
 <handling>
-This task-to-task context is fresh only on its first delivery during the current uninterrupted run. If Codex replays it literally after automatic context compaction, it is historical. Its visual position after the compacted summary does not make it newer. Do not acknowledge or apply that replay again.
+Apply this task-to-task context exactly once on its first delivery during the current uninterrupted run. This static header never proves that a replay is current. At the first automatic compaction this delivery expires. Any later literal copy with this id is historical, even if Codex displays it after the compacted summary. Do not acknowledge or apply that replay again.
 </handling>
 </erebus_coagent_delivery>
 
@@ -61,7 +63,7 @@ export function buildCodexHistoricalUserSteerMarker(
   kind: CodexTrackedLiveContextKind = "userSteer",
 ): string {
   return `<erebus_context stale_context_id="${escapeXmlAttribute(clientUserMessageId)}" stale_context_kind="${kind}">
-This is authoritative harness chronology, not a new user request. Automatic context compaction has completed. Only the ${kind === "userSteer" ? "user steer" : "co-agent message"} with this exact id is now historical. It happened before the compacted summary. If its wrapper and text appear literally outside or after that summary, that display order is a replay artifact, not chronology. It is not the current user turn, the next action, or the latest actionable instruction. Do not restart from, acknowledge, or reapply it. Continue from the progress preserved by the compacted summary and later work. Do not reclassify any other message.
+This is authoritative harness chronology, not a new user request. Automatic context compaction has completed. Only the ${kind === "userSteer" ? "user steer" : "co-agent message"} with this exact id is now historical. It happened before the compacted summary. Any delivery or freshness value inside its original wrapper is now void. If its wrapper and text appear literally outside or after that summary, that display order is a replay artifact, not chronology. It is not the current user turn, the next action, or the latest actionable instruction. Do not restart from, acknowledge, or reapply it. Continue from the progress preserved by the compacted summary and later work. Do not reclassify any other message.
 </erebus_context>`;
 }
 
@@ -69,6 +71,19 @@ export function buildCodexCompactionBoundaryMarker(compactedTurnId: TurnId): str
   return `<erebus_context_boundary after_compaction_turn_id="${escapeXmlAttribute(compactedTurnId)}">
 This is authoritative harness chronology, not a new user request. Automatic context compaction has completed. Every \`<erebus_user_steer>\` and \`<erebus_coagent_delivery>\` that appears before this boundary is historical, including any literal wrapper that Codex placed outside or after the compacted summary. Its visual position does not make it the current user turn, the next action, or the latest actionable instruction. Do not restart from, acknowledge, restate, or reapply any such replay. Continue from the progress preserved by the compacted summary and later work. Only a genuinely new delivery that appears after this boundary is fresh.
 </erebus_context_boundary>`;
+}
+
+export function buildCodexPostCompactionContextMarker(
+  current: CodexTrackedLiveUserSteer | null,
+  compactedTurnId: TurnId,
+): string {
+  // Codex replays at most the last injected live context as the misleading
+  // post-summary user item. Name that exact delivery whenever we know it;
+  // the broad boundary is only a recovery fallback when this session did not
+  // observe the original delivery.
+  return current
+    ? buildCodexHistoricalUserSteerMarker(current.clientUserMessageId, current.kind)
+    : buildCodexCompactionBoundaryMarker(compactedTurnId);
 }
 
 export function buildCodexCompactionContextInstruction(
@@ -150,24 +165,34 @@ export function isHiddenErebusContextItem(item: unknown): boolean {
   );
 }
 
-export function contextCompactionTurnId(notification: {
+export function contextCompactionSignal(notification: {
   readonly method: string;
   readonly params: unknown;
-}): TurnId | undefined {
+}): { readonly turnId: TurnId; readonly identity: string } | undefined {
   if (typeof notification.params !== "object" || notification.params === null) return undefined;
   const params = notification.params as {
     readonly turnId?: unknown;
     readonly item?: unknown;
   };
   if (typeof params.turnId !== "string") return undefined;
-  if (notification.method === "thread/compacted") return TurnId.make(params.turnId);
+  if (notification.method === "thread/compacted") {
+    return {
+      turnId: TurnId.make(params.turnId),
+      identity: `legacy-turn:${params.turnId}`,
+    };
+  }
   if (
     notification.method === "item/completed" &&
     typeof params.item === "object" &&
     params.item !== null &&
     (params.item as { readonly type?: unknown }).type === "contextCompaction"
   ) {
-    return TurnId.make(params.turnId);
+    const itemId = (params.item as { readonly id?: unknown }).id;
+    if (typeof itemId !== "string" || itemId.length === 0) return undefined;
+    return {
+      turnId: TurnId.make(params.turnId),
+      identity: `item:${itemId}`,
+    };
   }
   return undefined;
 }
