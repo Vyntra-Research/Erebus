@@ -16,9 +16,10 @@ import {
 } from "../CodexDeveloperInstructions.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
+  automaticCodexMcpElicitationResponse,
+  automaticCodexCommandApproval,
   buildTurnSteerParams,
   buildTurnStartParams,
-  automaticCodexCommandApproval,
   describeMcpElicitation,
   handleDynamicToolCallForProviderThread,
   hasConfiguredMcpServer,
@@ -441,6 +442,43 @@ describe("Codex MCP elicitation approvals", () => {
       required: ["approval"],
     },
   } satisfies EffectCodexSchema.McpServerElicitationRequestParams;
+
+  const toolApprovalRequest = {
+    ...request,
+    serverName: "proteus",
+    message: "Allow Proteus to run Get Memory Record?",
+    _meta: {
+      codex_approval_kind: "mcp_tool_call",
+      persist: ["session", "always"],
+    },
+  } satisfies EffectCodexSchema.McpServerElicitationRequestParams;
+
+  it("auto-approves MCP tool calls only in full-access mode", () => {
+    NodeAssert.deepStrictEqual(
+      automaticCodexMcpElicitationResponse({
+        runtimeMode: "full-access",
+        payload: toolApprovalRequest,
+      }),
+      {
+        action: "accept",
+        content: { approval: "once" },
+      },
+    );
+    NodeAssert.equal(
+      automaticCodexMcpElicitationResponse({
+        runtimeMode: "auto",
+        payload: toolApprovalRequest,
+      }),
+      null,
+    );
+  });
+
+  it("keeps ordinary MCP forms interactive in full-access mode", () => {
+    NodeAssert.equal(
+      automaticCodexMcpElicitationResponse({ runtimeMode: "full-access", payload: request }),
+      null,
+    );
+  });
 
   it("preserves the app name and advertised persistence choices", () => {
     NodeAssert.deepStrictEqual(describeMcpElicitation(request), {

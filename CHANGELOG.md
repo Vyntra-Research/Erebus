@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 - 2026-09-07
+
+### Fixed
+
+- Auto-approve MCP tool calls in Full Access while preserving Erebus command-guard blocks and interactive authentication requests.
+
 ## 0.5.1 - 2026-09-07
 
 ### Changed
