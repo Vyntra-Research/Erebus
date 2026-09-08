@@ -90,6 +90,7 @@ const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 const isCodexUserInputAnswerObject = Schema.is(CodexUserInputAnswerObject);
 const NullableMcpElicitationString = Schema.NullOr(Schema.String);
 const McpElicitationMetadata = Schema.Struct({
+  codex_approval_kind: Schema.optionalKey(NullableMcpElicitationString),
   app: Schema.optionalKey(NullableMcpElicitationString),
   app_name: Schema.optionalKey(NullableMcpElicitationString),
   appName: Schema.optionalKey(NullableMcpElicitationString),
@@ -140,6 +141,18 @@ const McpElicitationForm = Schema.Struct({
 });
 const isMcpElicitationMetadata = Schema.is(McpElicitationMetadata);
 const isMcpElicitationForm = Schema.is(McpElicitationForm);
+
+export function automaticCodexMcpElicitationResponse(input: {
+  readonly runtimeMode: RuntimeMode;
+  readonly payload: EffectCodexSchema.McpServerElicitationRequestParams;
+}): EffectCodexSchema.McpServerElicitationRequestResponse | null {
+  const metadata = isMcpElicitationMetadata(input.payload._meta) ? input.payload._meta : undefined;
+  if (input.runtimeMode !== "full-access" || metadata?.codex_approval_kind !== "mcp_tool_call") {
+    return null;
+  }
+  const response = toMcpElicitationResponse(input.payload, "accept");
+  return response.action === "accept" ? response : null;
+}
 
 // TODO: Verify `packages/effect-codex-app-server/scripts/generate.ts` so the generated
 // `V2TurnStartParams` schema includes `collaborationMode` directly.
@@ -2057,6 +2070,12 @@ export const makeCodexSessionRuntime = (
             action: "decline",
           } satisfies EffectCodexSchema.McpServerElicitationRequestResponse;
         }
+
+        const automaticResponse = automaticCodexMcpElicitationResponse({
+          runtimeMode: options.runtimeMode,
+          payload,
+        });
+        if (automaticResponse) return automaticResponse;
 
         const requestId = ApprovalRequestId.make(yield* randomUUIDv4("mcp-elicitation-request"));
         const turnId = payload.turnId
