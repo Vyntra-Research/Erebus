@@ -796,6 +796,148 @@ describe("deriveMessagesTimelineRows", () => {
     ).toBeDefined();
   });
 
+  it("folds settled unkeyed provider markers with their only chronological turn", () => {
+    const timelineEntries = [
+      {
+        id: "user-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:00Z",
+        message: {
+          id: "user-1" as never,
+          role: "user" as const,
+          text: "Continue",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "assistant-first-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:01Z",
+        message: {
+          id: "assistant-first" as never,
+          role: "assistant" as const,
+          text: "Checking the current state.",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:01Z",
+          updatedAt: "2026-01-01T00:00:02Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "compaction-entry",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:03Z",
+        entry: {
+          id: "compaction-work",
+          createdAt: "2026-01-01T00:00:03Z",
+          turnId: "turn-1" as never,
+          label: "Context compacted",
+          tone: "info" as const,
+          toolLifecycleStatus: "completed" as const,
+          sourceActivityKind: "context-compaction" as const,
+        },
+      },
+      ...[4, 5].map((second) => ({
+        id: `approval-entry-${second}`,
+        kind: "work" as const,
+        createdAt: `2026-01-01T00:00:0${second}Z`,
+        entry: {
+          id: `approval-work-${second}`,
+          createdAt: `2026-01-01T00:00:0${second}Z`,
+          turnId: null,
+          label: "Approval resolved",
+          tone: "info" as const,
+          toolLifecycleStatus: "completed" as const,
+          sourceActivityKind: "approval.resolved" as const,
+        },
+      })),
+      {
+        id: "assistant-final-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:06Z",
+        message: {
+          id: "assistant-final" as never,
+          role: "assistant" as const,
+          text: "Done.",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:06Z",
+          updatedAt: "2026-01-01T00:00:07Z",
+          streaming: false,
+        },
+      },
+    ];
+
+    const collapsedRows = deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(collapsedRows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "assistant-first-entry",
+      "turn-fold:turn-1",
+      "assistant-final-entry",
+    ]);
+
+    const expandedRows = deriveMessagesTimelineRows({
+      timelineEntries,
+      expandedTurnIds: new Set(["turn-1" as never]),
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(expandedRows.some((row) => row.kind === "work-toggle")).toBe(true);
+  });
+
+  it("does not fold unkeyed work that is still active", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "running-work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:01Z",
+          entry: {
+            id: "running-work",
+            createdAt: "2026-01-01T00:00:01Z",
+            turnId: null,
+            label: "Waiting for approval",
+            tone: "info",
+            toolLifecycleStatus: "inProgress",
+          },
+        },
+        {
+          id: "assistant-final-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:02Z",
+          message: {
+            id: "assistant-final" as never,
+            role: "assistant",
+            text: "Done.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:02Z",
+            updatedAt: "2026-01-01T00:00:03Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.some((row) => row.kind === "turn-fold")).toBe(false);
+    expect(rows.some((row) => row.kind === "work")).toBe(true);
+  });
+
   it("folds assistant messages between the first and terminal messages", () => {
     const timelineEntries = [
       {

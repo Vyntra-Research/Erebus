@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4 - 2026-09-08
+
+### Fixed
+
+- Fold settled provider lifecycle markers that omit their turn identity into the only matching completed response, while keeping active work, supervision, failures, and agent runs visible.
+
 ## 0.5.3 - 2026-09-08
 
 ### Fixed

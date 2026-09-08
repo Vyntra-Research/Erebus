@@ -572,6 +572,71 @@ function timelineEntryTurnId(entry: TimelineEntry): TurnId | null {
   return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
 }
 
+function explicitFoldTurnId(entry: TimelineEntry): TurnId | null {
+  if (entry.kind === "message" && entry.message.role === "assistant") {
+    return entry.message.turnId ?? null;
+  }
+  return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
+}
+
+function workEntryCanInheritFoldTurn(entry: WorkLogEntry): boolean {
+  // Never infer ownership for state that must remain independently visible.
+  // Provider request-resolution events are sometimes emitted without a turn,
+  // while live work, supervision, and agent runs can outlive the response that
+  // happened to precede them.
+  return (
+    entry.turnId == null &&
+    entry.toolLifecycleStatus !== "inProgress" &&
+    entry.toolLifecycleStatus !== "failed" &&
+    entry.toolLifecycleStatus !== "declined" &&
+    entry.toolLifecycleStatus !== "stopped" &&
+    entry.tone !== "error" &&
+    entry.agentSpawn === undefined &&
+    !workLogEntryIsResearchSupervision(entry)
+  );
+}
+
+/**
+ * Some provider lifecycle events omit turnId even though they occur inside a
+ * single response. Infer ownership only when the user-message-delimited span
+ * contains exactly one explicit turn. Ambiguous spans stay untouched.
+ */
+function deriveInheritedFoldTurnIds(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+): ReadonlyMap<string, TurnId> {
+  const inheritedTurnIdByEntryId = new Map<string, TurnId>();
+  let spanStart = 0;
+
+  const attachUnkeyedSettledWork = (spanEnd: number) => {
+    const span = timelineEntries.slice(spanStart, spanEnd);
+    const explicitTurnIds = new Set<TurnId>();
+    for (const entry of span) {
+      const turnId = explicitFoldTurnId(entry);
+      if (turnId !== null) explicitTurnIds.add(turnId);
+    }
+    if (explicitTurnIds.size !== 1) return;
+
+    const [onlyTurnId] = explicitTurnIds;
+    if (!onlyTurnId) return;
+    for (const entry of span) {
+      if (entry.kind === "work" && workEntryCanInheritFoldTurn(entry.entry)) {
+        inheritedTurnIdByEntryId.set(entry.id, onlyTurnId);
+      }
+    }
+  };
+
+  for (let index = 0; index < timelineEntries.length; index += 1) {
+    const entry = timelineEntries[index];
+    if (entry?.kind === "message" && entry.message.role === "user") {
+      attachUnkeyedSettledWork(index);
+      spanStart = index + 1;
+    }
+  }
+  attachUnkeyedSettledWork(timelineEntries.length);
+
+  return inheritedTurnIdByEntryId;
+}
+
 /**
  * Settled turns keep their first and terminal assistant messages visible.
  * Everything between them folds behind a "Worked for ..." row anchored at
@@ -597,6 +662,7 @@ function deriveTurnFolds(input: {
     startBoundary: string | null;
   }
   const groupsByTurnId = new Map<TurnId, TurnGroup>();
+  const inheritedTurnIdByEntryId = deriveInheritedFoldTurnIds(input.timelineEntries);
 
   let pendingUserBoundary: string | null = null;
   for (const entry of input.timelineEntries) {
@@ -604,12 +670,7 @@ function deriveTurnFolds(input: {
       pendingUserBoundary = entry.message.createdAt;
       continue;
     }
-    const turnId =
-      entry.kind === "message" && entry.message.role === "assistant"
-        ? (entry.message.turnId ?? null)
-        : entry.kind === "work"
-          ? (entry.entry.turnId ?? null)
-          : null;
+    const turnId = explicitFoldTurnId(entry) ?? inheritedTurnIdByEntryId.get(entry.id) ?? null;
     if (!turnId) {
       continue;
     }
