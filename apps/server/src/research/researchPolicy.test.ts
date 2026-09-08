@@ -39,6 +39,17 @@ it("keeps strict role-specific behavior around the shared contract", () => {
   );
   assert.match(OBSERVER_POLICY, /pendingUserSteer.*cannot prove noncompliance/);
   assert.match(OBSERVER_POLICY, /one complete assistant-message boundary/);
+  assert.match(
+    OBSERVER_POLICY,
+    /fresh userPrompt may ask the principal to verify, correct, or revisit/,
+  );
+  assert.match(OBSERVER_POLICY, /incomplete work inside that same live turn is not a deviation/);
+  assert.match(OBSERVER_POLICY, /currentWorkAlreadyAddressesIssue true/);
+  assert.match(OBSERVER_POLICY, /windowEndsInActiveTurn is true/);
+  assert.match(
+    OBSERVER_POLICY,
+    /Do not complain that the principal has "only announced" the check/,
+  );
   assert.match(OBSERVER_POLICY, /coagentMessage is task-to-task coordination/);
   assert.match(OBSERVER_POLICY, /user's prompt and later steers are binding/);
   assert.match(OBSERVER_POLICY, /compliance monitor, not the research coordinator/);
@@ -127,8 +138,8 @@ it("keeps strict role-specific behavior around the shared contract", () => {
 
 it("records a new policy revision and digest for persisted evaluations", () => {
   assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 19);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 22);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 22);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 23);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 23);
   assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 600);
   assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 60);
   assert.equal(RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds, 600);
