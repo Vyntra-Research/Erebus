@@ -55,6 +55,12 @@ describe("shouldBundleCliDependency", () => {
     }
   });
 
+  it("leaves filesystem-distributed research runtimes external", () => {
+    for (const id of ["@rafabd1/argos", "@vyntra-research/proteus"]) {
+      assert.strictEqual(shouldBundleCliDependency(id), false, id);
+    }
+  });
+
   it("leaves bun-only entry points external", () => {
     assert.strictEqual(shouldBundleCliDependency("@effect/platform-bun"), false);
     assert.strictEqual(shouldBundleCliDependency("@effect/sql-sqlite-bun"), false);
@@ -87,7 +93,13 @@ describe("selectCliRuntimeExternalDependencies", () => {
   it("selects every external root declared by the server", () => {
     assert.deepStrictEqual(
       Object.keys(selectCliRuntimeExternalDependencies(serverPackageJson.dependencies)).sort(),
-      ["@ff-labs/fff-node", "@vyntra-research/proteus", "msgpackr-extract", "node-pty"],
+      [
+        "@ff-labs/fff-node",
+        "@rafabd1/argos",
+        "@vyntra-research/proteus",
+        "msgpackr-extract",
+        "node-pty",
+      ],
     );
   });
 });

@@ -410,6 +410,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       bootstrapDelivery: "fd3",
       httpBaseUrl: backendExposure.httpBaseUrl,
       captureOutput: true,
+      expectedServerVersion: serverPackageJson.version,
       preflightFailure: Option.none(),
     } satisfies DesktopBackendManager.DesktopBackendStartConfig;
   },
@@ -552,6 +553,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     bootstrapDelivery: "stdin" as const,
     httpBaseUrl,
     captureOutput: true,
+    expectedServerVersion: serverPackageJson.version,
     ...(runningDistro !== null ? { runningDistro } : {}),
   };
 
