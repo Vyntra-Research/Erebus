@@ -146,6 +146,22 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
   }
 
+  getThreadGoal = Effect.succeed(null);
+
+  setThreadGoalStatus() {
+    return Effect.succeed({
+      threadId: "provider-thread-1",
+      objective: "Test goal",
+      status: "active" as const,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+  }
+
+  clearThreadGoal = Effect.succeed(true);
+
   steerTurn(turnId: TurnId, text: string) {
     return Effect.promise(() => this.steerTurnImpl(turnId, text));
   }
@@ -1525,6 +1541,50 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastReasoningOutputTokens: 0,
         compactsAutomatically: true,
       });
+    }),
+  );
+
+  it.effect("maps Codex persistent goal updates into canonical runtime events", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const eventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-codex-thread-goal-updated"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "thread/goal/updated",
+        payload: {
+          threadId: "provider-thread-1",
+          goal: {
+            threadId: "provider-thread-1",
+            objective: "Finish the research",
+            status: "active",
+            tokensUsed: 1200,
+            timeUsedSeconds: 90,
+            createdAt: 10,
+            updatedAt: 20,
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const event = yield* Fiber.join(eventFiber);
+      NodeAssert.equal(event._tag, "Some");
+      if (event._tag === "Some") {
+        NodeAssert.equal(event.value.type, "thread.goal.updated");
+        if (event.value.type === "thread.goal.updated") {
+          NodeAssert.deepEqual(event.value.payload, {
+            objective: "Finish the research",
+            status: "active",
+            tokensUsed: 1200,
+            timeUsedSeconds: 90,
+            createdAt: 10,
+            updatedAt: 20,
+          });
+        }
+      }
     }),
   );
 

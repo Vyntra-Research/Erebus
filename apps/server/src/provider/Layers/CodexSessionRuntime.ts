@@ -250,6 +250,14 @@ export interface CodexSessionRuntimeShape {
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly getThreadGoal: Effect.Effect<
+    EffectCodexSchema.V2ThreadGoalGetResponse["goal"],
+    CodexSessionRuntimeError
+  >;
+  readonly setThreadGoalStatus: (
+    status: EffectCodexSchema.V2ThreadGoalSetParams__ThreadGoalStatus,
+  ) => Effect.Effect<EffectCodexSchema.V2ThreadGoalSetResponse["goal"], CodexSessionRuntimeError>;
+  readonly clearThreadGoal: Effect.Effect<boolean, CodexSessionRuntimeError>;
   readonly steerTurn: (
     expectedTurnId: TurnId,
     text: string,
@@ -831,6 +839,8 @@ function readNotificationThreadId(notification: CodexServerNotification): string
     case "thread/unarchived":
     case "thread/closed":
     case "thread/name/updated":
+    case "thread/goal/updated":
+    case "thread/goal/cleared":
     case "thread/tokenUsage/updated":
     case "turn/started":
     case "hook/started":
@@ -1069,6 +1079,8 @@ function shouldSuppressChildConversationNotification(
     method === "thread/closed" ||
     method === "thread/compacted" ||
     method === "thread/name/updated" ||
+    method === "thread/goal/updated" ||
+    method === "thread/goal/cleared" ||
     method === "thread/tokenUsage/updated" ||
     method === "turn/started" ||
     method === "turn/completed" ||
@@ -1118,6 +1130,8 @@ const CHILD_CHATTER_METHODS: ReadonlySet<string> = new Set([
   "turn/plan/updated",
   "turn/diff/updated",
   "thread/name/updated",
+  "thread/goal/updated",
+  "thread/goal/cleared",
   "thread/settings/updated",
   "rawResponseItem/completed",
   // Child-owned thread lifecycle: the parent adapter maps these onto the
@@ -2321,6 +2335,29 @@ export const makeCodexSessionRuntime = (
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
       yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
+      yield* client.request("thread/goal/get", { threadId: providerThreadId }).pipe(
+        Effect.flatMap((response) =>
+          response.goal
+            ? emitEvent({
+                kind: "notification",
+                threadId: options.threadId,
+                method: "thread/goal/updated",
+                payload: { threadId: providerThreadId, goal: response.goal },
+              })
+            : emitEvent({
+                kind: "notification",
+                threadId: options.threadId,
+                method: "thread/goal/cleared",
+                payload: { threadId: providerThreadId },
+              }),
+        ),
+        Effect.catch((cause) =>
+          Effect.logDebug("Codex thread goal is unavailable for this session.", { cause }),
+        ),
+        Effect.timeoutOption("3 seconds"),
+        Effect.asVoid,
+        Effect.forkIn(runtimeScope),
+      );
       return session;
     });
 
@@ -2482,6 +2519,25 @@ export const makeCodexSessionRuntime = (
             turnId: effectiveTurnId,
           });
         }),
+      getThreadGoal: Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        return (yield* client.request("thread/goal/get", { threadId: providerThreadId })).goal;
+      }),
+      setThreadGoalStatus: (status) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          return (yield* client.request("thread/goal/set", {
+            threadId: providerThreadId,
+            status,
+          })).goal;
+        }),
+      clearThreadGoal: Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        const { cleared } = yield* client.request("thread/goal/clear", {
+          threadId: providerThreadId,
+        });
+        return cleared;
+      }),
       steerTurn: (expectedTurnId, text) =>
         Effect.gen(function* () {
           const threadId = yield* readProviderThreadId;

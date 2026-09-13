@@ -13,6 +13,8 @@ import type {
   ProviderDriverKind,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
+  ProviderThreadGoal,
+  ProviderThreadGoalStatus,
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
@@ -70,6 +72,14 @@ export interface ProviderAdapterShape<TError> {
    * Interrupt an active turn.
    */
   readonly interruptTurn: (threadId: ThreadId, turnId?: TurnId) => Effect.Effect<void, TError>;
+
+  /** Read and manage a provider-native persistent thread goal when supported. */
+  readonly getThreadGoal?: (threadId: ThreadId) => Effect.Effect<ProviderThreadGoal | null, TError>;
+  readonly setThreadGoalStatus?: (
+    threadId: ThreadId,
+    status: ProviderThreadGoalStatus,
+  ) => Effect.Effect<ProviderThreadGoal, TError>;
+  readonly clearThreadGoal?: (threadId: ThreadId) => Effect.Effect<boolean, TError>;
 
   /** Steer a currently running turn when the provider supports it. */
   readonly steerTurn?: (input: ProviderSteerTurnInput) => Effect.Effect<void, TError>;

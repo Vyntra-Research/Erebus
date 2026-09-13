@@ -96,6 +96,36 @@ export const ProviderInterruptTurnInput = Schema.Struct({
 });
 export type ProviderInterruptTurnInput = typeof ProviderInterruptTurnInput.Type;
 
+export const ProviderThreadGoalStatus = Schema.Literals([
+  "active",
+  "paused",
+  "blocked",
+  "usageLimited",
+  "budgetLimited",
+  "complete",
+]);
+export type ProviderThreadGoalStatus = typeof ProviderThreadGoalStatus.Type;
+
+export const ProviderThreadGoal = Schema.Struct({
+  objective: Schema.String,
+  status: ProviderThreadGoalStatus,
+  tokenBudget: Schema.optional(Schema.NullOr(Schema.Number)),
+  tokensUsed: Schema.Number,
+  timeUsedSeconds: Schema.Number,
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+});
+export type ProviderThreadGoal = typeof ProviderThreadGoal.Type;
+
+export const ProviderSetThreadGoalStatusInput = Schema.Struct({
+  threadId: ThreadId,
+  status: ProviderThreadGoalStatus,
+});
+export type ProviderSetThreadGoalStatusInput = typeof ProviderSetThreadGoalStatusInput.Type;
+
+export const ProviderClearThreadGoalInput = Schema.Struct({ threadId: ThreadId });
+export type ProviderClearThreadGoalInput = typeof ProviderClearThreadGoalInput.Type;
+
 export const ProviderSteerTurnInput = Schema.Struct({
   threadId: ThreadId,
   expectedTurnId: TurnId,

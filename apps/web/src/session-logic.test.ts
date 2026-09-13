@@ -15,6 +15,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
+  deriveThreadGoal,
   deriveWorkLogEntries,
   findLatestProposedPlan,
   hasActionableProposedPlan,
@@ -60,6 +61,56 @@ function makeActivity(overrides: {
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
   };
 }
+
+describe("deriveThreadGoal", () => {
+  it("keeps the latest native goal update and clears it explicitly", () => {
+    const update = makeActivity({
+      kind: "thread.goal.updated",
+      payload: {
+        objective: "Finish the research",
+        status: "paused",
+        tokensUsed: 1200,
+        tokenBudget: 5000,
+        timeUsedSeconds: 90,
+        createdAt: 10,
+        updatedAt: 20,
+      },
+    });
+
+    expect(deriveThreadGoal([update])).toEqual({
+      objective: "Finish the research",
+      status: "paused",
+      tokensUsed: 1200,
+      tokenBudget: 5000,
+      timeUsedSeconds: 90,
+      createdAt: 10,
+      updatedAt: 20,
+    });
+    expect(deriveWorkLogEntries([update])).toEqual([]);
+    expect(
+      deriveThreadGoal([update, makeActivity({ kind: "thread.goal.cleared", payload: {} })]),
+    ).toBeNull();
+  });
+});
+
+describe("resolved request work logs", () => {
+  it("inherits the requesting turn so settled approvals can fold into their run", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        kind: "approval.requested",
+        payload: { requestId: "req-1", requestKind: "command" },
+        turnId: "turn-1",
+      }),
+      makeActivity({
+        kind: "approval.resolved",
+        summary: "Approval resolved",
+        payload: { requestId: "req-1", decision: "accept" },
+      }),
+    ]);
+
+    expect(entries.find((entry) => entry.label === "Approval resolved")?.turnId).toBe("turn-1");
+  });
+});
 
 describe("derivePendingApprovals", () => {
   it("tracks open approvals and removes resolved ones", () => {

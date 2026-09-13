@@ -150,6 +150,64 @@ export interface ActivePlanState {
   }>;
 }
 
+export type ThreadGoalState = {
+  objective: string;
+  status: "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  tokenBudget?: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+const THREAD_GOAL_STATUSES = new Set<ThreadGoalState["status"]>([
+  "active",
+  "paused",
+  "blocked",
+  "usageLimited",
+  "budgetLimited",
+  "complete",
+]);
+
+export function deriveThreadGoal(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ThreadGoalState | null {
+  let goal: ThreadGoalState | null = null;
+  for (const activity of [...activities].toSorted(compareActivitiesByOrder)) {
+    if (activity.kind === "thread.goal.cleared") {
+      goal = null;
+      continue;
+    }
+    if (activity.kind !== "thread.goal.updated" || !activity.payload) {
+      continue;
+    }
+    const payload = activity.payload as Record<string, unknown>;
+    if (
+      typeof payload.objective !== "string" ||
+      typeof payload.status !== "string" ||
+      !THREAD_GOAL_STATUSES.has(payload.status as ThreadGoalState["status"]) ||
+      typeof payload.tokensUsed !== "number" ||
+      typeof payload.timeUsedSeconds !== "number" ||
+      typeof payload.createdAt !== "number" ||
+      typeof payload.updatedAt !== "number"
+    ) {
+      continue;
+    }
+    goal = {
+      objective: payload.objective,
+      status: payload.status as ThreadGoalState["status"],
+      ...(typeof payload.tokenBudget === "number" || payload.tokenBudget === null
+        ? { tokenBudget: payload.tokenBudget }
+        : {}),
+      tokensUsed: payload.tokensUsed,
+      timeUsedSeconds: payload.timeUsedSeconds,
+      createdAt: payload.createdAt,
+      updatedAt: payload.updatedAt,
+    };
+  }
+  return goal;
+}
+
 export interface LatestProposedPlanState {
   id: OrchestrationProposedPlanId;
   createdAt: string;
@@ -863,7 +921,21 @@ export function deriveWorkLogEntries(
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries: DerivedWorkLogEntry[] = [];
+  const blockingRequestTurnById = new Map<string, TurnId>();
   for (const activity of ordered) {
+    const activityPayload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const requestId =
+      typeof activityPayload?.requestId === "string" ? activityPayload.requestId : null;
+    if (
+      requestId &&
+      activity.turnId &&
+      (activity.kind === "approval.requested" || activity.kind === "user-input.requested")
+    ) {
+      blockingRequestTurnById.set(requestId, activity.turnId);
+    }
     if (activity.kind === "tool.started") continue;
     // Agent task.started rows are CTA seeds: they carry the true spawn turn,
     // which is the batch key (completions of background subagents arrive
@@ -873,10 +945,22 @@ export function deriveWorkLogEntries(
     if (activity.kind === "task.updated") continue;
     if (activity.kind === "tool.progress") continue;
     if (activity.kind === "context-window.updated") continue;
+    if (activity.kind === "thread.goal.updated" || activity.kind === "thread.goal.cleared")
+      continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
-    entries.push(toDerivedWorkLogEntry(activity));
+    const entry = toDerivedWorkLogEntry(activity);
+    const requestTurnId = requestId ? blockingRequestTurnById.get(requestId) : undefined;
+    if (
+      entry.turnId == null &&
+      requestTurnId &&
+      (activity.kind === "approval.resolved" || activity.kind === "user-input.resolved")
+    ) {
+      entries.push({ ...entry, turnId: requestTurnId });
+    } else {
+      entries.push(entry);
+    }
   }
   return collapseDerivedWorkLogEntries(entries);
 }

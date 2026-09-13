@@ -5,6 +5,8 @@
 ### Fixed
 
 - Persist the selected theme immediately and before normal desktop shutdown.
+- Show the native Codex goal above the composer, restore it when a task resumes, and expose pause, resume, and delete controls.
+- Fold resolved approval markers into their completed run even when the provider omits the turn identifier.
 
 ## 0.6.1 - 2026-09-13
 

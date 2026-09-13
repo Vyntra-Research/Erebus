@@ -14,10 +14,12 @@ import {
   NonNegativeInt,
   ThreadId,
   ProviderInterruptTurnInput,
+  ProviderClearThreadGoalInput,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
   ProviderSessionStartInput,
+  ProviderSetThreadGoalStatusInput,
   ProviderSteerTurnInput,
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
@@ -952,6 +954,65 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const getThreadGoal = Effect.fn("getThreadGoal")(function* (threadId: ThreadId) {
+    const routed = yield* resolveRoutableSession({
+      threadId,
+      operation: "ProviderService.getThreadGoal",
+      allowRecovery: true,
+    });
+    if (!routed.adapter.getThreadGoal) {
+      return yield* toValidationError(
+        "ProviderService.getThreadGoal",
+        `Provider '${routed.adapter.provider}' does not support persistent thread goals.`,
+      );
+    }
+    return yield* routed.adapter.getThreadGoal(routed.threadId);
+  });
+
+  const setThreadGoalStatus = Effect.fn("setThreadGoalStatus")(function* (
+    rawInput: ProviderSetThreadGoalStatusInput,
+  ) {
+    const input = yield* decodeInputOrValidationError({
+      operation: "ProviderService.setThreadGoalStatus",
+      schema: ProviderSetThreadGoalStatusInput,
+      payload: rawInput,
+    });
+    const routed = yield* resolveRoutableSession({
+      threadId: input.threadId,
+      operation: "ProviderService.setThreadGoalStatus",
+      allowRecovery: true,
+    });
+    if (!routed.adapter.setThreadGoalStatus) {
+      return yield* toValidationError(
+        "ProviderService.setThreadGoalStatus",
+        `Provider '${routed.adapter.provider}' does not support persistent thread goals.`,
+      );
+    }
+    return yield* routed.adapter.setThreadGoalStatus(routed.threadId, input.status);
+  });
+
+  const clearThreadGoal = Effect.fn("clearThreadGoal")(function* (
+    rawInput: ProviderClearThreadGoalInput,
+  ) {
+    const input = yield* decodeInputOrValidationError({
+      operation: "ProviderService.clearThreadGoal",
+      schema: ProviderClearThreadGoalInput,
+      payload: rawInput,
+    });
+    const routed = yield* resolveRoutableSession({
+      threadId: input.threadId,
+      operation: "ProviderService.clearThreadGoal",
+      allowRecovery: true,
+    });
+    if (!routed.adapter.clearThreadGoal) {
+      return yield* toValidationError(
+        "ProviderService.clearThreadGoal",
+        `Provider '${routed.adapter.provider}' does not support persistent thread goals.`,
+      );
+    }
+    return yield* routed.adapter.clearThreadGoal(routed.threadId);
+  });
+
   const steerTurn: ProviderServiceMethod<"steerTurn"> = Effect.fn("steerTurn")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -1336,6 +1397,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    getThreadGoal,
+    setThreadGoalStatus,
+    clearThreadGoal,
     steerTurn,
     respondToRequest,
     respondToUserInput,
