@@ -38,7 +38,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -96,6 +96,10 @@ export interface DesktopBackendStartConfig extends BackendProcessContext {
   readonly httpBaseUrl: URL;
   readonly captureOutput: boolean;
   readonly preflightFailure: Option.Option<PreflightFailure>;
+  // Packaged updates can briefly leave the previous sidecar listening on the
+  // same stable port. When set, readiness must come from this server version,
+  // not merely from any process that answers the well-known endpoint.
+  readonly expectedServerVersion?: string;
   // Present for a WSL run after the configured/default distro has been
   // resolved to the concrete distro passed to wsl.exe.
   readonly runningDistro?: string;
@@ -366,7 +370,10 @@ const closeRun = (
 };
 
 export const waitForHttpReady = (
-  options: BackendProcessContext & { readonly timeout: Duration.Duration },
+  options: BackendProcessContext & {
+    readonly timeout: Duration.Duration;
+    readonly expectedServerVersion?: string;
+  },
 ): Effect.Effect<void, BackendReadinessTimeoutError, HttpClient.HttpClient> => {
   const readinessUrl = new URL(BACKEND_READINESS_PATH, options.httpBaseUrl);
   return waitForHttpReadyShared({
@@ -375,6 +382,21 @@ export const waitForHttpReady = (
     timeoutMs: Duration.toMillis(options.timeout),
     intervalMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_INTERVAL),
     probeTimeoutMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
+    ...(options.expectedServerVersion === undefined
+      ? {}
+      : {
+          isReadyResponse: (response: HttpClientResponse.HttpClientResponse) =>
+            response.json.pipe(
+              Effect.map(
+                (body) =>
+                  typeof body === "object" &&
+                  body !== null &&
+                  "serverVersion" in body &&
+                  body.serverVersion === options.expectedServerVersion,
+              ),
+              Effect.orElseSucceed(() => false),
+            ),
+        }),
     makeError: ({ cause }) =>
       new BackendReadinessTimeoutError({
         executablePath: options.executablePath,
@@ -578,6 +600,9 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
       cwd: options.cwd,
       httpBaseUrl: options.httpBaseUrl,
       timeout: options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT,
+      ...(options.expectedServerVersion === undefined
+        ? {}
+        : { expectedServerVersion: options.expectedServerVersion }),
     }).pipe(
       Effect.flatMap(() => options.onReady?.() ?? Effect.void),
       Effect.as(true),

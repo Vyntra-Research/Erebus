@@ -59,6 +59,7 @@ import {
   WindowsPackagedPayloadValidationError,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
   WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
+  WINDOWS_SERVER_ASAR_REQUIRED_RUNTIME_FILES,
   WINDOWS_SERVER_EXTRA_RESOURCES,
   WINDOWS_SERVER_ASAR_RESOURCE,
   WINDOWS_SERVER_ASAR_UNPACK_GLOB,
@@ -107,6 +108,7 @@ function iconResizeSpawnerLayer(
 const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(function* (input: {
   readonly copyUnpackedNatives: boolean;
   readonly serverEntrySource?: string;
+  readonly omitPackedFile?: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -120,6 +122,12 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   yield* fs.makeDirectory(path.dirname(nativePath), { recursive: true });
   yield* fs.writeFileString(serverEntryPath, input.serverEntrySource ?? "console.log('server');\n");
   yield* fs.writeFileString(nativePath, "native-binary");
+  for (const requiredFile of WINDOWS_SERVER_ASAR_REQUIRED_RUNTIME_FILES) {
+    if (requiredFile === input.omitPackedFile) continue;
+    const requiredPath = path.join(sourceDir, ...requiredFile.split("/"));
+    yield* fs.makeDirectory(path.dirname(requiredPath), { recursive: true });
+    yield* fs.writeFileString(requiredPath, "fixture");
+  }
 
   const generatedAsarPath = path.join(tempDir, WINDOWS_SERVER_ASAR_RESOURCE);
   yield* packWindowsServerAsar({ sourceDir, asarPath: generatedAsarPath, arch: "x64" });
@@ -867,6 +875,27 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.deepStrictEqual(error.missingFiles, [
           "server.asar.unpacked/node_modules/native/addon.node",
         ]);
+      }),
+    ),
+  );
+
+  it.effect("rejects a packaged sidecar without the bundled Argos runtime", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const missingArgosFile = "node_modules/@rafabd1/argos/package.json";
+        const fixture = yield* makeWindowsPayloadFixture({
+          copyUnpackedNatives: true,
+          omitPackedFile: missingArgosFile,
+        });
+        const error = yield* validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+        }).pipe(Effect.flip);
+
+        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
+        assert.equal(error.reason, "sidecar-runtime-missing");
+        assert.deepStrictEqual(error.missingFiles, [missingArgosFile]);
       }),
     ),
   );

@@ -91,8 +91,9 @@ function makeProcess(options?: {
 function responseForRequest(
   request: HttpClientRequest.HttpClientRequest,
   status: number,
+  body: BodyInit | null = null,
 ): HttpClientResponse.HttpClientResponse {
-  return HttpClientResponse.fromWeb(request, new Response(null, { status }));
+  return HttpClientResponse.fromWeb(request, new Response(body, { status }));
 }
 
 function httpClientLayer(
@@ -697,6 +698,51 @@ describe("DesktopBackendManager", () => {
           "http://127.0.0.1:3773/.well-known/t3/environment",
           "http://127.0.0.1:3773/.well-known/t3/environment",
         ]);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("does not accept a stale backend from the previous desktop version", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const versions = ["0.6.0", "0.6.1"];
+        let readyCount = 0;
+        const firstRequest = yield* Deferred.make<void>();
+        const ready = yield* Deferred.make<void>();
+
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.succeed(
+              makeProcess({
+                exitCode: Deferred.await(ready).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+              }),
+            ),
+          ),
+        );
+
+        const instance = yield* makeTestInstance({
+          config: { ...baseConfig, expectedServerVersion: "0.6.1" },
+          spawnerLayer,
+          httpClientLayer: httpClientLayer((request) =>
+            Effect.gen(function* () {
+              const version = versions.shift();
+              assert.isDefined(version);
+              yield* Deferred.succeed(firstRequest, void 0);
+              return responseForRequest(request, 200, `{"serverVersion":"${version}"}`);
+            }),
+          ),
+          onReady: Effect.sync(() => {
+            readyCount += 1;
+          }).pipe(Effect.andThen(Deferred.succeed(ready, void 0)), Effect.asVoid),
+        });
+
+        yield* instance.start;
+        yield* Deferred.await(firstRequest);
+        assert.equal(readyCount, 0);
+
+        yield* TestClock.adjust(Duration.millis(100));
+        assert.equal(readyCount, 1);
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );

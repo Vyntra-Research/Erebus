@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 export const DEFAULT_HTTP_READY_PROBE_TIMEOUT_MS = 1_000;
 
@@ -56,6 +56,14 @@ export const waitForHttpReady = Effect.fn("shared.httpReadiness.waitForHttpReady
   readonly timeoutMs?: number;
   readonly intervalMs?: number;
   readonly probeTimeoutMs?: number;
+  /**
+   * Optional ownership check for callers that share a stable readiness URL
+   * across process generations. A 2xx response is retried until this check
+   * confirms that it came from the process the caller expects.
+   */
+  readonly isReadyResponse?: (
+    response: HttpClientResponse.HttpClientResponse,
+  ) => Effect.Effect<boolean>;
   readonly makeError: (info: {
     readonly requestUrl: string;
     readonly probeTimeoutMs: number;
@@ -107,7 +115,22 @@ export const waitForHttpReady = Effect.fn("shared.httpReadiness.waitForHttpReady
           Effect.mapError((cause) => fail(cause)),
         );
         return yield* Option.match(responseOption, {
-          onSome: Effect.succeed,
+          onSome: (response) =>
+            Effect.gen(function* () {
+              if (input.isReadyResponse === undefined) {
+                return response;
+              }
+              const isExpectedResponse = yield* input.isReadyResponse(response);
+              if (!isExpectedResponse) {
+                return yield* Effect.fail(
+                  fail({
+                    kind: "response-not-ready",
+                    attempt,
+                  }),
+                );
+              }
+              return response;
+            }),
           onNone: () =>
             Effect.fail(
               fail({
@@ -127,7 +150,11 @@ export const waitForHttpReady = Effect.fn("shared.httpReadiness.waitForHttpReady
         ),
       ),
     ),
-    HttpClient.tap((response) => response.text.pipe(Effect.ignore)),
+    // A response validator may consume the body while checking identity.
+    // Otherwise drain it so pooled connections remain reusable.
+    HttpClient.tap((response) =>
+      input.isReadyResponse === undefined ? response.text.pipe(Effect.ignore) : Effect.void,
+    ),
     HttpClient.retry(retryPolicy),
   );
 

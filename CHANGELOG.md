@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 - 2026-09-13
+
+### Fixed
+
+- Bundle the Argos runtime in the Windows desktop sidecar so existing Codex accounts remain available after an update.
+- Require desktop readiness to come from the installed Erebus version instead of an older sidecar still using the local port.
+
 ## 0.6.0 - 2026-09-12
 
 ### Added

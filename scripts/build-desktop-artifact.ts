@@ -558,6 +558,7 @@ const WindowsPackagedPayloadValidationReason = Schema.Literals([
   "packaged-app-missing",
   "sidecar-missing",
   "sidecar-invalid",
+  "sidecar-runtime-missing",
   "unpacked-native-missing",
   "resource-monitor-missing",
   "file-limit-exceeded",
@@ -586,6 +587,9 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedErrorCla
     }
     if (this.reason === "sidecar-invalid") {
       return "Windows packaged payload contains an invalid server.asar sidecar.";
+    }
+    if (this.reason === "sidecar-runtime-missing") {
+      return `Windows server sidecar is missing ${String(this.missingFiles?.length ?? 0)} required runtime files.`;
     }
     if (this.reason === "sidecar-missing") {
       return "Windows packaged payload is missing resources/server.asar.";
@@ -809,6 +813,21 @@ export const MAC_FILE_EXCLUSIONS = [
 // runtime; the WSL backend cannot read asar archives, so enabling WSL lazily
 // extracts the sidecar to a version-keyed directory (see DesktopWslServerTree).
 export const WINDOWS_SERVER_ASAR_RESOURCE = "server.asar";
+// These packages are resolved by filesystem path only when a Codex instance is
+// created, so the ordinary `bin.mjs --version` self-check cannot see if the
+// packager omitted them.
+export const WINDOWS_SERVER_ASAR_REQUIRED_RUNTIME_FILES = [
+  "node_modules/@rafabd1/argos/package.json",
+  "node_modules/@rafabd1/argos/dist/cli.js",
+  "node_modules/@rafabd1/argos/dist/mcp.js",
+  "node_modules/@rafabd1/argos/plugins/argos/.codex-plugin/plugin.json",
+  "node_modules/@rafabd1/argos/plugins/argos/skills/argos/SKILL.md",
+  "node_modules/@vyntra-research/proteus/package.json",
+  "node_modules/@vyntra-research/proteus/dist/cli.js",
+  "node_modules/@vyntra-research/proteus/dist/mcp.js",
+  "node_modules/@vyntra-research/proteus/plugins/proteus/.codex-plugin/plugin.json",
+  "node_modules/@vyntra-research/proteus/.agents/plugins/marketplace.json",
+] as const;
 // dlopen/spawn need real files, so native modules, shared libraries, and
 // helper executables live in the server.asar.unpacked sibling (the standard
 // asar redirect convention). Everything else stays packed.
@@ -2605,6 +2624,21 @@ export const validateWindowsPackagedPayload = Effect.fn(
         cause,
       }),
   });
+  const missingRuntimeFiles = WINDOWS_SERVER_ASAR_REQUIRED_RUNTIME_FILES.filter((requiredFile) => {
+    try {
+      statFile(asarPath, path.join(...requiredFile.split("/")));
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (missingRuntimeFiles.length > 0) {
+    return yield* new WindowsPackagedPayloadValidationError({
+      reason: "sidecar-runtime-missing",
+      packagedAppDir,
+      missingFiles: [...missingRuntimeFiles],
+    });
+  }
   if (unpackedFiles.length === 0) {
     return yield* new WindowsPackagedPayloadValidationError({
       reason: "sidecar-invalid",
