@@ -32,6 +32,7 @@
     "@pierre/diffs": "catalog:",
     "@rafabd1/argos": "https://github.com/rafabd1/Argos/releases/download/v0.1.0/rafabd1-argos-0.1.0.tgz",
     "@vyntra-research/proteus": "https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.9",
+    "ae-cvss-calculator": "1.0.13",
     "effect": "catalog:",
     "msgpackr-extract": "3.0.4",
     "node-pty": "^1.1.0",

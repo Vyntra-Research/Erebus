@@ -15,6 +15,7 @@ it("uses the native goal and leaves ordinary research free of Erebus lifecycle c
   assert.match(instructions, /Argos as the canonical connected research\s+memory/);
   assert.match(instructions, /Proteus is read-only legacy history/);
   assert.match(instructions, /Do not load or rely on Proteus skills/);
+  assert.match(instructions, /research\.calculate_cvss/);
   assert.match(instructions, /`findings\/`[\s\S]*`pocs\/`/);
   assert.match(instructions, /do not poll, wait, or keep researching/);
   assert.notMatch(instructions, /research\.start|research\.checkpoint|research\.pause/);

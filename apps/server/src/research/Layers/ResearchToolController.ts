@@ -2,6 +2,7 @@ import {
   CommandId,
   ResearchFindingId,
   ResearchSubmitFindingForReviewInput,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -14,17 +15,23 @@ import * as Schema from "effect/Schema";
 import { CoagentRegistry } from "../../coagents/Services/CoagentRegistry.ts";
 import { FindingReviewStore } from "../Services/FindingReviewStore.ts";
 import { ResearchToolController } from "../Services/ResearchToolController.ts";
+import { calculateCvss } from "../researchCvss.ts";
 import {
   buildCoagentResearchInstructions,
   buildPrincipalResearchInstructions,
 } from "../researchPrincipalInstructions.ts";
-import { isErebusResearchToolCall, toDynamicToolResponse } from "../researchTools.ts";
+import {
+  isErebusResearchToolCall,
+  toDynamicToolContent,
+  toDynamicToolResponse,
+} from "../researchTools.ts";
 
 const StatusInput = Schema.Struct({
   findingId: Schema.optional(ResearchFindingId),
 });
 
 const decoders = {
+  calculate_cvss: Schema.decodeUnknownEffect(Schema.Struct({ vector: TrimmedNonEmptyString })),
   get_status: Schema.decodeUnknownEffect(StatusInput),
   submit_finding: Schema.decodeUnknownEffect(ResearchSubmitFindingForReviewInput),
   revise_finding: Schema.decodeUnknownEffect(ResearchSubmitFindingForReviewInput),
@@ -129,7 +136,7 @@ const makeResearchToolController = Effect.gen(function* () {
         const coagentLink = yield* coagents
           .getByChild(context.threadId)
           .pipe(Effect.map(Option.getOrNull));
-        if (coagentLink && params.tool !== "get_status") {
+        if (coagentLink && params.tool !== "get_status" && params.tool !== "calculate_cvss") {
           return failure(
             "A co-agent cannot submit a finding to the Judge. Return the candidate to the parent task.",
             [`parentThreadId=${coagentLink.parentThreadId}`, `tool=research.${params.tool}`],
@@ -137,6 +144,10 @@ const makeResearchToolController = Effect.gen(function* () {
         }
 
         switch (params.tool) {
+          case "calculate_cvss": {
+            const input = yield* decoders.calculate_cvss(params.arguments);
+            return toDynamicToolContent(calculateCvss(input.vector));
+          }
           case "get_status": {
             const input = yield* decoders.get_status(params.arguments);
             const ownerThreadId = coagentLink?.parentThreadId ?? context.threadId;
@@ -237,9 +248,12 @@ const makeResearchToolController = Effect.gen(function* () {
                     params.tool,
                     cause instanceof Error ? cause.message : String(cause),
                   )
-                : failure("The Judge status could not be read.", [
-                    cause instanceof Error ? cause.message : String(cause),
-                  ]),
+                : failure(
+                    params.tool === "calculate_cvss"
+                      ? "The CVSS vector could not be calculated."
+                      : "The Judge status could not be read.",
+                    [cause instanceof Error ? cause.message : String(cause)],
+                  ),
             ),
           ),
         ),

@@ -468,6 +468,9 @@ importers:
       '@vyntra-research/proteus':
         specifier: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.9
         version: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.9
+      ae-cvss-calculator:
+        specifier: 1.0.13
+        version: 1.0.13
       effect:
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(patch_hash=af36b7948b6f9c56623074662b51dade5699880c1a7c71245de73e13c3185fb6)
@@ -4748,6 +4751,9 @@ packages:
     resolution: {integrity: sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  ae-cvss-calculator@1.0.13:
+    resolution: {integrity: sha512-QnPO1O5gZ/1NM+X4fbfqN/y5rImEZ8CSkbSk7Arv4RrmxPzxLXr9RSLmsQJykDtXFUXn9wHLxC0/fe/pO78t3w==}
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -13905,6 +13911,8 @@ snapshots:
       negotiator: 1.0.0
 
   acorn@8.16.0: {}
+
+  ae-cvss-calculator@1.0.13: {}
 
   agent-base@7.1.4: {}
 

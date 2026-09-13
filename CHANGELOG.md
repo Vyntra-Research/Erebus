@@ -13,7 +13,8 @@
 - Use the native Codex/T3 goal as the only task objective and progress lifecycle.
 - Apply evidence scope, anti-tunnel continuity, conclusion reopening, connected evidence, and Post-AI blind-spot checks without requiring a campaign workflow.
 - Limit the Judge to a fixed, ten-minute desk review of the submitted `findings/` document and `pocs/` artifact.
-- Expose Proteus as read-only legacy history and a CVSS calculator through an Erebus-managed MCP proxy.
+- Expose Proteus as read-only legacy history through an Erebus-managed MCP proxy.
+- Provide deterministic CVSS 3.0, 3.1, and 4.0 calculation directly through `research.calculate_cvss`.
 
 ### Removed
 

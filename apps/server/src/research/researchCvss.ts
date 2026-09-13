@@ -1,4 +1,29 @@
+import { fromVector } from "ae-cvss-calculator";
+
 export type CvssSeverity = "none" | "low" | "medium" | "high" | "critical";
+
+export type SupportedCvssVersion = "3.0" | "3.1" | "4.0";
+
+interface CvssCalculator {
+  calculateScores(): Record<string, unknown>;
+  isBaseFullyDefined(): boolean;
+}
+
+export interface CvssScoreResult {
+  readonly version: SupportedCvssVersion;
+  readonly requestedVector: string;
+  readonly vector: string;
+  readonly score: number;
+  readonly severity: CvssSeverity;
+  readonly scores: Readonly<Record<string, number | boolean | string>>;
+  readonly metrics: Readonly<Record<string, string>>;
+  readonly selectionGuidance: {
+    readonly privilegesRequired: string;
+    readonly attackConditions: string;
+    readonly impact: string;
+  };
+  readonly attribution: string;
+}
 
 export interface CvssV31Score {
   readonly vector: string;
@@ -6,16 +31,96 @@ export interface CvssV31Score {
   readonly severity: CvssSeverity;
 }
 
-const metricValues = {
-  AV: { N: 0.85, A: 0.62, L: 0.55, P: 0.2 },
-  AC: { L: 0.77, H: 0.44 },
-  UI: { N: 0.85, R: 0.62 },
-  C: { H: 0.56, L: 0.22, N: 0 },
-  I: { H: 0.56, L: 0.22, N: 0 },
-  A: { H: 0.56, L: 0.22, N: 0 },
-} as const;
+const REQUIRED_BASE_METRICS: Record<SupportedCvssVersion, ReadonlyArray<string>> = {
+  "3.0": ["AV", "AC", "PR", "UI", "S", "C", "I", "A"],
+  "3.1": ["AV", "AC", "PR", "UI", "S", "C", "I", "A"],
+  "4.0": ["AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA"],
+};
 
-const roundUp = (value: number): number => Math.ceil((value - Number.EPSILON) * 10) / 10;
+const ALLOWED_METRICS: Record<SupportedCvssVersion, ReadonlySet<string>> = {
+  "3.0": new Set([
+    "AV",
+    "AC",
+    "PR",
+    "UI",
+    "S",
+    "C",
+    "I",
+    "A",
+    "E",
+    "RL",
+    "RC",
+    "CR",
+    "IR",
+    "AR",
+    "MAV",
+    "MAC",
+    "MPR",
+    "MUI",
+    "MS",
+    "MC",
+    "MI",
+    "MA",
+  ]),
+  "3.1": new Set([
+    "AV",
+    "AC",
+    "PR",
+    "UI",
+    "S",
+    "C",
+    "I",
+    "A",
+    "E",
+    "RL",
+    "RC",
+    "CR",
+    "IR",
+    "AR",
+    "MAV",
+    "MAC",
+    "MPR",
+    "MUI",
+    "MS",
+    "MC",
+    "MI",
+    "MA",
+  ]),
+  "4.0": new Set([
+    "AV",
+    "AC",
+    "AT",
+    "PR",
+    "UI",
+    "VC",
+    "VI",
+    "VA",
+    "SC",
+    "SI",
+    "SA",
+    "E",
+    "CR",
+    "IR",
+    "AR",
+    "MAV",
+    "MAC",
+    "MAT",
+    "MPR",
+    "MUI",
+    "MVC",
+    "MVI",
+    "MVA",
+    "MSC",
+    "MSI",
+    "MSA",
+    "S",
+    "AU",
+    "R",
+    "V",
+    "RE",
+    "U",
+  ]),
+};
 
 export const cvssSeverity = (score: number): CvssSeverity => {
   if (score === 0) return "none";
@@ -25,57 +130,112 @@ export const cvssSeverity = (score: number): CvssSeverity => {
   return "critical";
 };
 
+export function calculateCvss(vectorInput: string): CvssScoreResult {
+  const requestedVector = vectorInput.trim();
+  if (!requestedVector) throw new Error("CVSS vector must not be empty.");
+
+  const { version, metrics } = validateVectorShape(requestedVector);
+  const calculator = fromVector(requestedVector) as CvssCalculator | undefined;
+  if (!calculator || typeof calculator.calculateScores !== "function") {
+    throw new Error(`Invalid CVSS ${version} vector or metric value.`);
+  }
+  if (typeof calculator.isBaseFullyDefined !== "function" || !calculator.isBaseFullyDefined()) {
+    const missing = REQUIRED_BASE_METRICS[version].filter(
+      (metric) => metrics[metric] === undefined,
+    );
+    throw new Error(
+      `CVSS ${version} vector is missing required base metrics: ${missing.join(", ")}.`,
+    );
+  }
+
+  const rawScores = calculator.calculateScores();
+  const score = rawScores.overall;
+  if (typeof score !== "number" || !Number.isFinite(score)) {
+    throw new Error(`CVSS ${version} calculator did not produce a finite score.`);
+  }
+  const scores = Object.fromEntries(
+    Object.entries(rawScores).filter(
+      (entry): entry is [string, number | boolean | string] =>
+        typeof entry[1] === "number" ||
+        typeof entry[1] === "boolean" ||
+        typeof entry[1] === "string",
+    ),
+  );
+
+  return {
+    version,
+    requestedVector,
+    vector: typeof rawScores.vector === "string" ? rawScores.vector : requestedVector,
+    score,
+    severity: cvssSeverity(score),
+    scores,
+    metrics,
+    selectionGuidance: {
+      privilegesRequired:
+        "PR:L means a normal low-privilege account. PR:H means a local owner or similarly privileged role, not a global platform administrator. Record a global-admin prerequisite as an out-of-scope or realism concern.",
+      attackConditions:
+        version === "4.0"
+          ? "Use AC:H for security-specific exploit complexity. Use AT:P when success needs a prerequisite deployment state, uncommon or non-default configuration, timing, a race, or another condition outside the attacker's control. Otherwise use AC:L and AT:N."
+          : "Use AC:H when success needs an uncommon or non-default configuration, timing, a race, or another condition outside the attacker's control. Otherwise use AC:L.",
+      impact:
+        "Use Low for limited or contained loss, including occasional cross-user data exposure. Use High only for broad or total loss, or restricted assets with direct serious value, such as RCE or unauthorized private source-code access. Judge both the value and breadth of what is affected, not only full control of one chosen target.",
+    },
+    attribution: "CVSS is owned by FIRST.Org, Inc. and used by permission.",
+  };
+}
+
+function validateVectorShape(vector: string): {
+  version: SupportedCvssVersion;
+  metrics: Record<string, string>;
+} {
+  const segments = vector.split("/");
+  const prefix = segments.shift();
+  const version = prefix?.startsWith("CVSS:") ? prefix.slice(5) : "";
+  if (version !== "3.0" && version !== "3.1" && version !== "4.0") {
+    throw new Error(
+      "Unsupported CVSS version. Use a vector beginning with CVSS:3.0, CVSS:3.1, or CVSS:4.0.",
+    );
+  }
+
+  const metrics: Record<string, string> = {};
+  for (const segment of segments) {
+    const separator = segment.indexOf(":");
+    if (separator <= 0 || separator === segment.length - 1) {
+      throw new Error(`Malformed CVSS metric segment: ${segment || "<empty>"}.`);
+    }
+    const key = segment.slice(0, separator);
+    const value = segment.slice(separator + 1);
+    if (!/^[A-Z]+$/.test(key) || !/^[A-Za-z0-9-]+$/.test(value)) {
+      throw new Error(`Malformed CVSS metric segment: ${segment}.`);
+    }
+    if (!ALLOWED_METRICS[version].has(key)) {
+      throw new Error(`Unsupported CVSS ${version} metric: ${key}.`);
+    }
+    if (metrics[key] !== undefined) {
+      throw new Error(`Duplicate CVSS metric: ${key}.`);
+    }
+    metrics[key] = value;
+  }
+
+  const missing = REQUIRED_BASE_METRICS[version].filter((metric) => metrics[metric] === undefined);
+  if (missing.length > 0) {
+    throw new Error(
+      `CVSS ${version} vector is missing required base metrics: ${missing.join(", ")}.`,
+    );
+  }
+  return { version, metrics };
+}
+
 export function calculateCvssV31(vector: string): CvssV31Score | null {
   const normalized = vector.trim().toUpperCase();
   if (!normalized.startsWith("CVSS:3.1/")) return null;
-  const metrics = new Map<string, string>();
-  for (const component of normalized.slice("CVSS:3.1/".length).split("/")) {
-    const [key, value, extra] = component.split(":");
-    if (!key || !value || extra || metrics.has(key)) return null;
-    metrics.set(key, value);
-  }
-  const av = metricValues.AV[metrics.get("AV") as keyof typeof metricValues.AV];
-  const ac = metricValues.AC[metrics.get("AC") as keyof typeof metricValues.AC];
-  const ui = metricValues.UI[metrics.get("UI") as keyof typeof metricValues.UI];
-  const confidentiality = metricValues.C[metrics.get("C") as keyof typeof metricValues.C];
-  const integrity = metricValues.I[metrics.get("I") as keyof typeof metricValues.I];
-  const availability = metricValues.A[metrics.get("A") as keyof typeof metricValues.A];
-  const scope = metrics.get("S");
-  const privileges = metrics.get("PR");
-  const pr =
-    scope === "U"
-      ? ({ N: 0.85, L: 0.62, H: 0.27 } as const)[privileges as "N" | "L" | "H"]
-      : scope === "C"
-        ? ({ N: 0.85, L: 0.68, H: 0.5 } as const)[privileges as "N" | "L" | "H"]
-        : undefined;
-  if (
-    av === undefined ||
-    ac === undefined ||
-    pr === undefined ||
-    ui === undefined ||
-    confidentiality === undefined ||
-    integrity === undefined ||
-    availability === undefined ||
-    metrics.size !== 8
-  ) {
+  try {
+    const result = calculateCvss(normalized);
+    if (result.version !== "3.1") return null;
+    return { vector: result.vector, score: result.score, severity: result.severity };
+  } catch {
     return null;
   }
-
-  const impactBase = 1 - (1 - confidentiality) * (1 - integrity) * (1 - availability);
-  const impact =
-    scope === "U"
-      ? 6.42 * impactBase
-      : 7.52 * (impactBase - 0.029) - 3.25 * (impactBase - 0.02) ** 15;
-  const exploitability = 8.22 * av * ac * pr * ui;
-  const score =
-    impact <= 0
-      ? 0
-      : roundUp(
-          scope === "U"
-            ? Math.min(impact + exploitability, 10)
-            : Math.min(1.08 * (impact + exploitability), 10),
-        );
-  return { vector: normalized, score, severity: cvssSeverity(score) };
 }
 
 const vectorAndScore =

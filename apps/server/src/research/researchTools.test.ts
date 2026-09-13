@@ -2,15 +2,35 @@ import { assert, it } from "@effect/vitest";
 
 import {
   isErebusResearchToolCall,
+  toDynamicToolContent,
   toDynamicToolResponse,
   EREBUS_RESEARCH_DYNAMIC_TOOL,
 } from "./researchTools.ts";
 
-it("exposes only independent Judge handoff tools", () => {
+it("exposes the local CVSS calculator and independent Judge handoff tools", () => {
   assert.deepStrictEqual(
     EREBUS_RESEARCH_DYNAMIC_TOOL.tools.map((tool) => tool.name),
-    ["get_status", "submit_finding", "revise_finding"],
+    ["calculate_cvss", "get_status", "submit_finding", "revise_finding"],
   );
+});
+
+it("publishes an explicit CVSS vector schema", () => {
+  const calculator = EREBUS_RESEARCH_DYNAMIC_TOOL.tools.find(
+    (tool) => tool.name === "calculate_cvss",
+  );
+  assert.isDefined(calculator);
+  assert.include(calculator.description, "never infers metrics");
+  const serializedSchema = JSON.stringify(calculator.inputSchema);
+  assert.include(serializedSchema, '"vector"');
+  assert.include(serializedSchema, "CVSS:4.0");
+
+  const response = toDynamicToolContent({ score: 7.3, severity: "high" });
+  assert.isTrue(response.success);
+  const content = response.contentItems[0];
+  assert.equal(content?.type, "inputText");
+  if (content?.type === "inputText") {
+    assert.deepEqual(JSON.parse(content.text), { score: 7.3, severity: "high" });
+  }
 });
 
 it("routes only calls from the research namespace", () => {

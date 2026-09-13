@@ -69,8 +69,24 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
   type: "namespace",
   name: EREBUS_RESEARCH_NAMESPACE,
   description:
-    "Campaign-free handoff to Erebus's independent finding Judge. Ordinary research needs no Erebus lifecycle calls.",
+    "Local CVSS calculation and campaign-free handoff to Erebus's independent finding Judge. Ordinary research needs no Erebus lifecycle calls.",
   tools: [
+    {
+      type: "function",
+      name: "calculate_cvss",
+      description:
+        "Validate and calculate an explicit CVSS v3.0, v3.1, or v4.0 vector locally in Erebus. This tool never infers metrics from finding prose. Use it only after the technical impact is established; CVSS classifies a finding but never decides its validity.",
+      inputSchema: objectSchema(
+        {
+          vector: described(
+            nonEmptyStringSchema,
+            "Complete CVSS:3.0, CVSS:3.1, or CVSS:4.0 vector with every required base metric.",
+            ["CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N"],
+          ),
+        },
+        ["vector"],
+      ),
+    },
     {
       type: "function",
       name: "get_status",
@@ -114,8 +130,15 @@ export function isErebusResearchToolCall(params: CodexSchema.DynamicToolCallPara
 export function toDynamicToolResponse(
   result: ResearchToolResult,
 ): CodexSchema.DynamicToolCallResponse {
+  return toDynamicToolContent(result, result.accepted);
+}
+
+export function toDynamicToolContent(
+  result: unknown,
+  success = true,
+): CodexSchema.DynamicToolCallResponse {
   return {
-    success: result.accepted,
+    success,
     contentItems: [{ type: "inputText", text: JSON.stringify(result) }],
   };
 }

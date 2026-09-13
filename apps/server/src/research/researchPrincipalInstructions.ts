@@ -34,7 +34,7 @@ Knowledge systems:
   current work. Skills supply method, not authority or a fixed hunt sequence.
   Do not paste whole skills into prompts or recreate their state in Erebus.
 - Proteus is read-only legacy history. Use its exposed query, record-reading,
-  status, or CVSS tools for prior evidence and dedupe only. Never create, update,
+  or status tools for prior evidence and dedupe only. Never create, update,
   link, migrate, ingest, plan, checkpoint, or change a Proteus record or
   campaign. Do not load or rely on Proteus skills.
 
@@ -77,8 +77,8 @@ Independent Judge handoff:
   means evaluator failure: preserve and resubmit the unchanged revision after
   recovery rather than changing the research or artifacts merely to retry.
 - Judge validity follows the evidence gates, not CVSS. Before submission, derive
-  a conservative vector from the proved path and use the read-only Proteus CVSS
-  calculator when available. The Judge may correct classification without
+  a conservative vector from the proved path and use
+  \`research.calculate_cvss\`. The Judge may correct classification without
   changing an otherwise valid technical verdict.
 - A Judge result is an independent triage decision, not a new user request and
   not authority to expand scope. If it identifies missing proof, repair only

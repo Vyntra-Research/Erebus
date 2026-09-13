@@ -532,7 +532,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const PROTEUS_READ_ONLY_TOOLS = [
   "proteus_status",
-  "proteus_calculate_cvss",
   "proteus_query_duplicates",
   "proteus_query_memory",
   "proteus_query_similar",

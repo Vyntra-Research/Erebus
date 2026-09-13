@@ -10,7 +10,7 @@ The rules apply when the agent ranks, narrows, discards, reopens, or promotes a 
 
 Argos is the connected memory for current research. Erebus installs its MCP and skills in the shared Codex profile. The agent updates canonical nodes and typed relations instead of copying the same fact into a second Erebus state. Each project's durable graph stays under `.argos/` in that project.
 
-Proteus is legacy history in Erebus 0.6. The managed plugin exposes read-only lookup, status, and CVSS tools. It does not expose mutation tools or Proteus skills.
+Proteus is legacy history in Erebus 0.6. The managed plugin exposes read-only lookup and status tools. It does not expose mutation tools, CVSS calculation, or Proteus skills.
 
 ## Co-agents and subagents
 
@@ -20,8 +20,9 @@ A co-agent receives the same research rules, but it does not own the principal's
 
 ## Judge handoff
 
-The `research` tool namespace has three operations:
+The `research` tool namespace has four operations:
 
+- `research.calculate_cvss` validates and scores an explicit CVSS 3.0, 3.1, or 4.0 vector.
 - `research.get_status` reads stored submissions and verdicts.
 - `research.submit_finding` submits revision 1.
 - `research.revise_finding` submits a later revision after a technical verdict requests a change.
@@ -54,7 +55,7 @@ Judge verdicts mean:
 - `invalidSubmission`: the submitted artifacts cannot be judged in their current form.
 - `reviewBlocked`: the evaluator or evidence transport failed. Preserve the finding and retry the same unchanged revision after recovery.
 
-CVSS classifies a proved finding. It does not decide whether the finding is valid.
+CVSS classifies a proved finding. It does not decide whether the finding is valid. The calculator never infers metrics from finding prose; pass the complete vector to `research.calculate_cvss`.
 
 ## Settings
 

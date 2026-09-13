@@ -137,6 +137,7 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
       );
       expect(proxy).toContain("Proteus is read-only in Erebus");
       expect(proxy).toContain('"proteus_query_memory"');
+      expect(proxy).not.toContain('"proteus_calculate_cvss"');
       expect(proxy).not.toContain('"proteus_prompt"');
       expect(proxy).not.toContain('"proteus_roles"');
       expect(proxy).not.toContain('"proteus_create_campaign"');

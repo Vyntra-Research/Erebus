@@ -16,14 +16,15 @@ Erebus is based on [T3 Code](https://github.com/pingdotgg/t3code). The current r
 - Supports up to four direct co-agent tasks for separate horizontal research surfaces. Each co-agent can use native subagents for work within its assigned surface.
 - Supports multiple Codex accounts with separate sign-in state, shared task data, and quota-aware routing at turn boundaries.
 - Keeps the Erebus Codex profile separate from the Codex desktop app profile.
-- Provides read-only access to legacy Proteus records and its CVSS calculator. Erebus does not load Proteus skills or allow Proteus writes.
+- Provides read-only access to legacy Proteus records. Erebus does not load Proteus skills or allow Proteus writes.
+- Calculates explicit CVSS 3.0, 3.1, and 4.0 vectors directly through `research.calculate_cvss`.
 - Installs [Argos](https://github.com/rafabd1/Argos) as the connected research map, including its MCP tools and specialist skills.
 
 ## Research and review
 
 1. Start research directly. Create a native goal only when the task benefits from one.
 2. Record connected research knowledge in Argos. Erebus does not mirror that state.
-3. Use Proteus only to read older evidence, check prior records, or calculate CVSS.
+3. Use Proteus only to read older evidence or check prior records. Use Erebus to calculate CVSS.
 4. Place the finding under `findings/` and the working PoC under `pocs/`.
 5. Submit those paths to the Judge. A successful submission ends the current turn.
 6. Erebus stores the verdict and starts a separate follow-up turn when the task is idle.

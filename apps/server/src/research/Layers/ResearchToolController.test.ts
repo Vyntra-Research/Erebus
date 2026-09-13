@@ -32,7 +32,44 @@ const resultFromResponse = (response: {
   return decodeResult(item?.text ?? "");
 };
 
+const jsonFromResponse = (response: {
+  readonly contentItems: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+}) => {
+  const item = response.contentItems[0];
+  assert.equal(item?.type, "inputText");
+  return JSON.parse(item?.text ?? "") as Record<string, unknown>;
+};
+
 layer("ResearchToolController", (it) => {
+  it.effect("calculates CVSS locally without Judge or Proteus state", () =>
+    Effect.gen(function* () {
+      const controller = yield* ResearchToolController;
+      assert(controller);
+      const threadId = ThreadId.make("thread-cvss");
+      const context = {
+        projectId: ProjectId.make("project-cvss"),
+        threadId,
+        cwd: process.cwd(),
+      };
+
+      const calculated = jsonFromResponse(
+        yield* controller.handle(context, {
+          namespace: "research",
+          tool: "calculate_cvss",
+          callId: "call-cvss",
+          threadId,
+          turnId: "turn-cvss",
+          arguments: {
+            vector: "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+          },
+        }),
+      );
+      assert.equal(calculated.version, "4.0");
+      assert.equal(calculated.score, 9.3);
+      assert.equal(calculated.severity, "critical");
+    }),
+  );
+
   it.effect("submits only workspace finding and PoC artifacts to the independent Judge", () =>
     Effect.gen(function* () {
       const controller = yield* ResearchToolController;
@@ -135,6 +172,22 @@ layer("ResearchToolController", (it) => {
         createdAt: "2026-09-12T12:00:00.000Z",
         updatedAt: "2026-09-12T12:00:00.000Z",
       });
+      const coagentCvss = jsonFromResponse(
+        yield* controller.handle(
+          { projectId, threadId: childThreadId, cwd: root },
+          {
+            namespace: "research",
+            tool: "calculate_cvss",
+            callId: "call-child-cvss",
+            threadId: childThreadId,
+            turnId: "turn-child",
+            arguments: {
+              vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+            },
+          },
+        ),
+      );
+      assert.equal(coagentCvss.score, 7.3);
       const coagent = resultFromResponse(
         yield* controller.handle(
           { projectId, threadId: childThreadId, cwd: root },
