@@ -177,6 +177,9 @@ describe("DesktopLifecycle", () => {
       const destroyAll = Effect.sync(() => {
         events.push("destroy");
       });
+      const flushStorageData = Effect.sync(() => {
+        events.push("flush-storage");
+      });
       const flushMainWindowBounds = Effect.sync(() => {
         events.push("flush");
       });
@@ -197,7 +200,7 @@ describe("DesktopLifecycle", () => {
       } as DesktopEnvironment.DesktopEnvironment["Service"]);
 
       const layer = DesktopLifecycle.layer.pipe(
-        Layer.provideMerge(makeElectronAppLayer(appListeners, quit)),
+        Layer.provideMerge(makeElectronAppLayer(appListeners, quit, { flushStorageData })),
         Layer.provideMerge(electronThemeLayer),
         Layer.provideMerge(makeElectronWindowLayer(destroyAll)),
         Layer.provideMerge(makeDesktopWindowLayer({ flushMainWindowBounds })),
@@ -219,8 +222,8 @@ describe("DesktopLifecycle", () => {
           yield* Deferred.succeed(allowShutdown, undefined);
           yield* Deferred.await(quitRequested);
 
-          assert.deepEqual(eventsBeforeCleanup, ["flush", "destroy", "request"]);
-          assert.deepEqual(events, ["flush", "destroy", "request", "quit"]);
+          assert.deepEqual(eventsBeforeCleanup, ["flush", "flush-storage", "destroy", "request"]);
+          assert.deepEqual(events, ["flush", "flush-storage", "destroy", "request", "quit"]);
         }),
       ).pipe(Effect.provide(layer));
     }),

@@ -101,6 +101,17 @@ let lastDesktopTheme: "light" | "dark" | "system" | null = null;
 let lastAppliedTheme: ThemeSnapshot | null = null;
 let themeStorageReadFailure: ThemeStorageError | null = null;
 
+function flushThemeStorage(): void {
+  if (typeof window === "undefined") return;
+  const flushRendererStorage = window.desktopBridge?.flushRendererStorage;
+  if (typeof flushRendererStorage !== "function") return;
+  void flushRendererStorage().catch((cause: unknown) => {
+    console.error("Failed to flush theme preference to desktop storage.", {
+      ...safeErrorLogAttributes(cause),
+    });
+  });
+}
+
 function emitChange() {
   snapshotStale = true;
   for (const listener of listeners) listener();
@@ -511,6 +522,7 @@ export function useTheme() {
       });
       return false;
     }
+    flushThemeStorage();
     applyTheme(next, true);
     emitChange();
     return true;
@@ -536,6 +548,7 @@ export function useTheme() {
       return false;
     }
     themeStorageReadFailure = null;
+    flushThemeStorage();
     applyTheme(getStored(), true);
     emitChange();
     return true;
@@ -580,6 +593,7 @@ export function useTheme() {
         });
         return false;
       }
+      flushThemeStorage();
       applyTheme(getStored(), true);
       emitChange();
       return true;
@@ -604,6 +618,7 @@ export function useTheme() {
       });
       return false;
     }
+    flushThemeStorage();
     applyTheme(getStored(), true);
     emitChange();
     return true;

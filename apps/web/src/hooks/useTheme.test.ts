@@ -27,6 +27,29 @@ afterEach(() => {
 });
 
 describe("theme failure handling", () => {
+  it("flushes a selected theme to desktop storage immediately", async () => {
+    const flushRendererStorage = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("react", () => ({
+      useCallback: <A>(callback: A) => callback,
+      useEffect: () => undefined,
+      useSyncExternalStore: (
+        _subscribe: (listener: () => void) => () => void,
+        getSnapshot: () => unknown,
+      ) => getSnapshot(),
+    }));
+    vi.stubGlobal("window", {
+      desktopBridge: { flushRendererStorage },
+      localStorage: createStorage(),
+      matchMedia: () => ({ matches: false }),
+    });
+
+    const { useTheme } = await import("./useTheme");
+    expect(useTheme().setTheme("codex")).toBe(true);
+    await Promise.resolve();
+
+    expect(flushRendererStorage).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves exact storage causes and operation context", async () => {
     const readCause = new Error("storage read blocked");
     const writeCause = new Error("storage quota exceeded");

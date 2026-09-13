@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 - 2026-09-13
+
+### Fixed
+
+- Persist the selected theme immediately and before normal desktop shutdown.
+
 ## 0.6.1 - 2026-09-13
 
 ### Fixed
