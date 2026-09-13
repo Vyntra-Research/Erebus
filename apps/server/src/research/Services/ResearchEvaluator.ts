@@ -1,36 +1,17 @@
 import type {
   ModelSelection,
-  ResearchContract,
-  ResearchFindingSubmission,
-  ResearchJudgeEvaluation,
+  ResearchFindingReviewEvaluation,
+  ResearchFindingReviewSubmission,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-
-import type { ObserverCommandAudit, ObserverTimelineMessage } from "../researchSupervision.ts";
 
 const Confidence = Schema.Number.check(Schema.isFinite()).pipe(
   Schema.decodeTo(
     Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1)),
   ),
 );
-
-export const ObserverAssessment = Schema.Struct({
-  verdict: Schema.Literals(["aligned", "watch", "deviation", "criticalDeviation"]),
-  confidence: Confidence,
-  interventionBasis: Schema.Struct({
-    actualViolationObserved: Schema.Boolean,
-    materialRiskObserved: Schema.Boolean,
-    repairStillNeeded: Schema.Boolean,
-    currentWorkAlreadyAddressesIssue: Schema.Boolean,
-  }),
-  contractClauses: Schema.Array(Schema.String),
-  evidence: Schema.Array(Schema.String),
-  risk: Schema.NullOr(Schema.String),
-  recommendedSteering: Schema.NullOr(Schema.String),
-});
-export type ObserverAssessment = typeof ObserverAssessment.Type;
 
 export const JudgeAssessment = Schema.Struct({
   verdict: Schema.Literals(["accepted", "revisionRequired", "rejected", "invalidSubmission"]),
@@ -61,64 +42,15 @@ export const JudgeAssessment = Schema.Struct({
 });
 export type JudgeAssessment = typeof JudgeAssessment.Type;
 
-export interface ObserverCampaignSnapshot {
-  readonly observedTask?: {
-    readonly threadId: string;
-    readonly role: "coagent";
-    readonly parentThreadId: string;
-    readonly assignment: string;
-  };
-  readonly campaign: {
-    readonly id: string;
-    readonly status: string;
-    readonly proteusCampaignId: string;
-    readonly eligibleMessageCount: number;
-    readonly lastObservedMessageCount: number;
-  };
-  readonly runtimeObserverPolicy: {
-    readonly messageWindow: number;
-    readonly interventionConfidence: number;
-    readonly cooldownMessages: number;
-    readonly maxInterventionsPerTurn: number | null;
-  };
-  readonly latestCheckpoint: {
-    readonly proteusCheckpointId: string;
-    readonly summary: string;
-    readonly evidence: ReadonlyArray<string>;
-    readonly killedPaths: ReadonlyArray<string>;
-    readonly openDeviations: ReadonlyArray<string>;
-    readonly nextMove: string;
-  } | null;
-  readonly latestFindings: ReadonlyArray<{
-    readonly findingId: string;
-    readonly revision: number;
-    readonly title: string;
-    readonly proteusBranchId: string;
-    readonly judge: {
-      readonly evaluationId: string;
-      readonly verdict: string;
-      readonly summary: string;
-      readonly nextAction: string | null;
-    } | null;
-  }>;
-  readonly recentInterventions: ReadonlyArray<{
-    readonly source: string;
-    readonly delivery: string;
-    readonly status: string;
-    readonly evaluationId: string;
-    readonly observation: string;
-  }>;
-}
-
 export class ResearchEvaluatorError extends Schema.TaggedErrorClass<ResearchEvaluatorError>()(
   "ResearchEvaluatorError",
   {
-    operation: Schema.Literals(["observer", "judge"]),
+    operation: Schema.Literal("judge"),
     detail: Schema.String,
   },
 ) {
   override get message(): string {
-    return `${this.operation} evaluation failed: ${this.detail}`;
+    return `judge evaluation failed: ${this.detail}`;
   }
 }
 
@@ -141,25 +73,11 @@ export const describeResearchEvaluatorFailure = (detail: string): string => {
 };
 
 export interface ResearchEvaluatorShape {
-  readonly evaluateObserver: (input: {
-    readonly cwd: string;
-    readonly modelSelection: ModelSelection;
-    readonly contract: ResearchContract;
-    readonly campaignSnapshot: ObserverCampaignSnapshot;
-    readonly messages: ReadonlyArray<{ readonly id: string; readonly text: string }>;
-    readonly timeline: ReadonlyArray<ObserverTimelineMessage>;
-    readonly commandAudit: ObserverCommandAudit;
-    readonly turnState: {
-      readonly activeTurnId: string | null;
-      readonly windowEndsInActiveTurn: boolean;
-    };
-  }) => Effect.Effect<ObserverAssessment, ResearchEvaluatorError>;
   readonly evaluateJudge: (input: {
     readonly cwd: string;
     readonly modelSelection: ModelSelection;
-    readonly contract: ResearchContract;
-    readonly finding: ResearchFindingSubmission;
-    readonly priorEvaluations: ReadonlyArray<ResearchJudgeEvaluation>;
+    readonly finding: ResearchFindingReviewSubmission;
+    readonly priorEvaluations: ReadonlyArray<ResearchFindingReviewEvaluation>;
   }) => Effect.Effect<JudgeAssessment, ResearchEvaluatorError>;
 }
 

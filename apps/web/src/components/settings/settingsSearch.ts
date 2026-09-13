@@ -45,33 +45,13 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  */
 export const SETTINGS_SEARCH_ITEMS = [
   {
-    id: "research-observer-message-window",
-    title: "Observer message window",
-    to: "/settings/research",
-  },
-  {
-    id: "research-observer-confidence",
-    title: "Observer intervention confidence",
-    to: "/settings/research",
-  },
-  {
-    id: "research-observer-cooldown",
-    title: "Observer cooldown",
-    to: "/settings/research",
-  },
-  {
-    id: "research-observer-turn-limit",
-    title: "Observer correction limit",
-    to: "/settings/research",
-  },
-  {
     id: "research-evaluator-model",
-    title: "Observer and Judge model",
+    title: "Judge model",
     to: "/settings/research",
   },
   {
     id: "research-evaluator-effort",
-    title: "Observer and Judge reasoning effort",
+    title: "Judge reasoning effort",
     to: "/settings/research",
   },
   {

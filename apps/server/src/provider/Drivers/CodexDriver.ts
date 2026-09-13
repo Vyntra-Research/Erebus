@@ -36,6 +36,7 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
+import { installManagedArgosForCodex } from "../../argosRuntime.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -161,9 +162,22 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       if (enabled) {
-        // Proteus is shared by every account. Install it before materializing
-        // the overlay so config.toml and managed plugin entries already exist
-        // in the shared home and are linked into the account home.
+        // Research runtimes are shared by every account. Install them before
+        // materializing the overlay so config.toml and managed plugin entries
+        // already exist in the shared home and are linked into the account home.
+        yield* installManagedArgosForCodex(homeLayout.sharedHomePath, {
+          managedRuntimeRoot: path.join(serverConfig.stateDir, "managed", "argos-runtime"),
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: cause.detail,
+                cause,
+              }),
+          ),
+        );
         yield* installManagedProteusForCodex(homeLayout.sharedHomePath, {
           managedRuntimeRoot: path.join(serverConfig.stateDir, "managed", "proteus-runtime"),
         }).pipe(

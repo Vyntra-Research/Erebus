@@ -78,6 +78,21 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
         await NodeFSP.writeFile(manifestPath, brokenManifest, "utf8");
         await NodeFSP.mkdir(NodePath.dirname(cachedManifestPath), { recursive: true });
         await NodeFSP.writeFile(cachedManifestPath, brokenManifest, "utf8");
+        await NodeFSP.mkdir(NodePath.join(first.installedPluginRoot, "skills", "legacy"), {
+          recursive: true,
+        });
+        await NodeFSP.writeFile(
+          NodePath.join(first.installedPluginRoot, "skills", "legacy", "SKILL.md"),
+          "legacy skill",
+        );
+        const cachedPluginRoot = NodePath.dirname(NodePath.dirname(cachedManifestPath));
+        await NodeFSP.mkdir(NodePath.join(cachedPluginRoot, "skills", "legacy"), {
+          recursive: true,
+        });
+        await NodeFSP.writeFile(
+          NodePath.join(cachedPluginRoot, "skills", "legacy", "SKILL.md"),
+          "legacy skill",
+        );
       });
       const second = yield* installManagedProteusForCodex(codexHome);
       const config = yield* fileSystem.readFileString(configPath);
@@ -96,11 +111,36 @@ it.layer(NodeServices.layer)("managed Proteus runtime", (it) => {
       expect(count(config, '[plugins."proteus@proteus-marketplace"]')).toBe(1);
       expect(manifest.mcpServers?.proteus?.command).toBe(process.execPath);
       expect(manifest.mcpServers?.proteus?.args).toEqual([
-        path.join(first.installedPluginRoot, "dist", "mcp.js"),
+        path.join(first.installedPluginRoot, "dist", "readonly-mcp.cjs"),
       ]);
-      expect(manifest.mcpServers?.proteus?.env).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
+      expect(manifest.mcpServers?.proteus?.env).toEqual({
+        ELECTRON_RUN_AS_NODE: "1",
+        EREBUS_PROTEUS_MCP_ENTRYPOINT: first.mcpPath,
+      });
       expect(cachedManifest.mcpServers?.proteus).toEqual(manifest.mcpServers?.proteus);
-      expect(yield* fileSystem.exists(path.join(first.installedPluginRoot, "skills"))).toBe(true);
+      expect(yield* fileSystem.exists(path.join(first.installedPluginRoot, "skills"))).toBe(false);
+      expect(
+        yield* fileSystem.exists(
+          path.join(
+            codexHome,
+            "plugins",
+            "cache",
+            "proteus-marketplace",
+            "proteus",
+            first.version,
+            "skills",
+          ),
+        ),
+      ).toBe(false);
+      const proxy = yield* fileSystem.readFileString(
+        path.join(first.installedPluginRoot, "dist", "readonly-mcp.cjs"),
+      );
+      expect(proxy).toContain("Proteus is read-only in Erebus");
+      expect(proxy).toContain('"proteus_query_memory"');
+      expect(proxy).not.toContain('"proteus_calculate_cvss"');
+      expect(proxy).not.toContain('"proteus_prompt"');
+      expect(proxy).not.toContain('"proteus_roles"');
+      expect(proxy).not.toContain('"proteus_create_campaign"');
       expect(
         yield* fileSystem.exists(path.join(first.marketplaceRoot, ".erebus-managed.json")),
       ).toBe(true);

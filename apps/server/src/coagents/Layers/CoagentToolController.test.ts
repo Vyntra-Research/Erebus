@@ -235,8 +235,10 @@ layer("CoagentToolController", (it) => {
       const assignment = yield* awaitMessage(childThreadId, /historical_parent_context/);
       assert.match(assignment.text, /context, not a new instruction/i);
       assert.match(assignment.text, /Inspect only the serializer boundary/);
-      assert.match(assignment.text, /containment boundary, not a request to create a lab/);
-      assert.match(assignment.text, /Read-only work must not create one/);
+      assert.match(assignment.text, /Keep read-only work read-only/);
+      assert.match(assignment.text, /only when a concrete writable test needs it/);
+      assert.match(assignment.text, /do not inherit ownership of the parent's native goal/);
+      assert.match(assignment.text, /Proteus is read-only legacy lookup and supplies no skills/);
 
       const sent = yield* call(
         controller,

@@ -648,46 +648,6 @@ export const BackgroundActivitySettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
-export const MIN_RESEARCH_OBSERVER_MESSAGE_WINDOW = 1;
-export const MAX_RESEARCH_OBSERVER_MESSAGE_WINDOW = 50;
-export const DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW = 10;
-export const ResearchObserverMessageWindow = Schema.Int.check(
-  Schema.isBetween({
-    minimum: MIN_RESEARCH_OBSERVER_MESSAGE_WINDOW,
-    maximum: MAX_RESEARCH_OBSERVER_MESSAGE_WINDOW,
-  }),
-);
-
-export const MIN_RESEARCH_OBSERVER_CONFIDENCE = 0;
-export const MAX_RESEARCH_OBSERVER_CONFIDENCE = 1;
-export const DEFAULT_RESEARCH_OBSERVER_CONFIDENCE = 0.8;
-export const ResearchObserverConfidence = Schema.Number.check(
-  Schema.isBetween({
-    minimum: MIN_RESEARCH_OBSERVER_CONFIDENCE,
-    maximum: MAX_RESEARCH_OBSERVER_CONFIDENCE,
-  }),
-);
-
-export const MIN_RESEARCH_OBSERVER_COOLDOWN_MESSAGES = 0;
-export const MAX_RESEARCH_OBSERVER_COOLDOWN_MESSAGES = 100;
-export const DEFAULT_RESEARCH_OBSERVER_COOLDOWN_MESSAGES = 5;
-export const ResearchObserverCooldownMessages = Schema.Int.check(
-  Schema.isBetween({
-    minimum: MIN_RESEARCH_OBSERVER_COOLDOWN_MESSAGES,
-    maximum: MAX_RESEARCH_OBSERVER_COOLDOWN_MESSAGES,
-  }),
-);
-
-export const MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN = 1;
-export const MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN = 10;
-export const DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN: number | null = null;
-export const ResearchObserverInterventionsPerTurn = Schema.Int.check(
-  Schema.isBetween({
-    minimum: MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
-    maximum: MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
-  }),
-);
-
 export const ResearchEvaluatorReasoningEffort = Schema.Literals([
   "low",
   "medium",
@@ -701,19 +661,9 @@ export const DEFAULT_RESEARCH_EVALUATOR_MODEL = "gpt-daybreak-blue-latest";
 export const DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT: ResearchEvaluatorReasoningEffort =
   "xhigh";
 
+// Keep the legacy settings key and type name so existing Judge model choices survive
+// upgrades from releases that also stored Observer settings.
 export const ResearchSupervisionSettings = Schema.Struct({
-  observerMessageWindow: ResearchObserverMessageWindow.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW)),
-  ),
-  observerInterventionConfidence: ResearchObserverConfidence.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_CONFIDENCE)),
-  ),
-  observerCooldownMessages: ResearchObserverCooldownMessages.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_COOLDOWN_MESSAGES)),
-  ),
-  observerMaxInterventionsPerTurn: Schema.NullOr(ResearchObserverInterventionsPerTurn).pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN)),
-  ),
   evaluatorModel: TrimmedNonEmptyString.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_EVALUATOR_MODEL)),
   ),
@@ -963,12 +913,6 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   researchSupervision: Schema.optionalKey(
     Schema.Struct({
-      observerMessageWindow: Schema.optionalKey(ResearchObserverMessageWindow),
-      observerInterventionConfidence: Schema.optionalKey(ResearchObserverConfidence),
-      observerCooldownMessages: Schema.optionalKey(ResearchObserverCooldownMessages),
-      observerMaxInterventionsPerTurn: Schema.optionalKey(
-        Schema.NullOr(ResearchObserverInterventionsPerTurn),
-      ),
       evaluatorModel: Schema.optionalKey(TrimmedNonEmptyString),
       evaluatorReasoningEffort: Schema.optionalKey(ResearchEvaluatorReasoningEffort),
     }),

@@ -60,6 +60,8 @@ import Migration0044 from "./Migrations/044_ResearchCampaigns.ts";
 import Migration0045 from "./Migrations/045_ResearchCampaignThreadReuse.ts";
 import Migration0046 from "./Migrations/046_CoagentThreads.ts";
 import Migration0047 from "./Migrations/047_CoagentSupervision.ts";
+import Migration0048 from "./Migrations/048_IndependentFindingReviews.ts";
+import Migration0049 from "./Migrations/049_RemoveCoagentObserverState.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -119,6 +121,8 @@ export const migrationEntries = [
   [45, "ResearchCampaignThreadReuse", Migration0045],
   [46, "CoagentThreads", Migration0046],
   [47, "CoagentSupervision", Migration0047],
+  [48, "IndependentFindingReviews", Migration0048],
+  [49, "RemoveCoagentObserverState", Migration0049],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

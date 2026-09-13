@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.0 - 2026-09-12
+
+### Added
+
+- Add campaign-free finding submissions with durable revisions and separate independent Judge delivery.
+- Bundle the Argos 0.1.0 release as the connected research map and install its MCP tools and specialist skills in the shared Codex profile.
+- Check and install newer stable Argos releases independently, with exact asset and SHA-256 verification, a manual update control, and one retained fallback version.
+
+### Changed
+
+- Use the native Codex/T3 goal as the only task objective and progress lifecycle.
+- Apply evidence scope, anti-tunnel continuity, conclusion reopening, connected evidence, and Post-AI blind-spot checks without requiring a campaign workflow.
+- Limit the Judge to a fixed, ten-minute desk review of the submitted `findings/` document and `pocs/` artifact.
+- Expose Proteus as read-only legacy history through an Erebus-managed MCP proxy.
+- Provide deterministic CVSS 3.0, 3.1, and 4.0 calculation directly through `research.calculate_cvss`.
+
+### Removed
+
+- Remove Erebus campaigns, contracts, checkpoints, and lifecycle tools from the active research runtime.
+- Remove Observer evaluation, intervention, cadence settings, and co-agent supervision.
+- Stop installing or loading Proteus skills in Erebus Codex profiles.
+
 ## 0.5.4 - 2026-09-08
 
 ### Fixed

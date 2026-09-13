@@ -1,29 +1,72 @@
-# Research supervision
+# Research and independent review
 
-Erebus allows one live research campaign per task. Separate tasks can run separate campaigns at the same time.
+Erebus does not create research campaigns. A task can start, resume, change direction, or end without a research setup call. If the work needs a durable objective, use the native Codex/T3 goal.
 
-The principal Codex agent registers the campaign contract and starts the campaign. The Observer reviews completed assistant messages in fixed windows. It sends a live correction only when the evidence crosses the configured confidence threshold; a correction is never queued for a later turn after the task stops or pauses.
+## Research context
 
-Erebus keeps a short, mandatory quality contract in every principal, Observer, Judge, and co-agent context. It covers scope, realistic attacker control, evidence, natural chains, depth, high-ROI continuity, dedupe, and promotion gates. Proteus provides the detailed research methods as installed skills. The agent loads `proteus:continuous-vuln-research` when a campaign starts or resumes, then loads only the specialist skill needed for the current task. Erebus refers to these skills by name instead of copying their full text into each prompt.
+Erebus keeps a short set of rules in the principal and co-agent context. These cover realistic attacker control, evidence scope, natural exploit chains, dedupe, safe execution, anti-tunnel checks, and Post-AI blind spots.
 
-When the principal agent submits a finding, that submission ends its turn. The Judge then reviews the finding, its `findings/` record, its `pocs/` evidence, and the campaign gates independently. Erebus delivers the durable verdict in a later turn. Severity labels do not decide validity, and the Judge must not demand report packaging, ZIP files, or hashes as promotion gates.
+The rules apply when the agent ranks, narrows, discards, reopens, or promotes a path. A failed test closes only the path it exercised. A check in one route does not prove that every route crosses it. New evidence must reopen any conclusion whose premise changed.
 
-Use **Settings -> Research** to set:
+Argos is the connected memory for current research. Erebus installs its MCP and skills in the shared Codex profile. The agent updates canonical nodes and typed relations instead of copying the same fact into a second Erebus state. Each project's durable graph stays under `.argos/` in that project.
 
-- completed assistant messages per Observer window
-- minimum intervention confidence
-- cooldown after an intervention
-- an optional correction cap, unlimited by default
-- evaluator model and reasoning effort
+Proteus is legacy history in Erebus 0.6. The managed plugin exposes read-only lookup and status tools. It does not expose mutation tools, CVSS calculation, or Proteus skills.
 
-These are harness settings. A campaign agent cannot change the Observer cadence as a research decision.
+## Co-agents and subagents
+
+Native provider subagents help with parallel work inside one bounded task. Erebus co-agent tasks cover separate horizontal sinks or surfaces. The principal assigns a distinct surface, checks progress, collects the handback, and releases the task when it is done.
+
+A co-agent receives the same research rules, but it does not own the principal's goal and cannot submit a finding to the Judge. It returns evidence and artifact paths to the principal.
+
+## Judge handoff
+
+The `research` tool namespace has four operations:
+
+- `research.calculate_cvss` validates and scores an explicit CVSS 3.0, 3.1, or 4.0 vector.
+- `research.get_status` reads stored submissions and verdicts.
+- `research.submit_finding` submits revision 1.
+- `research.revise_finding` submits a later revision after a technical verdict requests a change.
+
+Both submission tools use this shape:
+
+```json
+{
+  "findingId": "stable-finding-id",
+  "revision": 1,
+  "supersedesEvaluationId": null,
+  "title": "Concise finding title",
+  "target": "Product, version or ref, and tested topology",
+  "findingPath": "findings/stable-finding-id.md",
+  "pocPath": "pocs/stable-finding-id"
+}
+```
+
+`findingPath` must name an existing file under `findings/`. `pocPath` must name an existing file or directory under `pocs/`, or it may be `null` when the finding explains why no PoC artifact applies. Paths are relative to the task workspace and cannot escape those directories.
+
+The normal handoff contains only the finding and working PoC. Do not create a ZIP, checksum manifest, alternate deliverables directory, final report, or disclosure package for Judge review.
+
+When a submission returns `accepted: true`, the agent ends its turn. The Judge reads the submitted artifacts in a separate bounded desk review. Erebus stores the result and starts a follow-up turn when the task is idle.
+
+Judge verdicts mean:
+
+- `accepted`: every required evidence gate passed.
+- `revisionRequired`: the candidate is plausible but lacks a bounded proof or explanation.
+- `rejected`: the evidence demonstrates a technical failure, artificial scenario, duplicate boundary, or missing practical impact.
+- `invalidSubmission`: the submitted artifacts cannot be judged in their current form.
+- `reviewBlocked`: the evaluator or evidence transport failed. Preserve the finding and retry the same unchanged revision after recovery.
+
+CVSS classifies a proved finding. It does not decide whether the finding is valid. The calculator never infers metrics from finding prose; pass the complete vector to `research.calculate_cvss`.
+
+## Settings
+
+Use **Settings > Research** to choose the Judge model and reasoning effort. There is no Observer cadence or campaign setting in Erebus 0.6.
+
+Existing campaign records from older Erebus releases remain in the local database for compatibility. Erebus 0.6 does not resume or mutate them.
 
 ## Proteus updates
 
-Erebus checks the installed Proteus runtime against the latest stable release. When an update is available, it shows the current and latest versions at launch and under **Settings -> General**. The update control verifies the release metadata, installs the managed runtime, and keeps the previous managed release for rollback.
+Erebus checks its managed Proteus runtime against the latest stable release. When an update is available, the app shows the current and latest versions. The update control verifies the release metadata, installs the new runtime, and keeps the previous managed release for rollback. The runtime remains read-only inside Erebus.
 
-## Strict campaign payloads
+## Argos updates
 
-Research control tools reject incomplete payloads without changing campaign state. The agent must use every required field and the exact type shown by the tool before moving to the next step.
-
-Contract registration uses `{ campaignId, contract }`. Inside `contract`, `id` is the contract identifier and `target` is a required plain string. The target should name the product, repository, or service together with the version or ref and the deployment topology under test. Later lifecycle and finding calls refer to the registered identifier as `contractId`.
+Erebus includes Argos 0.1.0 as a tested fallback and checks the latest stable Argos release separately. The app shows the current and latest versions. Both automatic and manual updates verify the exact release asset and its SHA-256 digest, then install the MCP and skills for enabled Codex accounts. The current and previous managed releases remain available, and project knowledge under `.argos/` is not replaced.

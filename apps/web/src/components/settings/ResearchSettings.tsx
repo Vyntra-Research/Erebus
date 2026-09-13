@@ -2,31 +2,14 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_RESEARCH_EVALUATOR_MODEL,
   DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT,
-  DEFAULT_RESEARCH_OBSERVER_CONFIDENCE,
-  DEFAULT_RESEARCH_OBSERVER_COOLDOWN_MESSAGES,
-  DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
-  DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW,
-  MAX_RESEARCH_OBSERVER_COOLDOWN_MESSAGES,
-  MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
-  MAX_RESEARCH_OBSERVER_MESSAGE_WINDOW,
-  MIN_RESEARCH_OBSERVER_COOLDOWN_MESSAGES,
-  MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
-  MIN_RESEARCH_OBSERVER_MESSAGE_WINDOW,
   type ResearchEvaluatorReasoningEffort,
 } from "@t3tools/contracts/settings";
-import { EyeIcon, ScaleIcon } from "lucide-react";
+import { ScaleIcon } from "lucide-react";
 import { useMemo } from "react";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
 import { primaryServerProvidersAtom } from "~/state/server";
 
-import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-} from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import {
   SettingResetButton,
@@ -36,7 +19,6 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
-const NO_GROUPING = { useGrouping: false } as const;
 const EFFORT_LABELS: Readonly<Record<ResearchEvaluatorReasoningEffort, string>> = {
   low: "Low",
   medium: "Medium",
@@ -45,51 +27,6 @@ const EFFORT_LABELS: Readonly<Record<ResearchEvaluatorReasoningEffort, string>> 
   max: "Max",
   ultra: "Ultra",
 };
-const UNLIMITED_OBSERVER_CORRECTIONS = "unlimited";
-const OBSERVER_CORRECTION_LIMITS = Array.from(
-  {
-    length:
-      MAX_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN -
-      MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN +
-      1,
-  },
-  (_, index) => MIN_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN + index,
-);
-
-function IntegerControl({
-  label,
-  value,
-  min,
-  max,
-  onCommit,
-}: {
-  readonly label: string;
-  readonly value: number;
-  readonly min: number;
-  readonly max: number;
-  readonly onCommit: (value: number) => void;
-}) {
-  return (
-    <NumberField
-      value={value}
-      min={min}
-      max={max}
-      step={1}
-      format={NO_GROUPING}
-      size="sm"
-      className="w-28"
-      onValueCommitted={(next) => {
-        if (next !== null && Number.isInteger(next) && next >= min && next <= max) onCommit(next);
-      }}
-    >
-      <NumberFieldGroup>
-        <NumberFieldDecrement aria-label={`Decrease ${label}`} />
-        <NumberFieldInput aria-label={label} />
-        <NumberFieldIncrement aria-label={`Increase ${label}`} />
-      </NumberFieldGroup>
-    </NumberField>
-  );
-}
 
 export function ResearchSettings() {
   const research = usePrimarySettings((settings) => settings.researchSupervision);
@@ -117,161 +54,14 @@ export function ResearchSettings() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Observer" icon={<EyeIcon className="size-4" />}>
-        <SettingsRow
-          {...searchableSetting("research-observer-message-window")}
-          description="Evaluate the principal after this many completed assistant messages. Tool calls do not count."
-          resetAction={
-            research.observerMessageWindow !== DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW ? (
-              <SettingResetButton
-                label="Observer message window"
-                onClick={() =>
-                  updateResearch({
-                    observerMessageWindow: DEFAULT_RESEARCH_OBSERVER_MESSAGE_WINDOW,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <IntegerControl
-              label="Observer message window"
-              value={research.observerMessageWindow}
-              min={MIN_RESEARCH_OBSERVER_MESSAGE_WINDOW}
-              max={MAX_RESEARCH_OBSERVER_MESSAGE_WINDOW}
-              onCommit={(observerMessageWindow) => updateResearch({ observerMessageWindow })}
-            />
-          }
-        />
-        <SettingsRow
-          {...searchableSetting("research-observer-confidence")}
-          description="Minimum confidence required before a deviation becomes a live course correction."
-          resetAction={
-            research.observerInterventionConfidence !== DEFAULT_RESEARCH_OBSERVER_CONFIDENCE ? (
-              <SettingResetButton
-                label="Observer intervention confidence"
-                onClick={() =>
-                  updateResearch({
-                    observerInterventionConfidence: DEFAULT_RESEARCH_OBSERVER_CONFIDENCE,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <NumberField
-              value={Math.round(research.observerInterventionConfidence * 100)}
-              min={0}
-              max={100}
-              step={5}
-              format={NO_GROUPING}
-              size="sm"
-              className="w-28"
-              onValueCommitted={(next) => {
-                if (next !== null && Number.isFinite(next) && next >= 0 && next <= 100) {
-                  updateResearch({ observerInterventionConfidence: next / 100 });
-                }
-              }}
-            >
-              <NumberFieldGroup>
-                <NumberFieldDecrement aria-label="Decrease Observer confidence" />
-                <NumberFieldInput aria-label="Observer intervention confidence percent" />
-                <NumberFieldIncrement aria-label="Increase Observer confidence" />
-              </NumberFieldGroup>
-            </NumberField>
-          }
-        />
-        <SettingsRow
-          {...searchableSetting("research-observer-cooldown")}
-          description="Require this many new principal messages before another Observer correction."
-          resetAction={
-            research.observerCooldownMessages !== DEFAULT_RESEARCH_OBSERVER_COOLDOWN_MESSAGES ? (
-              <SettingResetButton
-                label="Observer cooldown"
-                onClick={() =>
-                  updateResearch({
-                    observerCooldownMessages: DEFAULT_RESEARCH_OBSERVER_COOLDOWN_MESSAGES,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <IntegerControl
-              label="Observer cooldown messages"
-              value={research.observerCooldownMessages}
-              min={MIN_RESEARCH_OBSERVER_COOLDOWN_MESSAGES}
-              max={MAX_RESEARCH_OBSERVER_COOLDOWN_MESSAGES}
-              onCommit={(observerCooldownMessages) => updateResearch({ observerCooldownMessages })}
-            />
-          }
-        />
-        <SettingsRow
-          {...searchableSetting("research-observer-turn-limit")}
-          description="Optional safety cap on live Observer corrections during one active principal response. Unlimited is recommended for long-running research; the message cooldown still applies."
-          resetAction={
-            research.observerMaxInterventionsPerTurn !==
-            DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN ? (
-              <SettingResetButton
-                label="Observer turn limit"
-                onClick={() =>
-                  updateResearch({
-                    observerMaxInterventionsPerTurn:
-                      DEFAULT_RESEARCH_OBSERVER_INTERVENTIONS_PER_TURN,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={
-                research.observerMaxInterventionsPerTurn === null
-                  ? UNLIMITED_OBSERVER_CORRECTIONS
-                  : String(research.observerMaxInterventionsPerTurn)
-              }
-              onValueChange={(value) => {
-                if (!value) return;
-                if (value === UNLIMITED_OBSERVER_CORRECTIONS) {
-                  updateResearch({ observerMaxInterventionsPerTurn: null });
-                  return;
-                }
-                const limit = Number(value);
-                if (OBSERVER_CORRECTION_LIMITS.includes(limit)) {
-                  updateResearch({ observerMaxInterventionsPerTurn: limit });
-                }
-              }}
-            >
-              <SelectTrigger className="w-40" aria-label="Maximum corrections per active run">
-                <SelectValue>
-                  {research.observerMaxInterventionsPerTurn === null
-                    ? "Unlimited"
-                    : research.observerMaxInterventionsPerTurn}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value={UNLIMITED_OBSERVER_CORRECTIONS}>
-                  Unlimited
-                </SelectItem>
-                {OBSERVER_CORRECTION_LIMITS.map((limit) => (
-                  <SelectItem hideIndicator key={limit} value={String(limit)}>
-                    {limit}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection title="Observer and Judge runtime" icon={<ScaleIcon className="size-4" />}>
+      <SettingsSection title="Independent Judge" icon={<ScaleIcon className="size-4" />}>
         <SettingsRow
           {...searchableSetting("research-evaluator-model")}
-          description="Codex model used for independent Observer and Judge evaluations."
+          description="Codex model used for independent finding reviews. The Judge runs only after a finding is submitted."
           resetAction={
             research.evaluatorModel !== DEFAULT_RESEARCH_EVALUATOR_MODEL ? (
               <SettingResetButton
-                label="research evaluator model"
+                label="Judge model"
                 onClick={() => updateResearch({ evaluatorModel: DEFAULT_RESEARCH_EVALUATOR_MODEL })}
               />
             ) : null
@@ -283,7 +73,7 @@ export function ResearchSettings() {
                 if (evaluatorModel) updateResearch({ evaluatorModel });
               }}
             >
-              <SelectTrigger className="w-full sm:w-64" aria-label="Observer and Judge model">
+              <SelectTrigger className="w-full sm:w-64" aria-label="Judge model">
                 <SelectValue>{evaluatorModelLabel}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -305,11 +95,11 @@ export function ResearchSettings() {
         />
         <SettingsRow
           {...searchableSetting("research-evaluator-effort")}
-          description="Reasoning effort used by both independent evaluators. Model support is validated by Codex."
+          description="Reasoning effort used by the independent Judge. Model support is validated by Codex."
           resetAction={
             research.evaluatorReasoningEffort !== DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT ? (
               <SettingResetButton
-                label="research evaluator effort"
+                label="Judge reasoning effort"
                 onClick={() =>
                   updateResearch({
                     evaluatorReasoningEffort: DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT,
@@ -327,7 +117,7 @@ export function ResearchSettings() {
                 })
               }
             >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Research evaluator effort">
+              <SelectTrigger className="w-full sm:w-40" aria-label="Judge reasoning effort">
                 <SelectValue>{EFFORT_LABELS[research.evaluatorReasoningEffort]}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>

@@ -3,7 +3,7 @@
 ## Using Erebus
 
 - [Install and first run](./user/install.md)
-- [Research supervision](./user/research-supervision.md)
+- [Research and independent review](./user/research-supervision.md)
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Organizing threads](./user/thread-sidebar.md)

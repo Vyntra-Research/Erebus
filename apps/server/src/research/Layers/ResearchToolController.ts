@@ -1,44 +1,40 @@
 import {
   CommandId,
-  type ResearchProteusHealth,
-  ResearchCampaignRefInput,
-  ResearchCampaignCloseInput,
-  ResearchCheckpointInput,
-  ResearchCreateCampaignInput,
-  ResearchRegisterContractInput,
-  ResearchStartInput,
-  ResearchSubmitFindingInput,
+  ResearchFindingId,
+  ResearchSubmitFindingForReviewInput,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-import { ServerSettingsService } from "../../serverSettings.ts";
 import { CoagentRegistry } from "../../coagents/Services/CoagentRegistry.ts";
-import { ResearchEngine } from "../Services/ResearchEngine.ts";
+import { FindingReviewStore } from "../Services/FindingReviewStore.ts";
 import { ResearchToolController } from "../Services/ResearchToolController.ts";
-import { ProteusBridge } from "../Services/ProteusBridge.ts";
+import { calculateCvss } from "../researchCvss.ts";
 import {
   buildCoagentResearchInstructions,
   buildPrincipalResearchInstructions,
 } from "../researchPrincipalInstructions.ts";
-import { canonicalContractDigest, canonicalizeFindingCvss } from "../researchIntegrity.ts";
-import { researchObserverPolicyFromSettings } from "../researchPolicy.ts";
-import { isErebusResearchToolCall, toDynamicToolResponse } from "../researchTools.ts";
+import {
+  isErebusResearchToolCall,
+  toDynamicToolContent,
+  toDynamicToolResponse,
+} from "../researchTools.ts";
+
+const StatusInput = Schema.Struct({
+  findingId: Schema.optional(ResearchFindingId),
+});
 
 const decoders = {
-  create_campaign: Schema.decodeUnknownEffect(ResearchCreateCampaignInput),
-  get_status: Schema.decodeUnknownEffect(ResearchCampaignRefInput),
-  register_contract: Schema.decodeUnknownEffect(ResearchRegisterContractInput),
-  start: Schema.decodeUnknownEffect(ResearchStartInput),
-  checkpoint: Schema.decodeUnknownEffect(ResearchCheckpointInput),
-  pause: Schema.decodeUnknownEffect(ResearchCampaignRefInput),
-  resume: Schema.decodeUnknownEffect(ResearchCampaignRefInput),
-  finish: Schema.decodeUnknownEffect(ResearchCampaignCloseInput),
-  abort: Schema.decodeUnknownEffect(ResearchCampaignCloseInput),
-  submit_finding: Schema.decodeUnknownEffect(ResearchSubmitFindingInput),
-  revise_finding: Schema.decodeUnknownEffect(ResearchSubmitFindingInput),
+  calculate_cvss: Schema.decodeUnknownEffect(Schema.Struct({ vector: TrimmedNonEmptyString })),
+  get_status: Schema.decodeUnknownEffect(StatusInput),
+  submit_finding: Schema.decodeUnknownEffect(ResearchSubmitFindingForReviewInput),
+  revise_finding: Schema.decodeUnknownEffect(ResearchSubmitFindingForReviewInput),
 } as const;
 
 const failure = (message: string, issues: ReadonlyArray<string> = []) =>
@@ -55,147 +51,80 @@ const findingSubmissionFailure = (
   return toDynamicToolResponse({
     accepted: false,
     status: "rejected",
-    message: `SUBMISSION NOT RECORDED — NO JUDGE JOB CREATED. ${message} Correct every listed issue and retry ${qualifiedTool} with the same findingId and revision. Do not claim the finding is submitted or pending.`,
+    message: `SUBMISSION NOT QUEUED — NO JUDGE JOB CREATED. ${message}`,
     issues,
     retry: {
       required: true,
       tool: qualifiedTool,
       mode: "sameFindingRevision",
-      instruction: `Correct every listed issue, then call ${qualifiedTool} again with the same findingId and revision.`,
+      instruction: `Correct the listed input issue, then retry ${qualifiedTool} with the same findingId and revision.`,
     },
   });
 };
 
-const proteusNumericId = (value: string): number | null => {
-  const match = value.trim().match(/^[A-Za-z]?([1-9]\d*)$/);
-  if (!match?.[1]) return null;
-  const parsed = Number(match[1]);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+const isContained = (path: Path.Path, root: string, candidate: string): boolean => {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 };
-
-const isTerminalCampaignStatus = (status: string): boolean =>
-  status === "completed" || status === "aborted";
-
-export const researchProteusDependencyIssues = (
-  proteus: ResearchProteusHealth,
-): ReadonlyArray<string> =>
-  (["runtime", "plugin", "skills", "mcp"] as const)
-    .filter((key) => {
-      const state = proteus[key];
-      // plugin/list can time out while the installed plugin's skills and MCP
-      // are already usable. Unknown is not evidence that the plugin is absent.
-      return state !== "ready" && !(key === "plugin" && state === "unknown");
-    })
-    .map((key) => `Proteus ${key} is ${proteus[key]}`);
 
 const makeResearchToolController = Effect.gen(function* () {
-  const engine = yield* ResearchEngine;
-  const proteusBridge = yield* ProteusBridge;
-  const serverSettings = yield* ServerSettingsService;
+  const reviews = yield* FindingReviewStore;
   const coagents = yield* CoagentRegistry;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
 
-  const resolveProteusCampaign = Effect.fn("ResearchToolController.resolveProteusCampaign")(
-    function* (
-      context: import("../Services/ResearchToolController.ts").ResearchToolContext,
-      id: string,
-    ) {
-      if (!proteusBridge) return null;
-      return yield* Effect.result(proteusBridge.resolveCampaign(context.cwd, id));
-    },
-  );
-
-  const campaignProteusRoot = Effect.fn("ResearchToolController.campaignProteusRoot")(function* (
-    context: import("../Services/ResearchToolController.ts").ResearchToolContext,
-    campaign: import("@t3tools/contracts").ResearchCampaign,
+  const validateArtifact = Effect.fn("ResearchToolController.validateArtifact")(function* (
+    cwd: string,
+    value: string,
+    rootName: "findings" | "pocs",
+    expectedKind: "file" | "file-or-directory",
   ) {
-    if (campaign.proteusRoot) return { root: campaign.proteusRoot, issues: [] } as const;
-    const result = yield* resolveProteusCampaign(context, campaign.proteusCampaignId);
-    return !result
-      ? ({ root: null, issues: ["Proteus validation bridge is unavailable"] } as const)
-      : result._tag === "Success"
-        ? ({ root: result.success.root, issues: [] } as const)
-        : ({ root: null, issues: [result.failure.detail] } as const);
+    if (path.isAbsolute(value)) {
+      return `${rootName} artifact path must be workspace-relative`;
+    }
+    const workspaceRoot = yield* fileSystem.realPath(cwd);
+    const expectedRoot = path.resolve(workspaceRoot, rootName);
+    const candidate = path.resolve(workspaceRoot, value);
+    if (!isContained(path, expectedRoot, candidate)) {
+      return `artifact must be located under ${rootName}/`;
+    }
+    const canonicalCandidate = yield* fileSystem.realPath(candidate).pipe(Effect.option);
+    if (Option.isNone(canonicalCandidate)) {
+      return `artifact does not exist: ${value}`;
+    }
+    const canonicalRoot = yield* fileSystem.realPath(expectedRoot).pipe(Effect.option);
+    if (
+      Option.isNone(canonicalRoot) ||
+      !isContained(path, canonicalRoot.value, canonicalCandidate.value)
+    ) {
+      return `artifact resolves outside ${rootName}/`;
+    }
+    const info = yield* fileSystem.stat(canonicalCandidate.value);
+    if (expectedKind === "file" && info.type !== "File") {
+      return `${rootName} artifact must be a file`;
+    }
+    if (expectedKind === "file-or-directory" && info.type !== "File" && info.type !== "Directory") {
+      return `${rootName} artifact must be a file or directory`;
+    }
+    return null;
   });
 
-  const validateProteusBranch = Effect.fn("ResearchToolController.validateProteusBranch")(
-    function* (root: string, id: string, campaignId: string) {
-      if (!proteusBridge) return ["Proteus validation bridge is unavailable"];
-      const result = yield* Effect.result(proteusBridge.readBranch(root, id));
-      if (result._tag === "Failure") return [result.failure.detail];
-      const expectedCampaignId = proteusNumericId(campaignId);
-      return result.success.campaignId === expectedCampaignId
-        ? []
-        : [`Proteus branch ${id} is not linked to campaign ${campaignId}.`];
-    },
-  );
-
-  const validateProteusCheckpoint = Effect.fn("ResearchToolController.validateProteusCheckpoint")(
-    function* (root: string, id: string, campaignId: string) {
-      if (!proteusBridge) return ["Proteus validation bridge is unavailable"];
-      const result = yield* Effect.result(proteusBridge.readCheckpoint(root, id));
-      if (result._tag === "Failure") return [result.failure.detail];
-      const expectedCampaignId = proteusNumericId(campaignId);
-      return result.success.campaignId === expectedCampaignId
-        ? []
-        : [`Proteus checkpoint ${id} is not linked to campaign ${campaignId}.`];
-    },
-  );
-
-  const validateActiveProteusCampaign = Effect.fn(
-    "ResearchToolController.validateActiveProteusCampaign",
-  )(function* (
-    context: import("../Services/ResearchToolController.ts").ResearchToolContext,
-    campaign: import("@t3tools/contracts").ResearchCampaign,
-  ) {
-    const linked = yield* campaignProteusRoot(context, campaign);
-    if (!linked.root) return [...linked.issues];
-    if (!proteusBridge) return ["Proteus validation bridge is unavailable"];
-    const result = yield* Effect.result(
-      proteusBridge.readCampaign(linked.root, campaign.proteusCampaignId),
-    );
-    if (result._tag === "Failure") return [result.failure.detail];
-    return result.success.status === "active"
-      ? []
-      : [
-          `Proteus campaign ${campaign.proteusCampaignId} is ${result.success.status ?? "unknown"}; it must be active before Erebus can start or resume monitoring. Repair the Proteus campaign state, verify it is active, then retry the same Erebus operation. No Erebus campaign state was changed.`,
-        ];
-  });
-
-  const campaignBelongsToContext = Effect.fn("ResearchToolController.campaignBelongsToContext")(
-    function* (
-      campaignId: import("@t3tools/contracts").ResearchCampaignId,
-      context: import("../Services/ResearchToolController.ts").ResearchToolContext,
-    ) {
-      const projection = yield* engine.findProjection(campaignId);
-      const campaign = projection?.campaign;
-      return (
-        campaign !== null &&
-        campaign !== undefined &&
-        campaign.projectId === context.projectId &&
-        campaign.principalThreadId === context.threadId
-      );
-    },
-  );
-
-  return {
+  return ResearchToolController.of({
     principalInstructions: (context) =>
       Effect.gen(function* () {
         const link = yield* coagents
           .getByChild(context.threadId)
           .pipe(Effect.map(Option.getOrNull));
         if (link) {
-          const projection = yield* engine.findProjectionByThread(link.parentThreadId);
-          return buildCoagentResearchInstructions(projection, link.assignment, link.parentThreadId);
+          return buildCoagentResearchInstructions(link.assignment, link.parentThreadId);
         }
-        return buildPrincipalResearchInstructions(
-          yield* engine.findProjectionByThread(context.threadId),
-        );
+        return buildPrincipalResearchInstructions(yield* reviews.listByThread(context.threadId));
       }).pipe(
         Effect.catch((cause) =>
-          Effect.logWarning("Failed to read Erebus campaign context.", {
+          Effect.logWarning("Failed to read Erebus Judge context.", {
             threadId: context.threadId,
             cause,
-          }).pipe(Effect.as(buildPrincipalResearchInstructions(null))),
+          }).pipe(Effect.as(buildPrincipalResearchInstructions())),
         ),
       ),
     handle: (context, params) =>
@@ -207,379 +136,129 @@ const makeResearchToolController = Effect.gen(function* () {
         const coagentLink = yield* coagents
           .getByChild(context.threadId)
           .pipe(Effect.map(Option.getOrNull));
-        if (coagentLink && params.tool !== "get_status") {
+        if (coagentLink && params.tool !== "get_status" && params.tool !== "calculate_cvss") {
           return failure(
-            "A co-agent cannot manage the research campaign. Return evidence and recommendations to the parent task.",
+            "A co-agent cannot submit a finding to the Judge. Return the candidate to the parent task.",
             [`parentThreadId=${coagentLink.parentThreadId}`, `tool=research.${params.tool}`],
           );
         }
 
-        const commandId = CommandId.make(`dynamic:${context.threadId}:${params.callId}`);
         switch (params.tool) {
-          case "create_campaign": {
-            const input = yield* decoders.create_campaign(params.arguments);
-            const existingThreadCampaign = yield* engine.findProjectionByThread(context.threadId);
-            if (
-              existingThreadCampaign?.campaign?.id === input.campaignId &&
-              existingThreadCampaign.campaign.proteusCampaignId === input.proteusCampaignId
-            ) {
-              const replayed = yield* engine.dispatch({
-                type: "campaign.create",
-                commandId,
-                campaignId: input.campaignId,
-                projectId: context.projectId,
-                principalThreadId: context.threadId,
-                proteusCampaignId: input.proteusCampaignId,
-                proteusRoot: existingThreadCampaign.campaign.proteusRoot ?? context.cwd,
-              });
-              return toDynamicToolResponse(replayed.result);
-            }
-            if (
-              existingThreadCampaign?.campaign &&
-              existingThreadCampaign.campaign.id !== input.campaignId &&
-              !isTerminalCampaignStatus(existingThreadCampaign.campaign.status)
-            ) {
-              return failure("This thread already owns a Erebus campaign.", [
-                existingThreadCampaign.campaign.id,
-              ]);
-            }
-            const existingProteusCampaign = (yield* engine.listProjections()).find(
-              (projection) =>
-                projection.campaign?.proteusCampaignId === input.proteusCampaignId &&
-                projection.campaign.status !== "completed" &&
-                projection.campaign.status !== "aborted",
-            )?.campaign;
-            if (existingProteusCampaign && existingProteusCampaign.id !== input.campaignId) {
-              return failure("The Proteus campaign is already linked to an active Erebus run.", [
-                existingProteusCampaign.id,
-              ]);
-            }
-            const proteusResult = yield* resolveProteusCampaign(context, input.proteusCampaignId);
-            if (!proteusResult) {
-              return failure("The Proteus campaign link could not be verified.", [
-                "Proteus validation bridge is unavailable",
-              ]);
-            }
-            if (proteusResult._tag === "Failure") {
-              return failure("The Proteus campaign link could not be verified.", [
-                proteusResult.failure.detail,
-              ]);
-            }
-            const dispatched = yield* engine.dispatch({
-              type: "campaign.create",
-              commandId,
-              campaignId: input.campaignId,
-              projectId: context.projectId,
-              principalThreadId: context.threadId,
-              proteusCampaignId: input.proteusCampaignId,
-              proteusRoot: proteusResult.success.root,
-            });
-            return toDynamicToolResponse(dispatched.result);
+          case "calculate_cvss": {
+            const input = yield* decoders.calculate_cvss(params.arguments);
+            return toDynamicToolContent(calculateCvss(input.vector));
           }
           case "get_status": {
             const input = yield* decoders.get_status(params.arguments);
-            const projection = yield* engine.findProjection(input.campaignId);
-            const campaign = projection?.campaign;
-            if (!projection || !campaign) {
-              return failure("The campaign does not exist.", ["campaign not found"]);
-            }
             const ownerThreadId = coagentLink?.parentThreadId ?? context.threadId;
-            if (
-              campaign.projectId !== context.projectId ||
-              campaign.principalThreadId !== ownerThreadId
-            ) {
-              return failure("The campaign is not owned by this project thread.", [
-                "campaign context mismatch",
-              ]);
+            const records = yield* reviews.listByThread(ownerThreadId, input.findingId);
+            if (records.length === 0) {
+              return toDynamicToolResponse({
+                accepted: true,
+                status: "empty",
+                message: input.findingId
+                  ? `No Judge submission exists for ${input.findingId}.`
+                  : "No finding has been submitted to the Judge from this task.",
+                issues: [],
+              });
             }
-            const queuedInterventions = projection.interventions.filter(
-              (intervention) =>
-                intervention.status === "queued" || intervention.status === "queuedWhilePaused",
-            ).length;
-            const activeContract = projection.contracts.find(
-              (contract) =>
-                contract.id === campaign.activeContractId &&
-                contract.revision === campaign.activeContractRevision,
-            );
-            const judgeDecisions = projection.judgeEvaluations
-              .map(
-                (evaluation) =>
-                  `${evaluation.findingId}@${evaluation.findingRevision ?? 1}:${evaluation.verdict}[${evaluation.evaluationId}]`,
-              )
-              .join(", ");
+            const states = records.map((record) => {
+              const evaluation = record.evaluations.at(-1);
+              return evaluation
+                ? `${record.submission.findingId}@${record.submission.revision}: ${evaluation.verdict} [${evaluation.evaluationId}] — ${evaluation.summary}`
+                : `${record.submission.findingId}@${record.submission.revision}: pending Judge review`;
+            });
             return toDynamicToolResponse({
               accepted: true,
-              status: campaign.status,
-              message: [
-                `Campaign ${campaign.id} is ${campaign.status}.`,
-                activeContract
-                  ? `Active contract: ${activeContract.id} revision ${activeContract.revision}, digest ${activeContract.digest}.`
-                  : "No contract is active.",
-                `Observer messages: ${campaign.lastObservedMessageCount}/${campaign.eligibleMessageCount}.`,
-                `Findings: ${projection.findings.length}; judge reviews: ${projection.judgeEvaluations.length}.`,
-                `Judge decisions: ${judgeDecisions || "none"}.`,
-                `Queued steering: ${queuedInterventions}.`,
-              ].join(" "),
+              status: records.some((record) => record.evaluations.length === 0)
+                ? "pending"
+                : "reviewed",
+              message: states.join("\n"),
               issues: [],
             });
-          }
-          case "register_contract": {
-            const input = yield* decoders.register_contract(params.arguments);
-            if (!(yield* campaignBelongsToContext(input.campaignId, context))) {
-              return failure("The campaign is not owned by this project thread.", [
-                "campaign context mismatch",
-              ]);
-            }
-            const observerPolicy = researchObserverPolicyFromSettings(
-              (yield* serverSettings.getSettings).researchSupervision,
-            );
-            const contractWithoutDigest = {
-              ...input.contract,
-              observerPolicy,
-            };
-            const contract = {
-              ...contractWithoutDigest,
-              digest: canonicalContractDigest(contractWithoutDigest),
-            };
-            const dispatched = yield* engine.dispatch({
-              type: "contract.register",
-              commandId,
-              campaignId: input.campaignId,
-              contract,
-            });
-            return toDynamicToolResponse(
-              dispatched.result.accepted
-                ? {
-                    ...dispatched.result,
-                    message: `${dispatched.result.message} Canonical digest: ${contract.digest}.`,
-                  }
-                : dispatched.result,
-            );
-          }
-          case "start": {
-            const input = yield* decoders.start(params.arguments);
-            if (!(yield* campaignBelongsToContext(input.campaignId, context))) {
-              return failure("The campaign is not owned by this project thread.", [
-                "campaign context mismatch",
-              ]);
-            }
-            const dependencyIssues = [...researchProteusDependencyIssues(context.proteus)];
-            const projection = yield* engine.findProjection(input.campaignId);
-            if (projection?.campaign) {
-              dependencyIssues.push(
-                ...(yield* validateActiveProteusCampaign(context, projection.campaign)),
-              );
-            }
-            const dispatched = yield* engine.dispatch({
-              type: "campaign.start",
-              commandId,
-              campaignId: input.campaignId,
-              contractId: input.contractId,
-              contractRevision: input.contractRevision,
-              proteusReady: dependencyIssues.length === 0,
-              dependencyIssues,
-            });
-            return toDynamicToolResponse(dispatched.result);
-          }
-          case "checkpoint": {
-            const input = yield* decoders.checkpoint(params.arguments);
-            if (!(yield* campaignBelongsToContext(input.campaignId, context))) {
-              return failure("The campaign is not owned by this project thread.", [
-                "campaign context mismatch",
-              ]);
-            }
-            const projection = yield* engine.findProjection(input.campaignId);
-            const campaign = projection?.campaign;
-            if (!campaign) {
-              return failure("The campaign does not have a Proteus campaign link.");
-            }
-            const linked = yield* campaignProteusRoot(context, campaign);
-            if (!linked.root) {
-              return failure("The Proteus campaign root could not be resolved.", linked.issues);
-            }
-            const proteusIssues = yield* validateProteusCheckpoint(
-              linked.root,
-              input.proteusCheckpointId,
-              campaign.proteusCampaignId,
-            );
-            if (proteusIssues.length > 0) {
-              return failure("The Proteus checkpoint link could not be verified.", proteusIssues);
-            }
-            const dispatched = yield* engine.dispatch({
-              type: "checkpoint.record",
-              commandId,
-              campaignId: input.campaignId,
-              checkpoint: input,
-            });
-            return toDynamicToolResponse(dispatched.result);
-          }
-          case "pause":
-          case "resume":
-          case "finish":
-          case "abort": {
-            const input = yield* decoders[params.tool](params.arguments);
-            if (!(yield* campaignBelongsToContext(input.campaignId, context))) {
-              return failure("The campaign is not owned by this project thread.", [
-                "campaign context mismatch",
-              ]);
-            }
-            const dependencyIssues = [...researchProteusDependencyIssues(context.proteus)];
-            const projection = yield* engine.findProjection(input.campaignId);
-            const campaign = projection?.campaign;
-            if (params.tool === "resume" && campaign) {
-              dependencyIssues.push(...(yield* validateActiveProteusCampaign(context, campaign)));
-            }
-            const reason =
-              "reason" in input && typeof input.reason === "string"
-                ? input.reason
-                : params.tool === "pause"
-                  ? "Paused by the principal research agent."
-                  : "Resumed by the principal research agent.";
-            if (params.tool === "finish" && campaign?.status === "completed") {
-              const replayed = yield* engine.dispatch({
-                type: "campaign.control",
-                commandId,
-                campaignId: input.campaignId,
-                action: params.tool,
-                reason,
-                proteusReady: dependencyIssues.length === 0,
-                dependencyIssues,
-              });
-              return toDynamicToolResponse(replayed.result);
-            }
-            if (params.tool === "finish") {
-              if (!campaign) return failure("The campaign does not exist.", ["campaign not found"]);
-              if (!["active", "paused"].includes(campaign.status)) {
-                return failure("Campaign finish was rejected.", [
-                  `cannot finish a ${campaign.status} campaign`,
-                ]);
-              }
-              const latestFindings = [...projection.findings]
-                .toReversed()
-                .filter(
-                  (finding, index, all) =>
-                    all.findIndex((candidate) => candidate.findingId === finding.findingId) ===
-                    index,
-                );
-              const pendingJudgeCount = latestFindings.filter((finding) => {
-                const evaluation = [...projection.judgeEvaluations]
-                  .toReversed()
-                  .find(
-                    (candidate) =>
-                      candidate.findingId === finding.findingId &&
-                      (candidate.findingRevision ?? 1) === (finding.revision ?? 1),
-                  );
-                return !evaluation || evaluation.verdict === "reviewBlocked";
-              }).length;
-              if (pendingJudgeCount > 0) {
-                return failure("Campaign finish was rejected.", [
-                  `${pendingJudgeCount} finding(s) still await judge review`,
-                ]);
-              }
-              const linked = yield* campaignProteusRoot(context, campaign);
-              if (!linked.root || !proteusBridge) {
-                return failure(
-                  "Proteus could not be completed; the Erebus campaign remains open.",
-                  linked.issues.length > 0
-                    ? linked.issues
-                    : ["Proteus validation bridge is unavailable"],
-                );
-              }
-              const completed = yield* Effect.result(
-                proteusBridge.completeCampaign(linked.root, campaign.proteusCampaignId, reason),
-              );
-              if (completed._tag === "Failure") {
-                return failure(
-                  "Proteus could not be completed; the Erebus campaign remains open.",
-                  [completed.failure.detail],
-                );
-              }
-            }
-            const dispatched = yield* engine.dispatch({
-              type: "campaign.control",
-              commandId,
-              campaignId: input.campaignId,
-              action: params.tool,
-              reason,
-              proteusReady: dependencyIssues.length === 0,
-              dependencyIssues,
-            });
-            return toDynamicToolResponse(dispatched.result);
           }
           case "submit_finding":
           case "revise_finding": {
             const input = yield* decoders[params.tool](params.arguments);
-            if (!(yield* campaignBelongsToContext(input.campaignId, context))) {
+            if (params.tool === "submit_finding" && input.revision !== 1) {
               return findingSubmissionFailure(
                 params.tool,
-                "The campaign is not owned by this project thread.",
-                ["campaign context mismatch"],
+                "submit_finding accepts revision 1 only.",
               );
             }
-            const projection = yield* engine.findProjection(input.campaignId);
-            const campaign = projection?.campaign;
-            if (!campaign) {
+            if (params.tool === "revise_finding" && input.revision === 1) {
               return findingSubmissionFailure(
                 params.tool,
-                "The campaign does not have a Proteus campaign link.",
+                "Revision 1 must use research.submit_finding.",
               );
             }
-            const linked = yield* campaignProteusRoot(context, campaign);
-            if (!linked.root) {
+
+            const artifactIssues = (yield* Effect.all([
+              validateArtifact(context.cwd, input.findingPath, "findings", "file"),
+              input.pocPath
+                ? validateArtifact(context.cwd, input.pocPath, "pocs", "file-or-directory")
+                : Effect.succeed(null),
+            ])).filter((issue): issue is string => issue !== null);
+            if (artifactIssues.length > 0) {
               return findingSubmissionFailure(
                 params.tool,
-                "The Proteus campaign root could not be resolved.",
-                linked.issues,
+                "One or more Judge artifacts are invalid or unreadable.",
+                artifactIssues,
               );
             }
-            const proteusIssues = yield* validateProteusBranch(
-              linked.root,
-              input.proteusBranchId,
-              campaign.proteusCampaignId,
-            );
-            if (proteusIssues.length > 0) {
-              return findingSubmissionFailure(
-                params.tool,
-                "The Proteus branch link could not be verified.",
-                proteusIssues,
-              );
-            }
-            const dispatched = yield* engine.dispatch({
-              type: "finding.submit",
-              commandId,
-              campaignId: input.campaignId,
-              finding: canonicalizeFindingCvss(input),
+
+            const submittedAt = DateTime.formatIso(yield* DateTime.now);
+            const result = yield* reviews.submit({
+              commandId: CommandId.make(`dynamic:${context.threadId}:${params.callId}`),
+              projectId: context.projectId,
+              threadId: context.threadId,
+              submission: { ...input, submittedAt },
             });
-            return dispatched.result.accepted
-              ? toDynamicToolResponse(dispatched.result)
-              : findingSubmissionFailure(
-                  params.tool,
-                  dispatched.result.message,
-                  dispatched.result.issues,
-                );
+            if (!result.reviewRequested) {
+              const evaluation = result.record.evaluations.at(-1);
+              return toDynamicToolResponse({
+                accepted: false,
+                status: "alreadyReviewed",
+                message: evaluation
+                  ? `Finding ${input.findingId} revision ${input.revision} already has verdict ${evaluation.verdict} [${evaluation.evaluationId}]. No new Judge job was created.`
+                  : "No new Judge job was created.",
+                issues: [],
+              });
+            }
+            return toDynamicToolResponse({
+              accepted: true,
+              status: "pendingJudge",
+              message: `Finding ${input.findingId} revision ${input.revision} is durable and queued for independent Judge review. End this turn now; Erebus will deliver the verdict in a separate follow-up turn.`,
+              issues: [],
+            });
           }
+          default:
+            return failure("Unknown Erebus research tool.", [params.tool]);
         }
-        return failure("Unknown Erebus research tool.", [params.tool]);
       }).pipe(
         Effect.catch((cause) =>
-          Effect.logWarning("Erebus research tool call failed", {
+          Effect.logWarning("Erebus Judge tool call failed", {
             tool: params.tool,
             threadId: params.threadId,
             cause,
           }).pipe(
             Effect.as(
               params.tool === "submit_finding" || params.tool === "revise_finding"
-                ? findingSubmissionFailure(params.tool, "The finding payload failed validation.", [
+                ? findingSubmissionFailure(
+                    params.tool,
                     cause instanceof Error ? cause.message : String(cause),
-                  ])
-                : failure("The research command could not be accepted.", [
-                    cause instanceof Error ? cause.message : String(cause),
-                  ]),
+                  )
+                : failure(
+                    params.tool === "calculate_cvss"
+                      ? "The CVSS vector could not be calculated."
+                      : "The Judge status could not be read.",
+                    [cause instanceof Error ? cause.message : String(cause)],
+                  ),
             ),
           ),
         ),
       ),
-  } satisfies import("../Services/ResearchToolController.ts").ResearchToolControllerShape;
+  });
 });
 
 export const ResearchToolControllerLive = Layer.effect(

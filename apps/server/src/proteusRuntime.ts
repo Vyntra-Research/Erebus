@@ -55,6 +55,7 @@ interface ProteusPackageJson {
 interface ErebusManagedMarker {
   readonly owner?: unknown;
   readonly version?: unknown;
+  readonly mode?: unknown;
 }
 
 interface ErebusManagedRuntimeMarker extends ErebusManagedMarker {
@@ -529,10 +530,80 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const PROTEUS_READ_ONLY_TOOLS = [
+  "proteus_status",
+  "proteus_query_duplicates",
+  "proteus_query_memory",
+  "proteus_query_similar",
+  "proteus_get_record",
+  "proteus_list_records",
+  "proteus_query_revisit",
+  "proteus_query_surfaces",
+  "proteus_query_global_learnings",
+] as const;
+
+const readOnlyProteusProxySource = (): string => `"use strict";
+const { spawn } = require("node:child_process");
+const allowed = new Set(${JSON.stringify(PROTEUS_READ_ONLY_TOOLS)});
+const entrypoint = process.env.EREBUS_PROTEUS_MCP_ENTRYPOINT;
+if (!entrypoint) throw new Error("EREBUS_PROTEUS_MCP_ENTRYPOINT is required");
+const child = spawn(process.execPath, [entrypoint], {
+  stdio: ["pipe", "pipe", "inherit"],
+  env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+});
+const listRequests = new Set();
+let inputBuffer = "";
+let outputBuffer = "";
+const writeLine = (stream, value) => stream.write(JSON.stringify(value) + "\\n");
+const handleInput = (line) => {
+  let message;
+  try { message = JSON.parse(line); } catch { child.stdin.write(line + "\\n"); return; }
+  if (message && message.method === "tools/list" && message.id != null) listRequests.add(String(message.id));
+  if (message && message.method === "tools/call") {
+    const name = message.params && message.params.name;
+    if (!allowed.has(name)) {
+      if (message.id != null) writeLine(process.stdout, {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32601, message: "Proteus is read-only in Erebus; this tool is not available." },
+      });
+      return;
+    }
+  }
+  child.stdin.write(line + "\\n");
+};
+const handleOutput = (line) => {
+  let message;
+  try { message = JSON.parse(line); } catch { process.stdout.write(line + "\\n"); return; }
+  if (message && message.id != null && listRequests.delete(String(message.id)) && message.result && Array.isArray(message.result.tools)) {
+    message.result.tools = message.result.tools.filter((tool) => tool && allowed.has(tool.name));
+  }
+  writeLine(process.stdout, message);
+};
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  inputBuffer += chunk;
+  const lines = inputBuffer.split(/\\r?\\n/);
+  inputBuffer = lines.pop() || "";
+  for (const line of lines) if (line.trim()) handleInput(line);
+});
+child.stdout.setEncoding("utf8");
+child.stdout.on("data", (chunk) => {
+  outputBuffer += chunk;
+  const lines = outputBuffer.split(/\\r?\\n/);
+  outputBuffer = lines.pop() || "";
+  for (const line of lines) if (line.trim()) handleOutput(line);
+});
+child.on("exit", (code, signal) => process.exitCode = code == null ? (signal ? 1 : 0) : code);
+process.on("SIGTERM", () => child.kill("SIGTERM"));
+process.on("SIGINT", () => child.kill("SIGINT"));
+`;
+
 async function writeManagedProteusManifest(
   manifestPath: string,
   version: string,
-  mcpPath: string,
+  proxyPath: string,
+  mcpEntrypoint: string,
   required: boolean,
 ): Promise<void> {
   const source = await NodeFSP.readFile(manifestPath, "utf8").catch((error: unknown) => {
@@ -558,12 +629,14 @@ async function writeManagedProteusManifest(
     ...(isRecord(manifest.mcpServers) ? manifest.mcpServers : {}),
     proteus: {
       command: process.execPath,
-      args: [mcpPath],
+      args: [proxyPath],
       env: {
         ELECTRON_RUN_AS_NODE: "1",
+        EREBUS_PROTEUS_MCP_ENTRYPOINT: mcpEntrypoint,
       },
     },
   };
+  manifest.description = "Read-only Proteus legacy research history for Erebus";
   const next = `${JSON.stringify(manifest, null, 2)}\n`;
   if (next !== source) await NodeFSP.writeFile(manifestPath, next, "utf8");
 }
@@ -609,46 +682,71 @@ export const installManagedProteusForCodex = Effect.fn("ProteusRuntime.installFo
         "marketplace.json",
       );
       const manifestPath = NodePath.join(installedPluginRoot, ".codex-plugin", "plugin.json");
-      const markerMatches = await NodeFSP.readFile(markerPath, "utf8")
-        .then((value) => {
-          const marker = JSON.parse(value) as ErebusManagedMarker;
-          return marker.owner === "Erebus" && marker.version === runtime.version;
-        })
-        .catch(() => false);
+      const proxyPath = NodePath.join(installedPluginRoot, "dist", "readonly-mcp.cjs");
+      const sourceManifestPath = NodePath.join(runtime.pluginRoot, ".codex-plugin", "plugin.json");
+      const marker = await NodeFSP.readFile(markerPath, "utf8")
+        .then((value) => JSON.parse(value) as ErebusManagedMarker)
+        .catch(() => null);
+      const markerMatches =
+        marker?.owner === "Erebus" &&
+        marker.version === runtime.version &&
+        marker.mode === "read-only";
       const managedFilesExist = markerMatches
-        ? await Promise.all([NodeFSP.access(manifestPath), NodeFSP.access(marketplacePath)])
+        ? await Promise.all([
+            NodeFSP.access(manifestPath),
+            NodeFSP.access(marketplacePath),
+            NodeFSP.access(proxyPath),
+          ])
             .then(() => true)
             .catch(() => false)
         : false;
 
       if (!managedFilesExist) {
-        await NodeFSP.mkdir(NodePath.dirname(installedPluginRoot), { recursive: true });
-        await copyFilesystemTree(runtime.pluginRoot, installedPluginRoot);
+        if (marker?.owner === "Erebus" && marker.version === runtime.version) {
+          await NodeFSP.rm(installedPluginRoot, { recursive: true, force: true });
+        }
+        await NodeFSP.mkdir(NodePath.dirname(manifestPath), { recursive: true });
+        await copyFilesystemTree(sourceManifestPath, manifestPath);
+        await NodeFSP.mkdir(NodePath.dirname(proxyPath), { recursive: true });
+        await NodeFSP.writeFile(proxyPath, readOnlyProteusProxySource(), "utf8");
         await NodeFSP.mkdir(NodePath.dirname(marketplacePath), { recursive: true });
         await copyFilesystemTree(sourceMarketplacePath, marketplacePath);
         await NodeFSP.writeFile(
           markerPath,
           // @effect-diagnostics-next-line preferSchemaOverJson:off
-          `${JSON.stringify({ owner: "Erebus", version: runtime.version }, null, 2)}\n`,
+          `${JSON.stringify({ owner: "Erebus", version: runtime.version, mode: "read-only" }, null, 2)}\n`,
           "utf8",
         );
       }
 
-      const mcpPath = NodePath.join(installedPluginRoot, "dist", "mcp.js");
-      await writeManagedProteusManifest(manifestPath, runtime.version, mcpPath, true);
+      await NodeFSP.rm(NodePath.join(installedPluginRoot, "skills"), {
+        recursive: true,
+        force: true,
+      });
       await writeManagedProteusManifest(
-        NodePath.join(
-          codexHome,
-          "plugins",
-          "cache",
-          MARKETPLACE_NAME,
-          "proteus",
-          runtime.version,
-          ".codex-plugin",
-          "plugin.json",
-        ),
+        manifestPath,
         runtime.version,
-        mcpPath,
+        proxyPath,
+        runtime.mcpPath,
+        true,
+      );
+      const cachedPluginRoot = NodePath.join(
+        codexHome,
+        "plugins",
+        "cache",
+        MARKETPLACE_NAME,
+        "proteus",
+        runtime.version,
+      );
+      await NodeFSP.rm(NodePath.join(cachedPluginRoot, "skills"), {
+        recursive: true,
+        force: true,
+      });
+      await writeManagedProteusManifest(
+        NodePath.join(cachedPluginRoot, ".codex-plugin", "plugin.json"),
+        runtime.version,
+        proxyPath,
+        runtime.mcpPath,
         false,
       );
 

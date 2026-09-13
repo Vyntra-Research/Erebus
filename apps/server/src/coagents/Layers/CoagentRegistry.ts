@@ -1,4 +1,4 @@
-import { NonNegativeInt, ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -23,8 +23,6 @@ const make = Effect.gen(function* () {
         creation_mode,
         status,
         error,
-        observer_campaign_id,
-        observer_message_count,
         created_at,
         updated_at
       ) VALUES (
@@ -35,8 +33,6 @@ const make = Effect.gen(function* () {
         ${row.creationMode},
         ${row.status},
         ${row.error},
-        ${row.observerCampaignId},
-        ${row.observerMessageCount},
         ${row.createdAt},
         ${row.updatedAt}
       )
@@ -47,8 +43,6 @@ const make = Effect.gen(function* () {
         creation_mode = excluded.creation_mode,
         status = excluded.status,
         error = excluded.error,
-        observer_campaign_id = excluded.observer_campaign_id,
-        observer_message_count = excluded.observer_message_count,
         updated_at = excluded.updated_at
     `,
   });
@@ -68,8 +62,6 @@ const make = Effect.gen(function* () {
         creation_mode,
         status,
         error,
-        observer_campaign_id,
-        observer_message_count,
         created_at,
         updated_at
       )
@@ -81,8 +73,6 @@ const make = Effect.gen(function* () {
         ${link.creationMode},
         ${link.status},
         ${link.error},
-        ${link.observerCampaignId},
-        ${link.observerMessageCount},
         ${link.createdAt},
         ${link.updatedAt}
       WHERE (
@@ -108,8 +98,6 @@ const make = Effect.gen(function* () {
         creation_mode AS "creationMode",
         status,
         error,
-        observer_campaign_id AS "observerCampaignId",
-        observer_message_count AS "observerMessageCount",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM coagent_threads
@@ -130,29 +118,11 @@ const make = Effect.gen(function* () {
         creation_mode AS "creationMode",
         status,
         error,
-        observer_campaign_id AS "observerCampaignId",
-        observer_message_count AS "observerMessageCount",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM coagent_threads
       WHERE parent_thread_id = ${parentThreadId}
       ORDER BY created_at ASC, child_thread_id ASC
-    `,
-  });
-
-  const setObserverCursorRow = SqlSchema.void({
-    Request: Schema.Struct({
-      childThreadId: ThreadId,
-      campaignId: Schema.String,
-      messageCount: NonNegativeInt,
-      updatedAt: Schema.String,
-    }),
-    execute: ({ childThreadId, campaignId, messageCount, updatedAt }) => sql`
-      UPDATE coagent_threads
-      SET observer_campaign_id = ${campaignId},
-          observer_message_count = ${messageCount},
-          updated_at = ${updatedAt}
-      WHERE child_thread_id = ${childThreadId}
     `,
   });
 
@@ -171,10 +141,6 @@ const make = Effect.gen(function* () {
     listByParent: (parentThreadId) =>
       listByParentRows(parentThreadId).pipe(
         Effect.mapError(toPersistenceSqlError("CoagentRegistry.listByParent")),
-      ),
-    setObserverCursor: (input) =>
-      setObserverCursorRow(input).pipe(
-        Effect.mapError(toPersistenceSqlError("CoagentRegistry.setObserverCursor")),
       ),
   });
 });

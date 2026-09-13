@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeTimersPromises from "node:timers/promises";
 import { describe, it, assert } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -301,6 +302,15 @@ function makeCodexProbeSnapshot(
       },
     ],
     skills: [],
+    argos: {
+      runtime: "unknown",
+      plugin: "unknown",
+      skills: "unknown",
+      mcp: "unknown",
+      version: null,
+      message: null,
+      checkedAt: "2026-09-01T12:00:00.000Z",
+    },
     proteus: {
       runtime: "unknown",
       plugin: "unknown",
@@ -1612,7 +1622,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             // executable. This verifies the public settings-to-probe behavior
             // without depending on timestamps assigned by TestClock.
             const refreshed = yield* Effect.gen(function* () {
-              for (let attempts = 0; attempts < 60; attempts += 1) {
+              for (let attempts = 0; attempts < 100; attempts += 1) {
                 const providers = yield* registry.getProviders;
                 const codex = providers.find((provider) => provider.instanceId === "codex");
                 if (
@@ -1623,6 +1633,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                   return providers;
                 }
                 yield* TestClock.adjust("50 millis");
+                // Rebuilding a Codex instance also repairs its managed Argos
+                // and Proteus profiles through real filesystem promises. A
+                // TestClock-only loop can exhaust every virtual retry before
+                // libuv completes that bounded work on a busy CI runner.
+                yield* Effect.promise(() => NodeTimersPromises.setTimeout(25));
                 yield* Effect.yieldNow;
               }
               return yield* registry.getProviders;

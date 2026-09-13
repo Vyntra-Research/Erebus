@@ -5,13 +5,12 @@ import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 import {
   buildResearchEvaluatorModelSelection,
   JUDGE_POLICY,
-  OBSERVER_POLICY,
   RESEARCH_EVALUATOR_MODEL,
   RESEARCH_EVALUATOR_REASONING_EFFORT,
   RESEARCH_INTERNAL_POLICY,
+  RESEARCH_JUDGE_GATES,
   RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS,
   RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS,
-  RESEARCH_OBSERVER_RUNTIME_POLICY,
   RESEARCH_SUPERVISOR_POLICY_VERSION,
 } from "./researchPolicy.ts";
 import {
@@ -19,156 +18,41 @@ import {
   EREBUS_PRINCIPAL_POLICY_VERSION,
 } from "./researchPrincipalInstructions.ts";
 
-it("distributes the complete canonical contract to every research role", () => {
+it("keeps the durable heuristics in principal and Judge roles", () => {
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Post-AI Blind-Spot Heuristics/);
-  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /total\s+coverage is a closure invariant/);
-  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /remains open while any reachable natural edge/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /A limit on one producer/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Reopen a conclusion/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Connect complementary evidence/);
   assert.include(EREBUS_PRINCIPAL_INSTRUCTIONS, EREBUS_RESEARCH_BASE_CONTRACT);
-  assert.include(OBSERVER_POLICY, EREBUS_RESEARCH_BASE_CONTRACT);
   assert.include(JUDGE_POLICY, EREBUS_RESEARCH_BASE_CONTRACT);
 });
 
-it("keeps strict role-specific behavior around the shared contract", () => {
-  assert.match(OBSERVER_POLICY, /Silence is correct when no material contractual deviation exists/);
-  assert.match(OBSERVER_POLICY, /Tool calls and user messages do not count/);
-  assert.match(OBSERVER_POLICY, /Never queue, replay, or reapply an Observer recommendation/);
-  assert.match(OBSERVER_POLICY, /replay the exact last Observer block literally after compaction/);
-  assert.match(
-    OBSERVER_POLICY,
-    /userPrompt, userSteer, pendingUserSteer, coagentMessage, and principalAssistant/,
-  );
-  assert.match(OBSERVER_POLICY, /pendingUserSteer.*cannot prove noncompliance/);
-  assert.match(OBSERVER_POLICY, /one complete assistant-message boundary/);
-  assert.match(
-    OBSERVER_POLICY,
-    /fresh userPrompt may ask the principal to verify, correct, or revisit/,
-  );
-  assert.match(OBSERVER_POLICY, /incomplete work inside that same live turn is not a deviation/);
-  assert.match(OBSERVER_POLICY, /currentWorkAlreadyAddressesIssue true/);
-  assert.match(OBSERVER_POLICY, /windowEndsInActiveTurn is true/);
-  assert.match(
-    OBSERVER_POLICY,
-    /Do not complain that the principal has "only announced" the check/,
-  );
-  assert.match(OBSERVER_POLICY, /coagentMessage is task-to-task coordination/);
-  assert.match(OBSERVER_POLICY, /user's prompt and later steers are binding/);
-  assert.match(OBSERVER_POLICY, /compliance monitor, not the research coordinator/);
-  assert.match(OBSERVER_POLICY, /do not decide the best research strategy/i);
-  assert.match(OBSERVER_POLICY, /You have no command authority/);
-  assert.match(OBSERVER_POLICY, /Never address the principal in imperative voice/);
-  assert.match(OBSERVER_POLICY, /The active contract or user instruction is the authority/);
-  assert.match(OBSERVER_POLICY, /Do not say "stop", "pause", "resume", "verify"/);
-  assert.match(OBSERVER_POLICY, /Possibility is not observation/);
-  assert.match(OBSERVER_POLICY, /Repetition does not make a safe, bounded action unsafe/);
-  assert.match(
-    OBSERVER_POLICY,
-    /repeated read-only enumeration rooted at packages\/next\/src.*src\/compiled subtree/,
-  );
-  assert.match(OBSERVER_POLICY, /from a drive or user-home root.*follows junctions/);
-  assert.match(OBSERVER_POLICY, /If any element is missing, use aligned or watch/);
-  assert.match(OBSERVER_POLICY, /Cost, elapsed time.*are not evidence of contractual deviation/);
-  assert.match(OBSERVER_POLICY, /earlier tactical plans are durable research context, not binding/);
-  assert.match(OBSERVER_POLICY, /Do not select the replacement branch/);
-  assert.match(OBSERVER_POLICY, /Do not infer that a wider sink.*is exhausted/);
-  assert.match(OBSERVER_POLICY, /Do not treat a CVE or advisory match as duplicate proof/);
-  assert.match(OBSERVER_POLICY, /bounded measurement.*the user requested.*is legitimate/);
-  assert.match(OBSERVER_POLICY, /request to "finish the tests".*closes the current dynamic test/);
-  assert.match(OBSERVER_POLICY, /prior aligned evaluation.*require new material evidence/);
-  assert.match(OBSERVER_POLICY, /Post-AI Blind-Spot closure invariant/);
-  assert.match(OBSERVER_POLICY, /only when the principal actually kills, downgrades, abandons/);
-  assert.match(
-    OBSERVER_POLICY,
-    /Do not intervene merely because active exploration has not completed total coverage/,
-  );
-  assert.match(JUDGE_POLICY, /Your job is not to help the finding pass/);
-  assert.match(JUDGE_POLICY, /maximum impact currently proved/);
-  assert.match(JUDGE_POLICY, /CVSS is an ancillary classification, never a validity gate/);
-  assert.match(JUDGE_POLICY, /finding record under findings\/ and its working PoC under pocs\//);
-  assert.match(JUDGE_POLICY, /advisory.*is not duplicate proof by itself/i);
-  assert.match(JUDGE_POLICY, /skeptical triager and an informed lay reviewer/);
-  assert.match(JUDGE_POLICY, /Never fill a gap with your own research/);
-  assert.match(JUDGE_POLICY, /bounded desk review.*not a new practical validation run/);
+it("keeps Judge independent, artifact-bounded, and campaign-free", () => {
+  assert.match(JUDGE_POLICY, /not part of a campaign/);
+  assert.match(JUDGE_POLICY, /do not manage the submitter's native goal/);
+  assert.match(JUDGE_POLICY, /skeptical triager and an informed reviewer/);
+  assert.match(JUDGE_POLICY, /Never fill a gap with new research/);
+  assert.match(JUDGE_POLICY, /bounded desk review/);
   assert.match(JUDGE_POLICY, /hard wall-clock budget of 600 seconds/);
-  assert.match(JUDGE_POLICY, /reserve the final 60 seconds/);
-  assert.match(JUDGE_POLICY, /ten-minute ceiling is latency tolerance.*not a research budget/);
-  assert.match(JUDGE_POLICY, /verify the submission's stated facts and claims/);
-  assert.match(JUDGE_POLICY, /Do not explore the wider codebase/);
-  assert.match(JUDGE_POLICY, /Missing evidence or explanation.*submission gap/);
-  assert.match(JUDGE_POLICY, /Finding acceptance and sink closure are separate decisions/);
-  assert.match(JUDGE_POLICY, /Do not require total coverage of unclaimed alternate chains/);
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /A finding stated in ordinary prose is not approved/);
-  assert.match(
-    EREBUS_PRINCIPAL_INSTRUCTIONS,
-    /SUBMISSION NOT RECORDED|submission was not recorded/i,
-  );
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /finding record under `findings\/`/);
-  assert.match(
-    EREBUS_PRINCIPAL_INSTRUCTIONS,
-    /Observer advice is fresh only in the uninterrupted live turn/,
-  );
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /outside and after the compacted summary/);
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /Recent commits, diffs, patch archaeology/);
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /lab must not lend the exploit/);
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /Do not paste their complete text/);
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /contract\.target.*required plain string/);
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /supply every required field/);
-  assert.match(
-    EREBUS_PRINCIPAL_INSTRUCTIONS,
-    /containment boundary, not a request to create a lab/,
-  );
-  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /read-only work must not create one/i);
-  assert.match(OBSERVER_POLICY, /One bounded task-owned directory.*is not itself unsafe/);
-  assert.match(OBSERVER_POLICY, /leading shell executable.*is not the mutation target/);
-  assert.match(
-    OBSERVER_POLICY,
-    /unsafeExecuted outcome is high-priority audit evidence, not a conclusive breach/,
-  );
-  assert.match(OBSERVER_POLICY, /docker exec belong to that named container/);
-  assert.match(OBSERVER_POLICY, /mark aligned or watch and remain silent/);
-  assert.match(OBSERVER_POLICY, /do not flag it merely because it is recursive/);
-  assert.match(OBSERVER_POLICY, /generated or compiled source.*is not automatically unsafe/);
-  assert.match(OBSERVER_POLICY, /prior Observer advisory cannot turn that safe action/);
-  assert.match(OBSERVER_POLICY, /Observed deviation: .*Recommended repair:/);
-  assert.notMatch(OBSERVER_POLICY, /you may require the principal to stop/i);
-  assert.match(
-    EREBUS_PRINCIPAL_INSTRUCTIONS,
-    /recursive search.*explicit source subtree is allowed/,
-  );
+  assert.match(JUDGE_POLICY, /CVSS is ancillary classification only/);
+  assert.match(JUDGE_POLICY, /finding[\s\S]*under findings\/[\s\S]*PoC under pocs\//);
+  assert.match(JUDGE_POLICY, /never use Proteus skills/);
+  assert.lengthOf(RESEARCH_JUDGE_GATES, 8);
 });
 
-it("records a new policy revision and digest for persisted evaluations", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 19);
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 23);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 23);
+it("records the campaign-free policy revision and pinned evaluator", () => {
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 20);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 24);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 24);
   assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 600);
   assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 60);
-  assert.equal(RESEARCH_INTERNAL_POLICY.judgeReviewBudgetSeconds, 600);
-  assert.equal(RESEARCH_INTERNAL_POLICY.judgeOutputReserveSeconds, 60);
-  assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorModel, "gpt-daybreak-blue-latest");
-  assert.equal(RESEARCH_INTERNAL_POLICY.evaluatorReasoningEffort, "xhigh");
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);
-});
 
-it("owns Observer cadence and intervention thresholds in the harness", () => {
-  assert.deepStrictEqual(RESEARCH_OBSERVER_RUNTIME_POLICY, {
-    messageWindow: 10,
-    interventionConfidence: 0.8,
-    cooldownMessages: 5,
-    maxInterventionsPerTurn: null,
-  });
-});
-
-it("runs Observer and Judge on pinned Daybreak Blue xhigh evaluations", () => {
   const selection = buildResearchEvaluatorModelSelection({
     instanceId: ProviderInstanceId.make("codex"),
     model: "gpt-5.6-sol",
-    options: [
-      { id: "reasoningEffort", value: "low" },
-      { id: "serviceTier", value: "priority" },
-    ],
+    options: [{ id: "reasoningEffort", value: "low" }],
   });
-
-  assert.equal(selection.instanceId, "codex");
   assert.equal(selection.model, RESEARCH_EVALUATOR_MODEL);
   assert.equal(RESEARCH_EVALUATOR_REASONING_EFFORT, "xhigh");
   assert.deepEqual(selection.options, [{ id: "reasoningEffort", value: "xhigh" }]);
