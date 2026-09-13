@@ -123,12 +123,10 @@ import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 import { forkParked, ServerActivation } from "./serverActivation.ts";
-import { ResearchCampaignStoreLive } from "./research/Layers/ResearchCampaignStore.ts";
-import { ResearchEngineLive } from "./research/Layers/ResearchEngine.ts";
+import { FindingReviewStoreLive } from "./research/Layers/FindingReviewStore.ts";
 import { ResearchEvaluatorLive } from "./research/Layers/ResearchEvaluator.ts";
 import { ResearchSupervisorLive } from "./research/Layers/ResearchSupervisor.ts";
 import { ResearchToolControllerLive } from "./research/Layers/ResearchToolController.ts";
-import { ProteusBridgeLive } from "./research/Layers/ProteusBridge.ts";
 import { CoagentRegistryLive } from "./coagents/Layers/CoagentRegistry.ts";
 import { CoagentToolControllerLive } from "./coagents/Layers/CoagentToolController.ts";
 
@@ -258,9 +256,13 @@ const CoagentRegistryLayerLive = CoagentRegistryLive.pipe(
   Layer.provideMerge(SqlitePersistenceLayerLive),
 );
 
+const FindingReviewStoreLayerLive = FindingReviewStoreLive.pipe(
+  Layer.provideMerge(SqlitePersistenceLayerLive),
+);
+
 const ResearchSupervisorRuntimeLive = ResearchSupervisorLive.pipe(
   Layer.provideMerge(ResearchEvaluatorLive),
-  Layer.provideMerge(CoagentRegistryLayerLive),
+  Layer.provideMerge(FindingReviewStoreLayerLive),
 );
 
 const ReactorLayerLive = Layer.empty.pipe(
@@ -291,15 +293,8 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
-const ResearchCampaignStoreLayerLive = ResearchCampaignStoreLive.pipe(
-  Layer.provideMerge(SqlitePersistenceLayerLive),
-);
-const ResearchEngineLayerLive = ResearchEngineLive.pipe(
-  Layer.provideMerge(ResearchCampaignStoreLayerLive),
-);
 const ResearchLayerLive = ResearchToolControllerLive.pipe(
-  Layer.provideMerge(ResearchEngineLayerLive),
-  Layer.provideMerge(ProteusBridgeLive.pipe(Layer.provide(ProcessRunner.layer))),
+  Layer.provideMerge(FindingReviewStoreLayerLive),
   Layer.provideMerge(CoagentRegistryLayerLive),
 );
 const CoagentLayerLive = CoagentToolControllerLive.pipe(

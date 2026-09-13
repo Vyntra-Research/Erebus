@@ -268,7 +268,7 @@ describe("evaluateCommandSafety", () => {
   });
 });
 
-it("redacts secrets and bounds Observer command text", () => {
+it("redacts secrets and bounds command audit text", () => {
   const command = `curl -H "Authorization: Bearer private-value" "https://host/path?token=secret" API_KEY=hidden ${"x".repeat(800)}`;
   const redacted = redactCommandForAudit(command, 180);
 

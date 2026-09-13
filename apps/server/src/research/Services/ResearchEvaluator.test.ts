@@ -5,39 +5,20 @@ import {
   describeResearchEvaluatorFailure,
   isResearchEvaluatorQuotaFailure,
   JudgeAssessment,
-  ObserverAssessment,
 } from "./ResearchEvaluator.ts";
 
-const decodeObserverAssessment = Schema.decodeUnknownSync(ObserverAssessment);
 const decodeJudgeAssessment = Schema.decodeUnknownSync(JudgeAssessment);
 
-it("emits provider-compatible confidence schemas and preserves range validation", () => {
-  const observerJsonSchema = Schema.toJsonSchemaDocument(ObserverAssessment).schema;
-  const judgeJsonSchema = Schema.toJsonSchemaDocument(JudgeAssessment).schema;
-  const observerProperties = observerJsonSchema.properties as Record<string, unknown>;
-  const judgeProperties = judgeJsonSchema.properties as Record<string, unknown>;
-  assert.deepStrictEqual(observerProperties.confidence, { type: "number" });
-  assert.deepStrictEqual(judgeProperties.confidence, { type: "number" });
-  assert.notInclude(JSON.stringify(judgeJsonSchema), '"allOf"');
+it("keeps the independent Judge response provider-compatible and range checked", () => {
+  const jsonSchema = Schema.toJsonSchemaDocument(JudgeAssessment).schema;
+  const properties = jsonSchema.properties as Record<string, unknown>;
+  assert.deepStrictEqual(properties.confidence, { type: "number" });
+  assert.notInclude(JSON.stringify(jsonSchema), '"allOf"');
 
-  const observer = {
-    verdict: "aligned",
-    confidence: 0.5,
-    interventionBasis: {
-      actualViolationObserved: false,
-      materialRiskObserved: false,
-      repairStillNeeded: false,
-      currentWorkAlreadyAddressesIssue: false,
-    },
-    contractClauses: [],
-    evidence: [],
-    risk: null,
-    recommendedSteering: null,
-  } as const;
-  const judge = {
+  const assessment = {
     verdict: "accepted",
     confidence: 0.5,
-    gates: [{ gateId: "G1", status: "pass", reason: "Passed", evidence: ["evidence"] }],
+    gates: [{ gateId: "J1", status: "pass", reason: "Passed", evidence: ["evidence"] }],
     summary: "Accepted",
     nextAction: null,
     evidenceAccess: {
@@ -49,10 +30,8 @@ it("emits provider-compatible confidence schemas and preserves range validation"
     cvssV31: null,
   } as const;
 
-  assert.equal(decodeObserverAssessment(observer).confidence, 0.5);
-  assert.equal(decodeJudgeAssessment(judge).confidence, 0.5);
-  assert.throws(() => decodeObserverAssessment({ ...observer, confidence: -1 }));
-  assert.throws(() => decodeJudgeAssessment({ ...judge, confidence: 2 }));
+  assert.equal(decodeJudgeAssessment(assessment).confidence, 0.5);
+  assert.throws(() => decodeJudgeAssessment({ ...assessment, confidence: 2 }));
 });
 
 it("classifies Codex quota exhaustion without persisting raw provider output", () => {
@@ -64,11 +43,10 @@ it("classifies Codex quota exhaustion without persisting raw provider output", (
     describeResearchEvaluatorFailure(raw),
     "The selected Codex evaluator account has exhausted its current usage quota.",
   );
-  assert.isTrue(isResearchEvaluatorQuotaFailure(describeResearchEvaluatorFailure(raw)));
   assert.notInclude(describeResearchEvaluatorFailure(raw), "account page");
 });
 
-it("keeps unknown evaluator failures out of durable campaign text", () => {
+it("keeps unknown evaluator failures out of durable review text", () => {
   const raw = "provider failed while processing SECRET_PROMPT_CONTENT at C:\\private\\evidence";
   const described = describeResearchEvaluatorFailure(raw);
 

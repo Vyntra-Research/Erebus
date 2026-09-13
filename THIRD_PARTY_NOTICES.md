@@ -10,6 +10,12 @@ Erebus changes the product identity, local state paths, security-research workfl
 
 ## Proteus
 
-Erebus installs [Proteus](https://github.com/Vyntra-Research/Proteus) as a command-line, MCP, plugin, and skills dependency. Proteus is Copyright Vyntra Research and licensed under GPL-3.0-or-later.
+Erebus installs [Proteus](https://github.com/Vyntra-Research/Proteus) as a command-line and MCP dependency. Proteus is Copyright Vyntra Research and licensed under GPL-3.0-or-later. Erebus exposes only its read-only legacy lookup and CVSS surface and does not install its skills.
 
 The pinned Proteus source revision appears in `apps/server/package.json` and `pnpm-lock.yaml`. Erebus invokes Proteus as a subprocess and copies its plugin files into Erebus-managed Codex storage at runtime.
+
+## Argos
+
+Erebus installs [Argos](https://github.com/rafabd1/Argos) as its graph-native research knowledge system. Argos is Copyright Vyntra Research and licensed under GPL-3.0-or-later.
+
+The pinned Argos release appears in `apps/server/package.json` and `pnpm-lock.yaml`. Erebus invokes Argos as a subprocess and installs its MCP plugin and skills into Erebus-managed Codex storage at runtime.

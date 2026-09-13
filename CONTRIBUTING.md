@@ -6,6 +6,6 @@ Before opening a large change, start a discussion in the [Erebus repository](htt
 
 For UI changes, include before-and-after images. For timing or motion changes, include a short video. Do not commit screenshots that exist only as review evidence.
 
-Do not submit credentials, machine-specific paths, campaign databases, research logs, private plans, proofs of concept against third parties, or unpublished vulnerability details. Report a flaw in Erebus through the process in [SECURITY.md](./SECURITY.md).
+Do not submit credentials, machine-specific paths, local research databases, research logs, private plans, proofs of concept against third parties, or unpublished vulnerability details. Report a flaw in Erebus through the process in [SECURITY.md](./SECURITY.md).
 
 Erebus is based on T3 Code. Preserve its MIT notice and do not remove the attribution in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

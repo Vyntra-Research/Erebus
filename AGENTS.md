@@ -1,6 +1,6 @@
 # Erebus
 
-Erebus is a local, Codex-first research harness based on T3 Code. A Node WebSocket server wraps provider CLIs and serves the web and desktop clients. Its research control plane adds Proteus-backed campaigns, an Observer, and an independent finding Judge.
+Erebus is a local, Codex-first research harness based on T3 Code. A Node WebSocket server wraps provider CLIs and serves the web and desktop clients. Erebus keeps durable research heuristics in the agent context, coordinates parallel tasks, and sends finished findings to an independent Judge.
 
 The current Erebus release targets Windows desktop and local Codex use. The inherited mobile, relay, hosted-app, and other provider surfaces remain in the tree but are not enabled until Erebus tests and publishes them.
 
@@ -10,7 +10,7 @@ Keep the useful upstream properties while making Erebus's research behavior expl
 
 ### 1. Open at the core
 
-Erebus is open source. Keep public code useful to external readers and keep private campaign data, plans, credentials, machine paths, and unpublished findings out of the repository.
+Erebus is open source. Keep public code useful to external readers and keep private research data, plans, credentials, machine paths, and unpublished findings out of the repository.
 
 ### 2. Performance without compromise
 
@@ -18,11 +18,11 @@ Users run long research tasks and notice dropped frames, stale state, and excess
 
 ### 3. Research integrity
 
-One task may have one live Erebus campaign. Different tasks may run different campaigns. Observer corrections are live and must not queue after a turn or pause. Judge results are durable follow-ups after finding submission. Neither supervisor may silently change campaign scope or authority.
+Erebus does not own goals or campaign state. Use the native Codex/T3 goal for visible progress and user control. Judge results are durable follow-ups after finding submission. The Judge evaluates the submitted artifacts and must not change the task's scope or authority.
 
 ### 4. Isolated local state
 
-Erebus uses its own application data and Codex home. Never point tests or development servers at a live Codex desktop profile. Erebus manages its pinned Proteus CLI, MCP server, plugin, and skills inside that isolated home.
+Erebus uses its own application data and Codex home. Never point tests or development servers at a live Codex desktop profile. Erebus may expose a managed, read-only Proteus history bridge, but it must not install Proteus research skills or allow Proteus state changes.
 
 ### 5. Preserve the upstream architecture
 

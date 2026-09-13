@@ -1,6 +1,7 @@
 import type {
   ProviderDriverKind,
   ModelCapabilities,
+  ResearchArgosHealth,
   ResearchProteusHealth,
   ServerProvider,
   ServerProviderAccountUsage,
@@ -224,6 +225,7 @@ export function buildServerProvider(input: {
   models: ReadonlyArray<ServerProviderModel>;
   slashCommands?: ReadonlyArray<ServerProviderSlashCommand>;
   skills?: ReadonlyArray<ServerProviderSkill>;
+  argos?: ResearchArgosHealth;
   proteus?: ResearchProteusHealth;
   probe: ProviderProbeResult;
 }): ServerProviderDraft {
@@ -254,6 +256,7 @@ export function buildServerProvider(input: {
     models: input.models,
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],
+    ...(input.argos ? { argos: input.argos } : {}),
     ...(input.proteus ? { proteus: input.proteus } : {}),
     ...(versionAdvisory ? { versionAdvisory } : {}),
   };

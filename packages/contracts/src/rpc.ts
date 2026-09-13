@@ -167,6 +167,9 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ServerArgosError,
+  ServerArgosStatus,
+  ServerArgosUpdateResult,
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
@@ -283,6 +286,8 @@ export const WS_METHODS = {
   serverRefreshProviders: "server.refreshProviders",
   serverLoginCodex: "server.loginCodex",
   serverUpdateProvider: "server.updateProvider",
+  serverGetArgosStatus: "server.getArgosStatus",
+  serverUpdateArgos: "server.updateArgos",
   serverGetProteusStatus: "server.getProteusStatus",
   serverUpdateProteus: "server.updateProteus",
   serverUpdateServer: "server.updateServer",
@@ -424,6 +429,18 @@ export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvide
   payload: ServerProviderUpdateInput,
   success: ServerProviderUpdatedPayload,
   error: Schema.Union([ServerProviderUpdateError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerGetArgosStatusRpc = Rpc.make(WS_METHODS.serverGetArgosStatus, {
+  payload: Schema.Struct({}),
+  success: ServerArgosStatus,
+  error: Schema.Union([ServerArgosError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerUpdateArgosRpc = Rpc.make(WS_METHODS.serverUpdateArgos, {
+  payload: Schema.Struct({}),
+  success: ServerArgosUpdateResult,
+  error: Schema.Union([ServerArgosError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerGetProteusStatusRpc = Rpc.make(WS_METHODS.serverGetProteusStatus, {
@@ -1108,6 +1125,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRefreshProvidersRpc,
   WsServerLoginCodexRpc,
   WsServerUpdateProviderRpc,
+  WsServerGetArgosStatusRpc,
+  WsServerUpdateArgosRpc,
   WsServerGetProteusStatusRpc,
   WsServerUpdateProteusRpc,
   WsServerUpdateServerRpc,

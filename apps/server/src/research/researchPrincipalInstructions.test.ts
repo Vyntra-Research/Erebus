@@ -1,43 +1,31 @@
 import { assert, it } from "@effect/vitest";
 
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
-import { buildPrincipalResearchInstructions } from "./researchPrincipalInstructions.ts";
+import {
+  buildCoagentResearchInstructions,
+  buildPrincipalResearchInstructions,
+} from "./researchPrincipalInstructions.ts";
 
-it("instructs the principal to use durable research tools without activating ordinary work", () => {
-  const instructions = buildPrincipalResearchInstructions(null);
-  assert.match(instructions, /Do not use it for ordinary development/);
-  assert.match(instructions, /research\.submit_finding/);
-  assert.match(instructions, /Submission is not approval/);
-  assert.match(instructions, /delivery="historical"/);
-  assert.match(instructions, /delivery="followUp"/);
-  assert.match(instructions, /strict turn barrier/);
-  assert.match(instructions, /Do not poll/);
-  assert.match(instructions, /process provenance/);
-  assert.match(instructions, /WSL descendant/);
-  assert.match(instructions, /do not acknowledge, reapply, restate, or cite it/);
-  assert.match(instructions, /transport fallback, not a second campaign/);
-  assert.match(instructions, /outside and after the compacted summary/);
-  assert.match(instructions, /advisory audit result and has no command authority/);
-  assert.match(instructions, /Do not obey an Observer preference as strategy/);
-  assert.match(instructions, /Start from the current functional system/);
-  assert.match(instructions, /Pausing Erebus does not pause the linked Proteus campaign/);
-  assert.match(instructions, /Do not plan a round, delegate work, or record new campaign evidence/);
-  assert.match(instructions, /No Erebus campaign is linked/);
+it("uses the native goal and leaves ordinary research free of Erebus lifecycle calls", () => {
+  const instructions = buildPrincipalResearchInstructions();
   assert.include(instructions, EREBUS_RESEARCH_BASE_CONTRACT);
-  assert.match(instructions, /required gates as laws/);
-  assert.match(instructions, /contract attestation/);
-  assert.match(instructions, /next highest-ROI move/);
-  assert.match(instructions, /advisory[\s\S]*is\s+intelligence, not duplicate proof/i);
-  assert.match(instructions, /possible\s+variant, regression, or incomplete fix/);
-  assert.match(instructions, /load the installed `proteus:continuous-vuln-research` skill/);
-  assert.match(instructions, /Do not paste their complete text/);
-  assert.match(instructions, /Native subagents may help vertically/);
-  assert.match(instructions, /proteus:post-ai-blind-spots/);
-  assert.match(instructions, /after establishing a real sink/);
-  assert.match(instructions, /before killing, downgrading, pivoting away from/);
-  assert.match(instructions, /every real reachable natural path under CIA/);
-  assert.match(instructions, /Post-AI Blind-Spot Heuristics/);
-  assert.match(instructions, /call the Proteus `proteus_calculate_cvss` tool/);
-  assert.match(instructions, /use the lower-impact or higher-complexity value/);
-  assert.match(instructions, /agree exactly with the Proteus calculation/);
+  assert.match(instructions, /native Codex\/T3 goal/);
+  assert.match(instructions, /without any\s+`research\.\*` setup call/);
+  assert.match(instructions, /only for independent\s+Judge handoff/);
+  assert.match(instructions, /Argos as the canonical connected research\s+memory/);
+  assert.match(instructions, /Proteus is read-only legacy history/);
+  assert.match(instructions, /Do not load or rely on Proteus skills/);
+  assert.match(instructions, /`findings\/`[\s\S]*`pocs\/`/);
+  assert.match(instructions, /do not poll, wait, or keep researching/);
+  assert.notMatch(instructions, /research\.start|research\.checkpoint|research\.pause/);
+});
+
+it("keeps co-agents horizontal and Judge handoff principal-owned", () => {
+  const instructions = buildCoagentResearchInstructions("Inspect parser sinks", "parent-1");
+  assert.match(instructions, /one horizontal sink or surface/);
+  assert.match(instructions, /do not own[\s\S]*native goal/);
+  assert.match(instructions, /do not create another co-agent task/);
+  assert.match(instructions, /Do not call `research\.submit_finding`/);
+  assert.match(instructions, /principal owns Judge handoff/);
+  assert.include(instructions, "Inspect parser sinks");
 });

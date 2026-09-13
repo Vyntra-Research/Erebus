@@ -462,6 +462,9 @@ importers:
       '@pierre/diffs':
         specifier: 'catalog:'
         version: 1.3.0-beta.10(patch_hash=7ef7cb0cbabb17c15cdb137554068b36f15f6f5265e73fb51452aa3380db91aa)(@shikijs/themes@4.3.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@rafabd1/argos':
+        specifier: https://github.com/rafabd1/Argos/releases/download/v0.1.0/rafabd1-argos-0.1.0.tgz
+        version: https://github.com/rafabd1/Argos/releases/download/v0.1.0/rafabd1-argos-0.1.0.tgz
       '@vyntra-research/proteus':
         specifier: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.9
         version: https://codeload.github.com/Vyntra-Research/Proteus/tar.gz/refs/tags/v2.1.9
@@ -3487,6 +3490,12 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  '@rafabd1/argos@https://github.com/rafabd1/Argos/releases/download/v0.1.0/rafabd1-argos-0.1.0.tgz':
+    resolution: {integrity: sha512-xCsAldSiP8jk1uE0fsRjCcSNWJtOYTQmk4X3tTu+imlepj6cB+rEgjm7wfP5B7YrsoZ8zlVyQ0kvGE8JXQnLyQ==, tarball: https://github.com/rafabd1/Argos/releases/download/v0.1.0/rafabd1-argos-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=24.0.0'}
+    hasBin: true
 
   '@react-grab/cli@0.1.44':
     resolution: {integrity: sha512-gMDYY2rw6OWajCcDlXSIgs2LC432YJXSb3Lm5yM187uhRgBYddoEVULi36h+IolX3r7jSb3ew7vn9FfI8NSo0A==}
@@ -12720,6 +12729,8 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.16
     optional: true
+
+  '@rafabd1/argos@https://github.com/rafabd1/Argos/releases/download/v0.1.0/rafabd1-argos-0.1.0.tgz': {}
 
   '@react-grab/cli@0.1.44':
     dependencies:

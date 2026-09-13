@@ -330,59 +330,35 @@ describe("ServerSettings Codex account routing", () => {
   });
 });
 
-describe("ServerSettings research supervision", () => {
-  it("provides conservative Observer and Judge defaults for legacy settings", () => {
+describe("ServerSettings independent Judge", () => {
+  it("provides independent Judge defaults for legacy settings", () => {
     expect(decodeServerSettings({}).researchSupervision).toEqual({
-      observerMessageWindow: 10,
-      observerInterventionConfidence: 0.8,
-      observerCooldownMessages: 5,
-      observerMaxInterventionsPerTurn: null,
       evaluatorModel: "gpt-daybreak-blue-latest",
       evaluatorReasoningEffort: "xhigh",
     });
   });
 
-  it("accepts bounded supervision updates", () => {
+  it("accepts Judge model updates and drops retired Observer fields", () => {
     expect(
       decodeServerSettingsPatch({
         researchSupervision: {
           observerMessageWindow: 8,
-          observerInterventionConfidence: 0.9,
-          observerCooldownMessages: 3,
-          observerMaxInterventionsPerTurn: 2,
           evaluatorModel: " gpt-daybreak-blue-latest ",
           evaluatorReasoningEffort: "high",
         },
       }).researchSupervision,
     ).toEqual({
-      observerMessageWindow: 8,
-      observerInterventionConfidence: 0.9,
-      observerCooldownMessages: 3,
-      observerMaxInterventionsPerTurn: 2,
       evaluatorModel: "gpt-daybreak-blue-latest",
       evaluatorReasoningEffort: "high",
     });
   });
 
-  it.each([
-    { observerMessageWindow: 0 },
-    { observerMessageWindow: 51 },
-    { observerInterventionConfidence: 1.01 },
-    { observerCooldownMessages: -1 },
-    { observerMaxInterventionsPerTurn: 0 },
-    { evaluatorModel: " " },
-    { evaluatorReasoningEffort: "impossible" },
-  ])("rejects invalid supervision settings: %o", (researchSupervision) => {
-    expect(() => decodeServerSettingsPatch({ researchSupervision })).toThrow();
-  });
-
-  it("accepts an unlimited Observer correction policy", () => {
-    expect(
-      decodeServerSettingsPatch({
-        researchSupervision: { observerMaxInterventionsPerTurn: null },
-      }).researchSupervision?.observerMaxInterventionsPerTurn,
-    ).toBeNull();
-  });
+  it.each([{ evaluatorModel: " " }, { evaluatorReasoningEffort: "impossible" }])(
+    "rejects invalid supervision settings: %o",
+    (researchSupervision) => {
+      expect(() => decodeServerSettingsPatch({ researchSupervision })).toThrow();
+    },
+  );
 });
 
 describe("ServerSettings.sourceControlWritingStyle", () => {

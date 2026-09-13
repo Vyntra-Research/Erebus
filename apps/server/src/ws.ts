@@ -49,6 +49,7 @@ import {
   type RelayClientInstallProgressEvent,
   type ServerSelfUpdateError,
   type ServerSelfUpdateProgressEvent,
+  ServerArgosError,
   ServerProteusError,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
@@ -69,6 +70,7 @@ import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/uns
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import { getArgosStatus, updateArgos } from "./argosMaintenance.ts";
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -1618,6 +1620,30 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "server",
             },
+          ),
+        [WS_METHODS.serverGetArgosStatus]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetArgosStatus, getArgosStatus(config.stateDir), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverUpdateArgos]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUpdateArgos,
+            Effect.gen(function* () {
+              const settings = yield* serverSettings.getSettings.pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ServerArgosError({
+                      operation: "update",
+                      detail: "Erebus could not read its settings before updating Argos.",
+                      cause,
+                    }),
+                ),
+              );
+              const result = yield* updateArgos(config.stateDir, settings);
+              yield* providerRegistry.refresh();
+              return result;
+            }),
+            { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverGetProteusStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.serverGetProteusStatus, getProteusStatus(config.stateDir), {

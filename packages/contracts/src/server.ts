@@ -20,7 +20,7 @@ import {
 import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
-import { ResearchProteusHealth } from "./research.ts";
+import { ResearchArgosHealth, ResearchProteusHealth } from "./research.ts";
 import { ServerSettings } from "./settings.ts";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
@@ -209,6 +209,7 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  argos: Schema.optionalKey(ResearchArgosHealth),
   proteus: Schema.optionalKey(ResearchProteusHealth),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
@@ -673,20 +674,43 @@ export class ServerProviderUpdateError extends Schema.TaggedErrorClass<ServerPro
   }
 }
 
-export const ServerProteusStatus = Schema.Struct({
+const ServerManagedResearchRuntimeStatus = Schema.Struct({
   version: TrimmedNonEmptyString,
   latestVersion: Schema.NullOr(TrimmedNonEmptyString),
   updateAvailable: Schema.Boolean,
   checkedAt: Schema.NullOr(Schema.Number),
   updateCheckError: Schema.NullOr(TrimmedNonEmptyString),
 });
-export type ServerProteusStatus = typeof ServerProteusStatus.Type;
 
-export const ServerProteusUpdateResult = Schema.Struct({
+const ServerManagedResearchRuntimeUpdateResult = Schema.Struct({
   previousVersion: TrimmedNonEmptyString,
   version: TrimmedNonEmptyString,
   updated: Schema.Boolean,
 });
+
+export const ServerArgosStatus = ServerManagedResearchRuntimeStatus;
+export type ServerArgosStatus = typeof ServerArgosStatus.Type;
+
+export const ServerArgosUpdateResult = ServerManagedResearchRuntimeUpdateResult;
+export type ServerArgosUpdateResult = typeof ServerArgosUpdateResult.Type;
+
+export class ServerArgosError extends Schema.TaggedErrorClass<ServerArgosError>()(
+  "ServerArgosError",
+  {
+    operation: Schema.Literals(["status", "update"]),
+    detail: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+export const ServerProteusStatus = ServerManagedResearchRuntimeStatus;
+export type ServerProteusStatus = typeof ServerProteusStatus.Type;
+
+export const ServerProteusUpdateResult = ServerManagedResearchRuntimeUpdateResult;
 export type ServerProteusUpdateResult = typeof ServerProteusUpdateResult.Type;
 
 export class ServerProteusError extends Schema.TaggedErrorClass<ServerProteusError>()(

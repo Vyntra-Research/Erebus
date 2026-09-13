@@ -768,6 +768,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetProteusStatus,
       staleTimeMs: 5_000,
     }),
+    argosStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:argos-status",
+      tag: WS_METHODS.serverGetArgosStatus,
+      staleTimeMs: 5_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",
@@ -795,6 +800,14 @@ export function createServerEnvironmentAtoms<R, E>(
     updateProteus: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-proteus",
       tag: WS_METHODS.serverUpdateProteus,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
+    updateArgos: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:update-argos",
+      tag: WS_METHODS.serverUpdateArgos,
       concurrency: {
         mode: "singleFlight",
         key: ({ environmentId }) => environmentId,

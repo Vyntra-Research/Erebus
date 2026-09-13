@@ -1,6 +1,5 @@
 import * as NodeCrypto from "node:crypto";
 
-import type { ResearchProteusHealth } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,17 +14,6 @@ import { ResearchToolController } from "../research/Services/ResearchToolControl
 import { EREBUS_RESEARCH_DYNAMIC_TOOL } from "../research/researchTools.ts";
 import { McpAuthMiddlewareLive } from "./McpHttpServer.ts";
 import { McpInvocationContext } from "./McpInvocationContext.ts";
-import { readMcpProviderSession } from "./McpProviderSession.ts";
-
-const unavailableProteusHealth = (): ResearchProteusHealth => ({
-  runtime: "unknown",
-  plugin: "unknown",
-  skills: "unknown",
-  mcp: "unknown",
-  version: null,
-  message: "Proteus health was not available for this resumed Codex session.",
-  checkedAt: "1970-01-01T00:00:00.000Z",
-});
 
 const failureResult = (message: string) =>
   new McpSchema.CallToolResult({
@@ -72,16 +60,12 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
                     ),
                   );
                 }
-                const proteus =
-                  readMcpProviderSession(invocation.threadId)?.proteusHealth ??
-                  unavailableProteusHealth();
                 return researchToolController
                   .handle(
                     {
                       projectId: threadContext.projectId,
                       threadId: invocation.threadId,
                       cwd: threadContext.worktreePath ?? threadContext.workspaceRoot,
-                      proteus,
                     },
                     {
                       namespace: EREBUS_RESEARCH_DYNAMIC_TOOL.name,

@@ -6,22 +6,10 @@ import {
   EREBUS_RESEARCH_DYNAMIC_TOOL,
 } from "./researchTools.ts";
 
-it("exposes only explicit campaign lifecycle tools", () => {
+it("exposes only independent Judge handoff tools", () => {
   assert.deepStrictEqual(
     EREBUS_RESEARCH_DYNAMIC_TOOL.tools.map((tool) => tool.name),
-    [
-      "create_campaign",
-      "get_status",
-      "register_contract",
-      "start",
-      "checkpoint",
-      "pause",
-      "resume",
-      "finish",
-      "abort",
-      "submit_finding",
-      "revise_finding",
-    ],
+    ["get_status", "submit_finding", "revise_finding"],
   );
 });
 
@@ -56,48 +44,7 @@ it("returns a structured result as dynamic-tool content", () => {
   }
 });
 
-it("publishes every required contract registration field", () => {
-  const registerContract = EREBUS_RESEARCH_DYNAMIC_TOOL.tools.find(
-    (tool) => tool.name === "register_contract",
-  );
-  assert.isDefined(registerContract);
-  const serializedSchema = JSON.stringify(registerContract.inputSchema);
-
-  for (const field of [
-    "id",
-    "revision",
-    "objective",
-    "target",
-    "authorization",
-    "attackerModel",
-    "impactThreshold",
-    "scope",
-    "strategy",
-    "heuristics",
-    "gates",
-    "duplicatePolicy",
-    "labPolicy",
-    "reportPolicy",
-    "proteusCampaignId",
-    "createdAt",
-  ]) {
-    assert.include(serializedSchema, `"${field}"`);
-  }
-  assert.notInclude(serializedSchema, '"observerPolicy"');
-  assert.include(registerContract.description, "contract.id");
-  assert.include(registerContract.description, "contractId");
-  assert.include(registerContract.description, "target is a required plain string");
-  const inputSchema = registerContract.inputSchema as unknown as {
-    properties: { contract: { properties: Record<string, { description?: string }> } };
-  };
-  assert.include(inputSchema.properties.contract.properties.target?.description, "version/ref");
-  for (const field of Object.values(inputSchema.properties.contract.properties)) {
-    assert.isString(field.description);
-    assert.isAbove(field.description?.length ?? 0, 0);
-  }
-});
-
-it("publishes the complete finding gate-claim schema and turn barrier", () => {
+it("publishes the minimal artifact handoff schema and turn barrier", () => {
   const submitFinding = EREBUS_RESEARCH_DYNAMIC_TOOL.tools.find(
     (tool) => tool.name === "submit_finding",
   );
@@ -107,9 +54,22 @@ it("publishes the complete finding gate-claim schema and turn barrier", () => {
   assert.include(submitFinding.description, "accepted=false");
 
   const serializedSchema = JSON.stringify(submitFinding.inputSchema);
-  for (const field of ["gateId", "status", "evidence", "pending", "pass", "fail", "unknown"]) {
+  for (const field of [
+    "findingId",
+    "revision",
+    "supersedesEvaluationId",
+    "title",
+    "target",
+    "findingPath",
+    "pocPath",
+  ]) {
     assert.include(serializedSchema, `"${field}"`);
   }
+  assert.notInclude(serializedSchema, '"campaignId"');
+  assert.notInclude(serializedSchema, '"contractId"');
+  assert.notInclude(serializedSchema, '"gateClaims"');
+  assert.include(serializedSchema, "findings/");
+  assert.include(serializedSchema, "pocs/");
 });
 
 it("publishes immutable finding revision metadata", () => {
@@ -118,7 +78,8 @@ it("publishes immutable finding revision metadata", () => {
   );
   assert.isDefined(reviseFinding);
   const serializedSchema = JSON.stringify(reviseFinding.inputSchema);
-  for (const field of ["findingId", "revision", "supersedesEvaluationId", "cvssV31"]) {
+  for (const field of ["findingId", "revision", "supersedesEvaluationId"]) {
     assert.include(serializedSchema, `"${field}"`);
   }
+  assert.notInclude(serializedSchema, '"cvssV31"');
 });

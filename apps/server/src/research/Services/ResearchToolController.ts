@@ -1,4 +1,4 @@
-import type { ProjectId, ResearchProteusHealth, ThreadId } from "@t3tools/contracts";
+import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as CodexSchema from "effect-codex-app-server/schema";
@@ -7,10 +7,9 @@ export interface ResearchToolContext {
   readonly projectId: ProjectId;
   readonly threadId: ThreadId;
   readonly cwd: string;
-  readonly proteus: ResearchProteusHealth;
 }
 
-export type ResearchInstructionContext = Omit<ResearchToolContext, "proteus">;
+export type ResearchInstructionContext = ResearchToolContext;
 
 export interface ResearchToolControllerShape {
   readonly principalInstructions: (context: ResearchInstructionContext) => Effect.Effect<string>;

@@ -302,7 +302,7 @@ function evaluateCommandSafetyAtDepth(
     return block(
       "opaque-shell-command",
       "Encoded shell commands cannot be inspected by the Erebus command guard.",
-      "Run the same bounded operation as readable shell text so the guard and Observer can audit it.",
+      "Run the same bounded operation as readable shell text so the Erebus command guard can inspect it.",
     );
   }
 

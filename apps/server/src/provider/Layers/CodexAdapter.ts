@@ -1787,7 +1787,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   ...(researchToolController ? [EREBUS_RESEARCH_DYNAMIC_TOOL] : []),
                   ...(coagentToolController ? [EREBUS_THREADS_DYNAMIC_TOOL] : []),
                 ],
-                handleDynamicTool: (params, proteus) =>
+                handleDynamicTool: (params, _proteus) =>
                   isErebusThreadsToolCall(params) && coagentToolController
                     ? coagentToolController.handle(
                         {
@@ -1803,7 +1803,6 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                             projectId,
                             threadId: input.threadId,
                             cwd: input.cwd ?? process.cwd(),
-                            proteus,
                           },
                           params,
                         )

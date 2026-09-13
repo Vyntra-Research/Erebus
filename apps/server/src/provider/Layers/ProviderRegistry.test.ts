@@ -301,6 +301,15 @@ function makeCodexProbeSnapshot(
       },
     ],
     skills: [],
+    argos: {
+      runtime: "unknown",
+      plugin: "unknown",
+      skills: "unknown",
+      mcp: "unknown",
+      version: null,
+      message: null,
+      checkedAt: "2026-09-01T12:00:00.000Z",
+    },
     proteus: {
       runtime: "unknown",
       plugin: "unknown",

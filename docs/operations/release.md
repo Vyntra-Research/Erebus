@@ -7,7 +7,7 @@ Erebus currently ships an unsigned Windows x64 installer. The release workflow s
 1. Set the desktop, server, web, and contracts packages to the same version.
 2. Confirm the managed Proteus version.
 3. Run the test suite and build the Windows installer.
-4. Check the repository for credentials, local paths, campaign data, private notes, unpublished findings, and logs.
+4. Check the repository for credentials, local paths, private research data, private notes, unpublished findings, and logs.
 5. Confirm the installer contents and update metadata.
 
 ## Automated release
