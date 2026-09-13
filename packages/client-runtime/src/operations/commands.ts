@@ -48,6 +48,8 @@ export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
+export type SetThreadGoalStatusInput = CommandInput<"thread.goal.status.set">;
+export type ClearThreadGoalInput = CommandInput<"thread.goal.clear">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
@@ -292,6 +294,30 @@ export const interruptThreadTurn: (input: InterruptThreadTurnInput) => CommandEf
   return yield* dispatch({
     ...input,
     type: "thread.turn.interrupt",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const setThreadGoalStatus: (input: SetThreadGoalStatusInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setThreadGoalStatus",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.goal.status.set",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const clearThreadGoal: (input: ClearThreadGoalInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.clearThreadGoal",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.goal.clear",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });

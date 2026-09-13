@@ -65,6 +65,8 @@ type ProviderIntentEvent = Extract<
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
+      | "thread.goal-status-set-requested"
+      | "thread.goal-clear-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
       | "thread.session-stop-requested";
@@ -356,6 +358,8 @@ const make = Effect.gen(function* () {
     readonly kind:
       | "provider.turn.start.failed"
       | "provider.turn.interrupt.failed"
+      | "provider.goal.update.failed"
+      | "provider.goal.clear.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
       | "provider.session.stop.failed";
@@ -1439,6 +1443,65 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause(recoverInterruptFailure));
   });
 
+  const processGoalStatusSetRequested = Effect.fn("processGoalStatusSetRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.goal-status-set-requested" }>,
+  ) {
+    const setGoalStatus = providerService.setThreadGoalStatus;
+    if (!setGoalStatus) {
+      return yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.goal.update.failed",
+        summary: "Goal update failed",
+        detail: "This server does not support persistent thread goals.",
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      });
+    }
+    yield* setGoalStatus({
+      threadId: event.payload.threadId,
+      status: event.payload.status,
+    }).pipe(
+      Effect.catchCause((cause) =>
+        appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.goal.update.failed",
+          summary: "Goal update failed",
+          detail: formatFailureDetail(cause),
+          turnId: null,
+          createdAt: event.payload.createdAt,
+        }),
+      ),
+    );
+  });
+
+  const processGoalClearRequested = Effect.fn("processGoalClearRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.goal-clear-requested" }>,
+  ) {
+    const clearGoal = providerService.clearThreadGoal;
+    if (!clearGoal) {
+      return yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.goal.clear.failed",
+        summary: "Goal removal failed",
+        detail: "This server does not support persistent thread goals.",
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      });
+    }
+    yield* clearGoal({ threadId: event.payload.threadId }).pipe(
+      Effect.catchCause((cause) =>
+        appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.goal.clear.failed",
+          summary: "Goal removal failed",
+          detail: formatFailureDetail(cause),
+          turnId: null,
+          createdAt: event.payload.createdAt,
+        }),
+      ),
+    );
+  });
+
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
@@ -1592,6 +1655,12 @@ const make = Effect.gen(function* () {
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
+      case "thread.goal-status-set-requested":
+        yield* processGoalStatusSetRequested(event);
+        return;
+      case "thread.goal-clear-requested":
+        yield* processGoalClearRequested(event);
+        return;
       case "thread.approval-response-requested":
         yield* processApprovalResponseRequested(event);
         return;
@@ -1637,6 +1706,8 @@ const make = Effect.gen(function* () {
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
+        event.type === "thread.goal-status-set-requested" ||
+        event.type === "thread.goal-clear-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
         event.type === "thread.session-stop-requested"

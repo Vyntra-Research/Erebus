@@ -13,6 +13,7 @@
  */
 import type {
   ProviderInterruptTurnInput,
+  ProviderClearThreadGoalInput,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
@@ -20,12 +21,14 @@ import type {
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
+  ProviderSetThreadGoalStatusInput,
   ProviderSteerTurnInput,
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
   ThreadId,
   ProviderTurnStartResult,
+  ProviderThreadGoal,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -60,6 +63,18 @@ export interface ProviderServiceShape {
   readonly interruptTurn: (
     input: ProviderInterruptTurnInput,
   ) => Effect.Effect<void, ProviderServiceError>;
+
+  readonly getThreadGoal?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ProviderThreadGoal | null, ProviderServiceError>;
+
+  readonly setThreadGoalStatus?: (
+    input: ProviderSetThreadGoalStatusInput,
+  ) => Effect.Effect<ProviderThreadGoal, ProviderServiceError>;
+
+  readonly clearThreadGoal?: (
+    input: ProviderClearThreadGoalInput,
+  ) => Effect.Effect<boolean, ProviderServiceError>;
 
   readonly steerTurn: (input: ProviderSteerTurnInput) => Effect.Effect<void, ProviderServiceError>;
 

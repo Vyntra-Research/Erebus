@@ -267,6 +267,16 @@ export const setTheme = DesktopIpc.makeIpcMethod({
   }),
 });
 
+export const flushRendererStorage = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.FLUSH_RENDERER_STORAGE_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.flushRendererStorage")(function* () {
+    const electronApp = yield* ElectronApp.ElectronApp;
+    yield* electronApp.flushStorageData;
+  }),
+});
+
 export const showContextMenu = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.CONTEXT_MENU_CHANNEL,
   payload: ContextMenuInput,

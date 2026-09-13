@@ -102,6 +102,7 @@ import {
   deriveTurnPlans,
   findLatestProposedPlan,
   deriveWorkLogEntries,
+  deriveThreadGoal,
   hasActionableProposedPlan,
   isLatestTurnSettled,
 } from "../session-logic";
@@ -319,6 +320,7 @@ import {
 } from "./chat/ContextWindowMeter.logic";
 import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "../lib/contextWindow";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
+import { ThreadGoalBar } from "./chat/ThreadGoalBar";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
   DRAFT_HERO_TRANSITION_DURATION_MS,
@@ -1302,6 +1304,12 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
+    reportFailure: false,
+  });
+  const setThreadGoalStatus = useAtomCommand(threadEnvironment.setGoalStatus, {
+    reportFailure: false,
+  });
+  const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, {
     reportFailure: false,
   });
   const respondToThreadApproval = useAtomCommand(threadEnvironment.respondToApproval, {
@@ -2315,6 +2323,54 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const activeThreadGoal = useMemo(() => deriveThreadGoal(threadActivities), [threadActivities]);
+  const [goalCommandThreadKey, setGoalCommandThreadKey] = useState<string | null>(null);
+  const goalCommandBusy = activeThreadKey !== null && goalCommandThreadKey === activeThreadKey;
+  const reportGoalCommandFailure = useCallback(
+    (title: string, result: AtomCommandResult<unknown, unknown>) => {
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title,
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        }),
+      );
+    },
+    [],
+  );
+  const handleSetGoalStatus = useCallback(
+    async (status: "active" | "paused") => {
+      if (!activeThreadRef) return;
+      const key = scopedThreadKey(activeThreadRef);
+      setGoalCommandThreadKey(key);
+      try {
+        const result = await setThreadGoalStatus({
+          environmentId: activeThreadRef.environmentId,
+          input: { threadId: activeThreadRef.threadId, status },
+        });
+        reportGoalCommandFailure("Could not update goal", result);
+      } finally {
+        setGoalCommandThreadKey((current) => (current === key ? null : current));
+      }
+    },
+    [activeThreadRef, reportGoalCommandFailure, setThreadGoalStatus],
+  );
+  const handleClearGoal = useCallback(async () => {
+    if (!activeThreadRef) return;
+    const key = scopedThreadKey(activeThreadRef);
+    setGoalCommandThreadKey(key);
+    try {
+      const result = await clearThreadGoal({
+        environmentId: activeThreadRef.environmentId,
+        input: { threadId: activeThreadRef.threadId },
+      });
+      reportGoalCommandFailure("Could not delete goal", result);
+    } finally {
+      setGoalCommandThreadKey((current) => (current === key ? null : current));
+    }
+  }, [activeThreadRef, clearThreadGoal, reportGoalCommandFailure]);
   const activeContextWindow = useMemo(
     () => deriveLatestContextWindowSnapshot(threadActivities),
     [threadActivities],
@@ -7028,6 +7084,12 @@ function ChatViewContent(props: ChatViewProps) {
                         showComposerContextStrip && "chat-composer-glass-shell-with-context",
                       )}
                     >
+                      <ThreadGoalBar
+                        goal={activeThreadGoal}
+                        busy={goalCommandBusy}
+                        onSetStatus={(status) => void handleSetGoalStatus(status)}
+                        onClear={() => void handleClearGoal()}
+                      />
                       <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer

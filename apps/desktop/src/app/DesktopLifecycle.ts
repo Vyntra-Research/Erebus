@@ -117,13 +117,21 @@ function handleBeforeQuit(
   void runEffect(
     Effect.gen(function* () {
       const state = yield* DesktopState.DesktopState;
+      const electronApp = yield* ElectronApp.ElectronApp;
       const electronWindow = yield* ElectronWindow.ElectronWindow;
       yield* Ref.set(state.quitting, true);
       yield* logLifecycleInfo("before-quit received");
       yield* requestDesktopShutdownAndWait(
-        electronWindow.destroyAll.pipe(
+        electronApp.flushStorageData.pipe(
           Effect.catchCause((cause) =>
-            logLifecycleError("failed to destroy windows before shutdown", { cause }),
+            logLifecycleError("failed to flush renderer storage before shutdown", { cause }),
+          ),
+          Effect.andThen(
+            electronWindow.destroyAll.pipe(
+              Effect.catchCause((cause) =>
+                logLifecycleError("failed to destroy windows before shutdown", { cause }),
+              ),
+            ),
           ),
         ),
       );

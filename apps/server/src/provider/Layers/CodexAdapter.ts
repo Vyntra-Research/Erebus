@@ -25,6 +25,7 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
+  type ProviderThreadGoalStatus,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
@@ -810,6 +811,39 @@ function mapToRuntimeEvents(
 ): ReadonlyArray<ProviderRuntimeEvent> {
   if (event.kind === "notification" && event.method.startsWith("collabAgent/")) {
     return mapCollabAgentEvent(event, canonicalThreadId);
+  }
+
+  if (event.kind === "notification" && event.method === "thread/goal/updated") {
+    const payload = readPayload(EffectCodexSchema.V2ThreadGoalUpdatedNotification, event.payload);
+    if (!payload) return [];
+    const goal = payload.goal;
+    return [
+      {
+        type: "thread.goal.updated",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {
+          objective: goal.objective,
+          status: goal.status,
+          ...(goal.tokenBudget !== undefined ? { tokenBudget: goal.tokenBudget } : {}),
+          tokensUsed: goal.tokensUsed,
+          timeUsedSeconds: goal.timeUsedSeconds,
+          createdAt: goal.createdAt,
+          updatedAt: goal.updatedAt,
+        },
+      },
+    ];
+  }
+
+  if (event.kind === "notification" && event.method === "thread/goal/cleared") {
+    const payload = readPayload(EffectCodexSchema.V2ThreadGoalClearedNotification, event.payload);
+    if (!payload) return [];
+    return [
+      {
+        type: "thread.goal.cleared",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {},
+      },
+    ];
   }
   if (event.kind === "notification" && event.method === "erebus/commandGuard/blocked") {
     const payload = readPayload(ErebusCommandGuardBlockedPayload, event.payload);
@@ -2033,6 +2067,63 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
+  const getThreadGoal: NonNullable<CodexAdapterShape["getThreadGoal"]> = (threadId) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) => session.runtime.getThreadGoal),
+      Effect.map((goal) =>
+        goal
+          ? {
+              objective: goal.objective,
+              status: goal.status,
+              ...(goal.tokenBudget !== undefined ? { tokenBudget: goal.tokenBudget } : {}),
+              tokensUsed: goal.tokensUsed,
+              timeUsedSeconds: goal.timeUsedSeconds,
+              createdAt: goal.createdAt,
+              updatedAt: goal.updatedAt,
+            }
+          : null,
+      ),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/goal/get", cause),
+      ),
+    );
+
+  const setThreadGoalStatus: NonNullable<CodexAdapterShape["setThreadGoalStatus"]> = (
+    threadId,
+    status,
+  ) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) =>
+        session.runtime.setThreadGoalStatus(status as ProviderThreadGoalStatus),
+      ),
+      Effect.map((goal) => ({
+        objective: goal.objective,
+        status: goal.status,
+        ...(goal.tokenBudget !== undefined ? { tokenBudget: goal.tokenBudget } : {}),
+        tokensUsed: goal.tokensUsed,
+        timeUsedSeconds: goal.timeUsedSeconds,
+        createdAt: goal.createdAt,
+        updatedAt: goal.updatedAt,
+      })),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/goal/set", cause),
+      ),
+    );
+
+  const clearThreadGoal: NonNullable<CodexAdapterShape["clearThreadGoal"]> = (threadId) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) => session.runtime.clearThreadGoal),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/goal/clear", cause),
+      ),
+    );
+
   const steerTurn: NonNullable<CodexAdapterShape["steerTurn"]> = (input) =>
     requireSession(input.threadId).pipe(
       Effect.flatMap((session) => session.runtime.steerTurn(input.expectedTurnId, input.text)),
@@ -2178,6 +2269,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    getThreadGoal,
+    setThreadGoalStatus,
+    clearThreadGoal,
     steerTurn,
     readThread,
     rollbackThread,

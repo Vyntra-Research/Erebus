@@ -774,6 +774,36 @@ export function runtimeEventToActivities(
       ];
     }
 
+    case "thread.goal.updated": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "thread.goal.updated",
+          summary: `Goal ${event.payload.status}`,
+          payload: event.payload,
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "thread.goal.cleared": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "thread.goal.cleared",
+          summary: "Goal removed",
+          payload: {},
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "thread.token-usage.updated": {
       const payload = buildContextWindowActivityPayload(event);
       if (!payload) {

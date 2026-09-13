@@ -23,8 +23,10 @@ import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
+  clearThreadGoal,
   createProject,
   deleteArchivedThreads,
+  setThreadGoalStatus,
   settleThread,
   stopThreadSession,
   unsettleThread,
@@ -74,6 +76,34 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
 });
 
 describe("environment commands", () => {
+  it.effect("dispatches persistent goal controls", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      const provideSupervisor = Effect.provideService(
+        EnvironmentSupervisor.EnvironmentSupervisor,
+        supervisor,
+      );
+
+      yield* setThreadGoalStatus({
+        commandId: CommandId.make("pause-goal"),
+        threadId: ThreadId.make("thread-1"),
+        status: "paused",
+        createdAt: "2026-06-06T00:00:00.000Z",
+      }).pipe(provideSupervisor);
+      yield* clearThreadGoal({
+        commandId: CommandId.make("clear-goal"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: "2026-06-06T00:01:00.000Z",
+      }).pipe(provideSupervisor);
+
+      expect(dispatched.map((command) => command.type)).toEqual([
+        "thread.goal.status.set",
+        "thread.goal.clear",
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
   it.effect("adds generated command metadata", () =>
     Effect.gen(function* () {
       const dispatched: ClientOrchestrationCommand[] = [];
