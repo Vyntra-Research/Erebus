@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.5 - 2026-09-14
+
+### Fixed
+
+- Keep the native goal card in sync with successful provider updates and removals, including when the provider already has no active goal.
+- Fold co-agent handbacks into their completed run and keep the run disclosure beside the final response.
+
 ## 0.6.4 - 2026-09-14
 
 ### Fixed

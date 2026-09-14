@@ -252,6 +252,21 @@ describe("ProviderCommandReactor", () => {
       Effect.succeed(input?.codexFailoverSelection ?? null),
     );
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
+    const setThreadGoalStatus = vi.fn<NonNullable<ProviderServiceShape["setThreadGoalStatus"]>>(
+      ({ status }) =>
+        Effect.succeed({
+          objective: "Test goal",
+          status,
+          tokenBudget: null,
+          tokensUsed: 12,
+          timeUsedSeconds: 34,
+          createdAt: 1,
+          updatedAt: 2,
+        }),
+    );
+    const clearThreadGoal = vi.fn<NonNullable<ProviderServiceShape["clearThreadGoal"]>>(() =>
+      Effect.succeed(false),
+    );
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
     const stopSession = vi.fn((stopInput: unknown) =>
@@ -337,6 +352,8 @@ describe("ProviderCommandReactor", () => {
       startSession: startSession as ProviderServiceShape["startSession"],
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
+      setThreadGoalStatus,
+      clearThreadGoal,
       steerTurn: () => unsupported(),
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
@@ -532,6 +549,8 @@ describe("ProviderCommandReactor", () => {
       sendTurn,
       failoverAfterUsageLimit,
       interruptTurn,
+      setThreadGoalStatus,
+      clearThreadGoal,
       respondToRequest,
       respondToUserInput,
       stopSession,
@@ -2697,6 +2716,118 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.interruptTurn.mock.calls.length === 1);
     expect(harness.interruptTurn.mock.calls[0]?.[0]).toEqual({
       threadId: "thread-1",
+    });
+  });
+
+  it("projects a successful native goal status update without waiting for a notification", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-goal-active"),
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: EventId.make("activity-goal-active"),
+          tone: "info",
+          kind: "thread.goal.updated",
+          summary: "Goal active",
+          payload: {
+            objective: "Test goal",
+            status: "active",
+            tokenBudget: null,
+            tokensUsed: 12,
+            timeUsedSeconds: 34,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.goal.status.set",
+        commandId: CommandId.make("cmd-goal-pause"),
+        threadId: ThreadId.make("thread-1"),
+        status: "paused",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const thread = (await harness.readModel()).threads.find(
+        (entry) => entry.id === ThreadId.make("thread-1"),
+      );
+      return (
+        thread?.activities.some(
+          (activity) =>
+            activity.kind === "thread.goal.updated" &&
+            (activity.payload as { status?: string } | null)?.status === "paused",
+        ) ?? false
+      );
+    });
+
+    expect(harness.setThreadGoalStatus).toHaveBeenCalledWith({
+      threadId: ThreadId.make("thread-1"),
+      status: "paused",
+    });
+  });
+
+  it("clears the projected goal when the provider already has no goal", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-existing-goal"),
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: EventId.make("activity-existing-goal"),
+          tone: "info",
+          kind: "thread.goal.updated",
+          summary: "Goal active",
+          payload: {
+            objective: "Test goal",
+            status: "active",
+            tokenBudget: null,
+            tokensUsed: 12,
+            timeUsedSeconds: 34,
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.goal.clear",
+        commandId: CommandId.make("cmd-goal-clear"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const thread = (await harness.readModel()).threads.find(
+        (entry) => entry.id === ThreadId.make("thread-1"),
+      );
+      return (
+        thread?.activities.some((activity) => activity.kind === "thread.goal.cleared") ?? false
+      );
+    });
+
+    expect(harness.clearThreadGoal).toHaveBeenCalledWith({
+      threadId: ThreadId.make("thread-1"),
     });
   });
 

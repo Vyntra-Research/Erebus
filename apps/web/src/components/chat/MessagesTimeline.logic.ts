@@ -219,6 +219,7 @@ function maxIsoTimestamp(a: string | null, b: string | null): string | null {
 export interface TimelineDurationMessage {
   id: string;
   role: "user" | "assistant" | "system";
+  text?: string | null;
   createdAt: string;
   updatedAt: string;
   streaming: boolean;
@@ -310,7 +311,7 @@ export function computeMessageDurationStart(
   let lastBoundary: string | null = null;
 
   for (const message of messages) {
-    if (message.role === "user") {
+    if (message.role === "user" && !messageIsCoagentCoordination(message)) {
       lastBoundary = message.createdAt;
     }
     result.set(message.id, lastBoundary ?? message.createdAt);
@@ -506,7 +507,7 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
       continue;
     }
     const { message } = timelineEntry;
-    if (message.role === "user") {
+    if (message.role === "user" && !messageIsCoagentCoordination(message)) {
       nullTurnResponseIndex += 1;
       continue;
     }
@@ -553,15 +554,33 @@ function deriveUnsettledTurnId(
   return isSettled ? null : latestTurn.turnId;
 }
 
-function lastUserMessageIndex(timelineEntries: ReadonlyArray<TimelineEntry>): number {
-  return timelineEntries.findLastIndex(
-    (entry) => entry.kind === "message" && entry.message.role === "user",
+function messageIsCoagentCoordination(message: ChatMessage | TimelineDurationMessage): boolean {
+  return (
+    message.role === "user" &&
+    String(message.id).startsWith("coagent-message:") &&
+    message.text?.trimStart().startsWith("<erebus_coagent_message ") === true
   );
 }
 
-function timelineEntryTurnId(entry: TimelineEntry): TurnId | null {
+function entryIsUserAuthoredMessage(entry: TimelineEntry): boolean {
+  return (
+    entry.kind === "message" &&
+    entry.message.role === "user" &&
+    !messageIsCoagentCoordination(entry.message)
+  );
+}
+
+function lastUserMessageIndex(timelineEntries: ReadonlyArray<TimelineEntry>): number {
+  return timelineEntries.findLastIndex((entry) => entryIsUserAuthoredMessage(entry));
+}
+
+function timelineEntryTurnId(
+  entry: TimelineEntry,
+  inheritedTurnIdByEntryId?: ReadonlyMap<string, TurnId>,
+): TurnId | null {
   if (entry.kind === "message") {
-    return entry.message.role === "assistant" ? (entry.message.turnId ?? null) : null;
+    if (entry.message.role === "assistant") return entry.message.turnId ?? null;
+    return inheritedTurnIdByEntryId?.get(entry.id) ?? null;
   }
   if (entry.kind === "turn-plan") {
     return entry.turnPlan.turnId;
@@ -607,7 +626,7 @@ function deriveInheritedFoldTurnIds(
   const inheritedTurnIdByEntryId = new Map<string, TurnId>();
   let spanStart = 0;
 
-  const attachUnkeyedSettledWork = (spanEnd: number) => {
+  const attachUnkeyedSettledEntries = (spanEnd: number) => {
     const span = timelineEntries.slice(spanStart, spanEnd);
     const explicitTurnIds = new Set<TurnId>();
     for (const entry of span) {
@@ -621,18 +640,20 @@ function deriveInheritedFoldTurnIds(
     for (const entry of span) {
       if (entry.kind === "work" && workEntryCanInheritFoldTurn(entry.entry)) {
         inheritedTurnIdByEntryId.set(entry.id, onlyTurnId);
+      } else if (entry.kind === "message" && messageIsCoagentCoordination(entry.message)) {
+        inheritedTurnIdByEntryId.set(entry.id, onlyTurnId);
       }
     }
   };
 
   for (let index = 0; index < timelineEntries.length; index += 1) {
     const entry = timelineEntries[index];
-    if (entry?.kind === "message" && entry.message.role === "user") {
-      attachUnkeyedSettledWork(index);
+    if (entry && entryIsUserAuthoredMessage(entry)) {
+      attachUnkeyedSettledEntries(index);
       spanStart = index + 1;
     }
   }
-  attachUnkeyedSettledWork(timelineEntries.length);
+  attachUnkeyedSettledEntries(timelineEntries.length);
 
   return inheritedTurnIdByEntryId;
 }
@@ -646,6 +667,7 @@ function deriveInheritedFoldTurnIds(
 function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   terminalAssistantMessageIds: ReadonlySet<string>;
+  inheritedTurnIdByEntryId: ReadonlyMap<string, TurnId>;
   latestTurn: TimelineLatestTurn | null;
   unsettledTurnId: TurnId | null;
 }): ReadonlyMap<string, TurnFold> {
@@ -662,15 +684,14 @@ function deriveTurnFolds(input: {
     startBoundary: string | null;
   }
   const groupsByTurnId = new Map<TurnId, TurnGroup>();
-  const inheritedTurnIdByEntryId = deriveInheritedFoldTurnIds(input.timelineEntries);
-
   let pendingUserBoundary: string | null = null;
   for (const entry of input.timelineEntries) {
-    if (entry.kind === "message" && entry.message.role === "user") {
-      pendingUserBoundary = entry.message.createdAt;
+    if (entryIsUserAuthoredMessage(entry)) {
+      pendingUserBoundary = entry.createdAt;
       continue;
     }
-    const turnId = explicitFoldTurnId(entry) ?? inheritedTurnIdByEntryId.get(entry.id) ?? null;
+    const turnId =
+      explicitFoldTurnId(entry) ?? input.inheritedTurnIdByEntryId.get(entry.id) ?? null;
     if (!turnId) {
       continue;
     }
@@ -764,10 +785,19 @@ function deriveTurnFolds(input: {
         ? `Worked for ${duration}`
         : "Worked";
 
-    foldsByAnchorEntryId.set(firstHiddenEntry.id, {
+    // Keep the disclosure next to the visible end of the completed response.
+    // Long turns may contain hours of user steers; anchoring at the first
+    // hidden item leaves the only expand control far above the final answer.
+    const anchorEntry =
+      group.terminalEntry && group.terminalEntry.id === lastEntry.id
+        ? group.terminalEntry
+        : group.entries.findLast((entry) => hiddenEntryIds.has(entry.id));
+    if (!anchorEntry) continue;
+
+    foldsByAnchorEntryId.set(anchorEntry.id, {
       turnId,
-      anchorEntryId: firstHiddenEntry.id,
-      createdAt: firstHiddenEntry.createdAt,
+      anchorEntryId: anchorEntry.id,
+      createdAt: anchorEntry.createdAt,
       hiddenEntryIds,
       label,
     });
@@ -792,6 +822,7 @@ export function deriveMessagesTimelineRows(input: {
     timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineEntries);
+  const inheritedTurnIdByEntryId = deriveInheritedFoldTurnIds(timelineEntries);
   const unsettledTurnId = deriveUnsettledTurnId(
     input.latestTurn ?? null,
     input.runningTurnId ?? null,
@@ -799,6 +830,7 @@ export function deriveMessagesTimelineRows(input: {
   const foldsByAnchorEntryId = deriveTurnFolds({
     timelineEntries,
     terminalAssistantMessageIds,
+    inheritedTurnIdByEntryId,
     latestTurn: input.latestTurn ?? null,
     unsettledTurnId,
   });
@@ -819,7 +851,8 @@ export function deriveMessagesTimelineRows(input: {
         ? -1
         : timelineEntries.findIndex(
             (entry, index) =>
-              index > latestUserMessageIndex && timelineEntryTurnId(entry) === unsettledTurnId,
+              index > latestUserMessageIndex &&
+              timelineEntryTurnId(entry, inheritedTurnIdByEntryId) === unsettledTurnId,
           );
     activeTurnHeaderIndex =
       firstOwnedAfterUser >= 0 ? firstOwnedAfterUser : latestUserMessageIndex + 1;
@@ -827,7 +860,8 @@ export function deriveMessagesTimelineRows(input: {
   const entryBelongsToActiveTurn = (entry: TimelineEntry, index: number) =>
     input.isWorking &&
     index >= activeTurnHeaderIndex &&
-    (unsettledTurnId === null || timelineEntryTurnId(entry) === unsettledTurnId);
+    (unsettledTurnId === null ||
+      timelineEntryTurnId(entry, inheritedTurnIdByEntryId) === unsettledTurnId);
   const workEntryIsInActiveRun = (entry: WorkLogEntry) =>
     input.isWorking &&
     unsettledTurnId !== null &&
