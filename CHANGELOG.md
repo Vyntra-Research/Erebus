@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.3 - 2026-09-13
+
+### Fixed
+
+- Replace the animated goal line with a compact goal card that keeps its status, objective, elapsed time, and controls visible above the composer.
+
 ## 0.6.2 - 2026-09-13
 
 ### Fixed
