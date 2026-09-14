@@ -6,6 +6,7 @@ import {
   type ModelSelection,
   type OrchestrationEvent,
   type ProviderSendTurnInput,
+  type ProviderThreadGoal,
   type ProviderTurnStartResult,
   ProviderDriverKind,
   type ProjectId,
@@ -388,6 +389,36 @@ const make = Effect.gen(function* () {
               ...(input.requestId ? { requestId: input.requestId } : {}),
             },
             turnId: input.turnId,
+            createdAt: input.createdAt,
+          },
+          createdAt: input.createdAt,
+        }),
+      ),
+    );
+
+  const appendGoalActivity = (input: {
+    readonly threadId: ThreadId;
+    readonly kind: "thread.goal.updated" | "thread.goal.cleared";
+    readonly summary: string;
+    readonly payload: ProviderThreadGoal | Record<string, never>;
+    readonly createdAt: string;
+  }) =>
+    Effect.all({
+      commandId: serverCommandId("provider-goal-activity"),
+      eventId: serverEventId(),
+    }).pipe(
+      Effect.flatMap(({ commandId, eventId }) =>
+        orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId,
+          threadId: input.threadId,
+          activity: {
+            id: eventId,
+            tone: "info",
+            kind: input.kind,
+            summary: input.summary,
+            payload: input.payload,
+            turnId: null,
             createdAt: input.createdAt,
           },
           createdAt: input.createdAt,
@@ -1461,16 +1492,25 @@ const make = Effect.gen(function* () {
       threadId: event.payload.threadId,
       status: event.payload.status,
     }).pipe(
-      Effect.catchCause((cause) =>
-        appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.goal.update.failed",
-          summary: "Goal update failed",
-          detail: formatFailureDetail(cause),
-          turnId: null,
-          createdAt: event.payload.createdAt,
-        }),
-      ),
+      Effect.matchCauseEffect({
+        onFailure: (cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.goal.update.failed",
+            summary: "Goal update failed",
+            detail: formatFailureDetail(cause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          }),
+        onSuccess: (goal) =>
+          appendGoalActivity({
+            threadId: event.payload.threadId,
+            kind: "thread.goal.updated",
+            summary: `Goal ${goal.status}`,
+            payload: goal,
+            createdAt: event.payload.createdAt,
+          }),
+      }),
     );
   });
 
@@ -1489,16 +1529,27 @@ const make = Effect.gen(function* () {
       });
     }
     yield* clearGoal({ threadId: event.payload.threadId }).pipe(
-      Effect.catchCause((cause) =>
-        appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.goal.clear.failed",
-          summary: "Goal removal failed",
-          detail: formatFailureDetail(cause),
-          turnId: null,
-          createdAt: event.payload.createdAt,
-        }),
-      ),
+      Effect.matchCauseEffect({
+        onFailure: (cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.goal.clear.failed",
+            summary: "Goal removal failed",
+            detail: formatFailureDetail(cause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          }),
+        // A false response means the provider already has no goal. Either way,
+        // the local projection must reflect the authoritative empty state.
+        onSuccess: () =>
+          appendGoalActivity({
+            threadId: event.payload.threadId,
+            kind: "thread.goal.cleared",
+            summary: "Goal removed",
+            payload: {},
+            createdAt: event.payload.createdAt,
+          }),
+      }),
     );
   });
 

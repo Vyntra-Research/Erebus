@@ -787,8 +787,8 @@ describe("deriveMessagesTimelineRows", () => {
     expect(expandedRows.map((row) => row.id)).toEqual([
       "user-entry",
       "assistant-first-entry",
-      "turn-fold:turn-1",
       "work-toggle:work-entry-1",
+      "turn-fold:turn-1",
       "assistant-final-entry",
     ]);
     expect(
@@ -895,6 +895,168 @@ describe("deriveMessagesTimelineRows", () => {
     });
 
     expect(expandedRows.some((row) => row.kind === "work-toggle")).toBe(true);
+  });
+
+  it("folds co-agent handbacks into the settled turn and keeps its disclosure by the final reply", () => {
+    const timelineEntries = [
+      {
+        id: "user-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:00Z",
+        message: {
+          id: "user-1" as never,
+          role: "user" as const,
+          text: "Map the surface",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "assistant-first-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:01Z",
+        message: {
+          id: "assistant-first" as never,
+          role: "assistant" as const,
+          text: "I am mapping it now.",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:01Z",
+          updatedAt: "2026-01-01T00:00:01Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "assistant-middle-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:02Z",
+        message: {
+          id: "assistant-middle" as never,
+          role: "assistant" as const,
+          text: "One partition is complete.",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:02Z",
+          updatedAt: "2026-01-01T00:00:02Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "coagent-entry-1",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:03Z",
+        message: {
+          id: "coagent-message:one" as never,
+          role: "user" as const,
+          text: [
+            '<erebus_coagent_message from_thread_id="child-1" from_title="Parser">',
+            "Parser handback",
+            "</erebus_coagent_message>",
+          ].join("\n"),
+          turnId: null,
+          createdAt: "2026-01-01T00:00:03Z",
+          updatedAt: "2026-01-01T00:00:03Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "steer-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:04Z",
+        message: {
+          id: "user-steer" as never,
+          role: "user" as const,
+          text: "Keep the evidence bounded",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:04Z",
+          updatedAt: "2026-01-01T00:00:04Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "assistant-after-steer-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:05Z",
+        message: {
+          id: "assistant-after-steer" as never,
+          role: "assistant" as const,
+          text: "The evidence is bounded.",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:05Z",
+          updatedAt: "2026-01-01T00:00:05Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "coagent-entry-2",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:06Z",
+        message: {
+          id: "coagent-message:two" as never,
+          role: "user" as const,
+          text: [
+            '<erebus_coagent_message from_thread_id="child-2" from_title="Runtime">',
+            "Runtime handback",
+            "</erebus_coagent_message>",
+          ].join("\n"),
+          turnId: null,
+          createdAt: "2026-01-01T00:00:06Z",
+          updatedAt: "2026-01-01T00:00:06Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "assistant-final-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:07Z",
+        message: {
+          id: "assistant-final" as never,
+          role: "assistant" as const,
+          text: "Done.",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:07Z",
+          updatedAt: "2026-01-01T00:00:08Z",
+          streaming: false,
+        },
+      },
+    ];
+
+    const collapsedRows = deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(collapsedRows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "assistant-first-entry",
+      "steer-entry",
+      "turn-fold:turn-1",
+      "assistant-final-entry",
+    ]);
+
+    const expandedRows = deriveMessagesTimelineRows({
+      timelineEntries,
+      expandedTurnIds: new Set(["turn-1" as never]),
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(expandedRows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "assistant-first-entry",
+      "assistant-middle-entry",
+      "coagent-entry-1",
+      "steer-entry",
+      "assistant-after-steer-entry",
+      "coagent-entry-2",
+      "turn-fold:turn-1",
+      "assistant-final-entry",
+    ]);
   });
 
   it("does not fold unkeyed work that is still active", () => {
