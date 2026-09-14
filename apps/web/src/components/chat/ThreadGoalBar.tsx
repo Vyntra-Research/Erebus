@@ -1,5 +1,5 @@
-import { PauseIcon, PlayIcon, TargetIcon, Trash2Icon } from "lucide-react";
-import { useState } from "react";
+import { Maximize2Icon, PauseIcon, PlayIcon, TargetIcon, Trash2Icon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import type { ThreadGoalState } from "../../session-logic";
 import {
@@ -22,34 +22,41 @@ function formatCount(value: number): string {
 }
 
 function formatDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  if (seconds < 60) return `${seconds}s`;
+
+  const remainderSeconds = seconds % 60;
   const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const minutes = Math.floor((seconds % 3600) / 60);
   if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  return `${minutes}m ${remainderSeconds}s`;
 }
 
-const STATUS_LABELS: Record<ThreadGoalState["status"], string> = {
-  active: "Active",
-  paused: "Paused",
-  blocked: "Blocked",
-  usageLimited: "Usage limited",
-  budgetLimited: "Budget limited",
-  complete: "Complete",
+const STATUS_TITLES: Record<ThreadGoalState["status"], string> = {
+  active: "Goal in progress",
+  paused: "Goal paused",
+  blocked: "Goal blocked",
+  usageLimited: "Goal waiting for usage",
+  budgetLimited: "Goal budget reached",
+  complete: "Goal complete",
 };
 
 const STATUS_COLORS: Record<ThreadGoalState["status"], string> = {
-  active: "bg-amber-400",
-  paused: "bg-muted-foreground/70",
-  blocked: "bg-destructive",
-  usageLimited: "bg-orange-500",
-  budgetLimited: "bg-orange-500",
-  complete: "bg-emerald-500",
+  active: "text-amber-500",
+  paused: "text-muted-foreground",
+  blocked: "text-destructive",
+  usageLimited: "text-orange-500",
+  budgetLimited: "text-orange-500",
+  complete: "text-emerald-500",
 };
 
-function goalProgress(goal: ThreadGoalState): number | null {
-  if (goal.status === "complete") return 100;
-  if (!goal.tokenBudget || goal.tokenBudget <= 0) return null;
-  return Math.min(100, Math.max(1, (goal.tokensUsed / goal.tokenBudget) * 100));
+function toMilliseconds(timestamp: number): number {
+  return timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp;
+}
+
+function elapsedSeconds(goal: ThreadGoalState, nowMs: number): number {
+  if (goal.status !== "active") return goal.timeUsedSeconds;
+  return goal.timeUsedSeconds + Math.max(0, (nowMs - toMilliseconds(goal.updatedAt)) / 1000);
 }
 
 export function ThreadGoalBar(props: {
@@ -59,82 +66,108 @@ export function ThreadGoalBar(props: {
   onClear: () => void;
 }) {
   const [clearOpen, setClearOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(Date.now);
+
+  useEffect(() => {
+    if (props.goal?.status !== "active") return;
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [props.goal?.status]);
+
   if (!props.goal) return null;
 
-  const progress = goalProgress(props.goal);
   const nextStatus = props.goal.status === "active" ? "paused" : "active";
+  const duration = formatDuration(elapsedSeconds(props.goal, nowMs));
   const usage = props.goal.tokenBudget
     ? `${formatCount(props.goal.tokensUsed)} / ${formatCount(props.goal.tokenBudget)} tokens`
     : `${formatCount(props.goal.tokensUsed)} tokens`;
 
   return (
     <>
-      <Popover>
-        <PopoverTrigger
-          aria-label={`Goal ${STATUS_LABELS[props.goal.status].toLowerCase()}: ${props.goal.objective}`}
-          className="group/goal block w-full px-3 pb-1 pt-0.5 outline-none"
-          data-thread-goal
+      <div
+        className="relative z-[1] mx-3 -mb-2.5 flex h-11 min-w-0 items-start gap-2 rounded-t-2xl border border-border/80 bg-card px-3 pb-3 pt-2 text-xs shadow-sm"
+        data-thread-goal
+      >
+        <TargetIcon
+          className={`mt-0.5 size-3.5 shrink-0 ${STATUS_COLORS[props.goal.status]}`}
+          aria-hidden="true"
+        />
+        <span className="shrink-0 font-medium text-foreground">
+          {STATUS_TITLES[props.goal.status]}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          {props.goal.objective}
+        </span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">{duration}</span>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost-muted"
+          className="-my-1 size-6 shrink-0 rounded-full"
+          aria-label="Delete goal"
+          disabled={props.busy}
+          onClick={() => setClearOpen(true)}
         >
-          <span className="relative block h-1 overflow-hidden rounded-full bg-border/70">
-            <span
-              className={`absolute inset-y-0 left-0 rounded-full transition-[width,background-color] duration-300 ${STATUS_COLORS[props.goal.status]} ${progress === null && props.goal.status === "active" ? "animate-pulse" : ""}`}
-              style={{ width: progress === null ? "100%" : `${progress}%` }}
-            />
-          </span>
-        </PopoverTrigger>
-        <PopoverPopup
-          side="top"
-          align="start"
-          sideOffset={6}
-          className="w-96 max-w-[calc(100vw-2rem)]"
-        >
-          <div className="space-y-3">
+          <Trash2Icon className="size-3.5" aria-hidden="true" />
+        </Button>
+        {props.goal.status !== "complete" ? (
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost-muted"
+            className="-my-1 size-6 shrink-0 rounded-full"
+            aria-label={nextStatus === "paused" ? "Pause goal" : "Resume goal"}
+            disabled={props.busy}
+            onClick={() => props.onSetStatus(nextStatus)}
+          >
+            {nextStatus === "paused" ? (
+              <PauseIcon className="size-3.5" aria-hidden="true" />
+            ) : (
+              <PlayIcon className="size-3.5" aria-hidden="true" />
+            )}
+          </Button>
+        ) : null}
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost-muted"
+                className="-my-1 size-6 shrink-0 rounded-full"
+                aria-label="Show goal details"
+              >
+                <Maximize2Icon className="size-3.5" aria-hidden="true" />
+              </Button>
+            }
+          />
+          <PopoverPopup
+            side="top"
+            align="end"
+            sideOffset={8}
+            className="w-96 max-w-[calc(100vw-2rem)]"
+          >
             <div className="flex items-start gap-2.5">
               <TargetIcon
-                className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                className={`mt-0.5 size-4 shrink-0 ${STATUS_COLORS[props.goal.status]}`}
                 aria-hidden="true"
               />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">Goal</span>
-                  <span>{STATUS_LABELS[props.goal.status]}</span>
+                  <span className="font-medium text-foreground">
+                    {STATUS_TITLES[props.goal.status]}
+                  </span>
                   <span aria-hidden="true">·</span>
-                  <span>{formatDuration(props.goal.timeUsedSeconds)}</span>
+                  <span>{duration}</span>
                   <span aria-hidden="true">·</span>
                   <span>{usage}</span>
                 </div>
                 <p className="mt-1 text-sm leading-5 text-foreground">{props.goal.objective}</p>
               </div>
             </div>
-            <div className="flex items-center justify-end gap-1">
-              {props.goal.status !== "complete" ? (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  disabled={props.busy}
-                  onClick={() => props.onSetStatus(nextStatus)}
-                >
-                  {nextStatus === "paused" ? (
-                    <PauseIcon className="size-3.5" aria-hidden="true" />
-                  ) : (
-                    <PlayIcon className="size-3.5" aria-hidden="true" />
-                  )}
-                  {nextStatus === "paused" ? "Pause" : "Resume"}
-                </Button>
-              ) : null}
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Delete goal"
-                disabled={props.busy}
-                onClick={() => setClearOpen(true)}
-              >
-                <Trash2Icon className="size-3.5" aria-hidden="true" />
-              </Button>
-            </div>
-          </div>
-        </PopoverPopup>
-      </Popover>
+          </PopoverPopup>
+        </Popover>
+      </div>
 
       <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
         <AlertDialogPopup>
