@@ -84,89 +84,88 @@ export function ThreadGoalBar(props: {
 
   return (
     <>
-      <div
-        className="relative z-[1] mx-3 -mb-2.5 flex h-11 min-w-0 items-start gap-2 rounded-t-2xl border border-border/80 bg-card px-3 pb-3 pt-2 text-xs shadow-sm"
-        data-thread-goal
-      >
-        <TargetIcon
-          className={`mt-0.5 size-3.5 shrink-0 ${STATUS_COLORS[props.goal.status]}`}
-          aria-hidden="true"
-        />
-        <span className="shrink-0 font-medium text-foreground">
-          {STATUS_TITLES[props.goal.status]}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {props.goal.objective}
-        </span>
-        <span className="shrink-0 tabular-nums text-muted-foreground">{duration}</span>
-        <Button
-          type="button"
-          size="icon-xs"
-          variant="ghost-muted"
-          className="-my-1 size-6 shrink-0 rounded-full"
-          aria-label="Delete goal"
-          disabled={props.busy}
-          onClick={() => setClearOpen(true)}
-        >
-          <Trash2Icon className="size-3.5" aria-hidden="true" />
-        </Button>
-        {props.goal.status !== "complete" ? (
+      <div className="chat-composer-top-drawer" data-thread-goal>
+        <div className="flex min-w-0 items-center gap-2 px-3 py-1.5 text-xs sm:px-4">
+          <TargetIcon
+            className={`size-3.5 shrink-0 ${STATUS_COLORS[props.goal.status]}`}
+            aria-hidden="true"
+          />
+          <span className="shrink-0 font-medium text-foreground">
+            {STATUS_TITLES[props.goal.status]}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {props.goal.objective}
+          </span>
+          <span className="shrink-0 tabular-nums text-muted-foreground">{duration}</span>
           <Button
             type="button"
             size="icon-xs"
             variant="ghost-muted"
-            className="-my-1 size-6 shrink-0 rounded-full"
-            aria-label={nextStatus === "paused" ? "Pause goal" : "Resume goal"}
+            className="size-6 shrink-0 rounded-full"
+            aria-label="Delete goal"
             disabled={props.busy}
-            onClick={() => props.onSetStatus(nextStatus)}
+            onClick={() => setClearOpen(true)}
           >
-            {nextStatus === "paused" ? (
-              <PauseIcon className="size-3.5" aria-hidden="true" />
-            ) : (
-              <PlayIcon className="size-3.5" aria-hidden="true" />
-            )}
+            <Trash2Icon className="size-3.5" aria-hidden="true" />
           </Button>
-        ) : null}
-        <Popover>
-          <PopoverTrigger
-            render={
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost-muted"
-                className="-my-1 size-6 shrink-0 rounded-full"
-                aria-label="Show goal details"
-              >
-                <Maximize2Icon className="size-3.5" aria-hidden="true" />
-              </Button>
-            }
-          />
-          <PopoverPopup
-            side="top"
-            align="end"
-            sideOffset={8}
-            className="w-96 max-w-[calc(100vw-2rem)]"
-          >
-            <div className="flex items-start gap-2.5">
-              <TargetIcon
-                className={`mt-0.5 size-4 shrink-0 ${STATUS_COLORS[props.goal.status]}`}
-                aria-hidden="true"
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">
-                    {STATUS_TITLES[props.goal.status]}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span>{duration}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{usage}</span>
+          {props.goal.status !== "complete" ? (
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost-muted"
+              className="size-6 shrink-0 rounded-full"
+              aria-label={nextStatus === "paused" ? "Pause goal" : "Resume goal"}
+              disabled={props.busy}
+              onClick={() => props.onSetStatus(nextStatus)}
+            >
+              {nextStatus === "paused" ? (
+                <PauseIcon className="size-3.5" aria-hidden="true" />
+              ) : (
+                <PlayIcon className="size-3.5" aria-hidden="true" />
+              )}
+            </Button>
+          ) : null}
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  className="size-6 shrink-0 rounded-full"
+                  aria-label="Show goal details"
+                >
+                  <Maximize2Icon className="size-3.5" aria-hidden="true" />
+                </Button>
+              }
+            />
+            <PopoverPopup
+              side="top"
+              align="end"
+              sideOffset={8}
+              className="w-96 max-w-[calc(100vw-2rem)]"
+            >
+              <div className="flex items-start gap-2.5">
+                <TargetIcon
+                  className={`mt-0.5 size-4 shrink-0 ${STATUS_COLORS[props.goal.status]}`}
+                  aria-hidden="true"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      {STATUS_TITLES[props.goal.status]}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>{duration}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{usage}</span>
+                  </div>
+                  <p className="mt-1 text-sm leading-5 text-foreground">{props.goal.objective}</p>
                 </div>
-                <p className="mt-1 text-sm leading-5 text-foreground">{props.goal.objective}</p>
               </div>
-            </div>
-          </PopoverPopup>
-        </Popover>
+            </PopoverPopup>
+          </Popover>
+        </div>
       </div>
 
       <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
