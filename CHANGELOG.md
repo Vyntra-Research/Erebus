@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4 - 2026-09-14
+
+### Fixed
+
+- Align the native goal card with the composer and remove its duplicate lower border.
+
 ## 0.6.3 - 2026-09-13
 
 ### Fixed
