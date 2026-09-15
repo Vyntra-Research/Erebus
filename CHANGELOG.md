@@ -1,9 +1,11 @@
 # Changelog
 
-## 0.6.7 - 2026-09-15
+## 0.6.8 - 2026-09-15
 
 ### Fixed
 
+- Keep Judge and task coordination tools out of the browser MCP catalog while preserving the authorized research fallback.
+- Fold resolved tool approvals and co-agent messages into their matching completed run, including when several turns follow one user message.
 - Wait for desktop bootstrap delivery and stop startup when the required envelope is missing, rather than silently starting in web mode.
 - Verify desktop authentication before marking the local server ready, including when another server reports the same version.
 

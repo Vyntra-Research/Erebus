@@ -193,4 +193,4 @@ const TransportLive = McpServer.layerHttp({
   protocols: [McpProtocol.v2025_06_18],
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = RegistrationLive.pipe(Layer.provideMerge(TransportLive));
+export const layer = RegistrationLive.pipe(Layer.provideMerge(TransportLive), Layer.fresh);

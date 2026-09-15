@@ -223,4 +223,8 @@ const McpTransportLive = McpServer.layerHttp({
   protocols: [McpProtocol.v2025_06_18],
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = PreviewToolkitRegistrationLive.pipe(Layer.provideMerge(McpTransportLive));
+// Each endpoint owns its tool registry; only the credential registry is shared.
+export const layer = PreviewToolkitRegistrationLive.pipe(
+  Layer.provideMerge(McpTransportLive),
+  Layer.fresh,
+);

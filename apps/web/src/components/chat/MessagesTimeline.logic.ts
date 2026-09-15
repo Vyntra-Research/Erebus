@@ -579,7 +579,8 @@ function timelineEntryTurnId(
   inheritedTurnIdByEntryId?: ReadonlyMap<string, TurnId>,
 ): TurnId | null {
   if (entry.kind === "message") {
-    if (entry.message.role === "assistant") return entry.message.turnId ?? null;
+    if (entry.message.role === "assistant" || messageIsCoagentCoordination(entry.message))
+      return entry.message.turnId ?? inheritedTurnIdByEntryId?.get(entry.id) ?? null;
     return inheritedTurnIdByEntryId?.get(entry.id) ?? null;
   }
   if (entry.kind === "turn-plan") {
@@ -592,7 +593,10 @@ function timelineEntryTurnId(
 }
 
 function explicitFoldTurnId(entry: TimelineEntry): TurnId | null {
-  if (entry.kind === "message" && entry.message.role === "assistant") {
+  if (
+    entry.kind === "message" &&
+    (entry.message.role === "assistant" || messageIsCoagentCoordination(entry.message))
+  ) {
     return entry.message.turnId ?? null;
   }
   return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
@@ -617,32 +621,62 @@ function workEntryCanInheritFoldTurn(entry: WorkLogEntry): boolean {
 
 /**
  * Some provider lifecycle events omit turnId even though they occur inside a
- * single response. Infer ownership only when the user-message-delimited span
- * contains exactly one explicit turn. Ambiguous spans stay untouched.
+ * response. Use neighboring keyed entries within each user-message-delimited
+ * span. Between different turns, a completed assistant response separates
+ * trailing coordination from work that still belongs to that response.
  */
 function deriveInheritedFoldTurnIds(
   timelineEntries: ReadonlyArray<TimelineEntry>,
 ): ReadonlyMap<string, TurnId> {
   const inheritedTurnIdByEntryId = new Map<string, TurnId>();
+  const assistantEndByTurnId = new Map<TurnId, string>();
+  for (const entry of timelineEntries) {
+    if (entry.kind !== "message" || entry.message.role !== "assistant" || !entry.message.turnId)
+      continue;
+    assistantEndByTurnId.set(
+      entry.message.turnId,
+      maxIsoTimestamp(
+        assistantEndByTurnId.get(entry.message.turnId) ?? null,
+        entry.message.updatedAt,
+      ) ?? entry.message.updatedAt,
+    );
+  }
   let spanStart = 0;
 
   const attachUnkeyedSettledEntries = (spanEnd: number) => {
     const span = timelineEntries.slice(spanStart, spanEnd);
-    const explicitTurnIds = new Set<TurnId>();
-    for (const entry of span) {
-      const turnId = explicitFoldTurnId(entry);
-      if (turnId !== null) explicitTurnIds.add(turnId);
+    const nextTurnIds: Array<TurnId | null> = Array.from({ length: span.length }, () => null);
+    let nextTurnId: TurnId | null = null;
+    for (let index = span.length - 1; index >= 0; index -= 1) {
+      const entry = span[index];
+      if (!entry) continue;
+      nextTurnId = explicitFoldTurnId(entry) ?? nextTurnId;
+      nextTurnIds[index] = nextTurnId;
     }
-    if (explicitTurnIds.size !== 1) return;
-
-    const [onlyTurnId] = explicitTurnIds;
-    if (!onlyTurnId) return;
-    for (const entry of span) {
-      if (entry.kind === "work" && workEntryCanInheritFoldTurn(entry.entry)) {
-        inheritedTurnIdByEntryId.set(entry.id, onlyTurnId);
-      } else if (entry.kind === "message" && messageIsCoagentCoordination(entry.message)) {
-        inheritedTurnIdByEntryId.set(entry.id, onlyTurnId);
+    let previousTurnId: TurnId | null = null;
+    for (let index = 0; index < span.length; index += 1) {
+      const entry = span[index];
+      if (!entry) continue;
+      const keyedTurnId = explicitFoldTurnId(entry);
+      if (keyedTurnId !== null) {
+        previousTurnId = keyedTurnId;
+        continue;
       }
+      const canInherit =
+        (entry.kind === "work" && workEntryCanInheritFoldTurn(entry.entry)) ||
+        (entry.kind === "message" && messageIsCoagentCoordination(entry.message));
+      if (!canInherit) continue;
+      const followingTurnId = nextTurnIds[index] ?? null;
+      let ownerTurnId = previousTurnId ?? followingTurnId;
+      if (previousTurnId && followingTurnId && previousTurnId !== followingTurnId) {
+        const previousEnd = assistantEndByTurnId.get(previousTurnId);
+        ownerTurnId = previousEnd
+          ? Date.parse(entry.createdAt) > Date.parse(previousEnd)
+            ? followingTurnId
+            : previousTurnId
+          : null;
+      }
+      if (ownerTurnId) inheritedTurnIdByEntryId.set(entry.id, ownerTurnId);
     }
   };
 
@@ -661,7 +695,7 @@ function deriveInheritedFoldTurnIds(
 /**
  * Settled turns keep their first and terminal assistant messages visible.
  * Everything between them folds behind a "Worked for ..." row anchored at
- * the first hidden entry. Keeping both ends prevents a short follow-up from
+ * the final response. Keeping both ends prevents a short follow-up from
  * hiding a substantive opening response while still bounding noisy turns.
  */
 function deriveTurnFolds(input: {
@@ -729,7 +763,8 @@ function deriveTurnFolds(input: {
       continue;
     }
     const firstAssistantEntry = group.entries.find(
-      (entry): entry is Extract<TimelineEntry, { kind: "message" }> => entry.kind === "message",
+      (entry): entry is Extract<TimelineEntry, { kind: "message" }> =>
+        entry.kind === "message" && entry.message.role === "assistant",
     );
     const hiddenEntryIds = new Set<string>();
     for (const entry of group.entries) {

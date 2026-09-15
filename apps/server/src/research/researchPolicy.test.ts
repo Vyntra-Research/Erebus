@@ -41,7 +41,7 @@ it("keeps Judge independent, artifact-bounded, and campaign-free", () => {
 });
 
 it("records the campaign-free policy revision and pinned evaluator", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 20);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 21);
   assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 24);
   assert.equal(RESEARCH_INTERNAL_POLICY.version, 24);
   assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 600);

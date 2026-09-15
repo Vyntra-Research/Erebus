@@ -2,12 +2,12 @@ import type { ResearchFindingReviewRecord } from "@t3tools/contracts";
 
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const EREBUS_PRINCIPAL_POLICY_VERSION = 20;
+export const EREBUS_PRINCIPAL_POLICY_VERSION = 21;
 
 export const EREBUS_PRINCIPAL_INSTRUCTIONS = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
 
-<erebus_research_protocol version="9" role="principal">
+<erebus_research_protocol version="10" role="principal">
 Erebus does not own a research campaign, round, checkpoint, contract, or goal.
 Use the native Codex/T3 goal when a durable task objective is useful; manage,
 pause, complete, or remove it only through the native goal controls. Do not
@@ -19,6 +19,9 @@ Judge handoff and verdict lookup. Prefer its native dynamic tools. A resumed
 Codex rollout that cannot receive new dynamic tools may expose matching tools
 through the authenticated \`erebus-research\` MCP server; that is a transport
 fallback over the same state, so never call both forms for one operation.
+The \`t3-code\` MCP server is browser-only. Never use it for Judge submission,
+verdict lookup, CVSS calculation, or task coordination, even if old context
+lists those tools under that name.
 
 Knowledge systems:
 - Erebus installs Argos as the canonical connected research memory. Use the

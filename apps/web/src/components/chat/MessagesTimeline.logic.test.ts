@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
+import { MessageId, TurnId } from "@t3tools/contracts";
+import type { TimelineEntry } from "../../session-logic";
 import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
@@ -1057,6 +1059,119 @@ describe("deriveMessagesTimelineRows", () => {
       "turn-fold:turn-1",
       "assistant-final-entry",
     ]);
+  });
+
+  it("folds approvals and leading co-agent messages when one user span contains multiple turns", () => {
+    const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}Z`;
+    const assistant = (id: string, turn: string, second: number): TimelineEntry => ({
+      id,
+      kind: "message",
+      createdAt: at(second),
+      message: {
+        id: MessageId.make(id),
+        role: "assistant",
+        text: id,
+        turnId: TurnId.make(turn),
+        createdAt: at(second),
+        updatedAt: at(second),
+        streaming: false,
+      },
+    });
+    const approval = (id: string, second: number): TimelineEntry => ({
+      id,
+      kind: "work",
+      createdAt: at(second),
+      entry: {
+        id,
+        createdAt: at(second),
+        turnId: null,
+        label: "Approval resolved",
+        tone: "info",
+        sourceActivityKind: "approval.resolved",
+      },
+    });
+    const timelineEntries: Array<TimelineEntry> = [
+      {
+        id: "user",
+        kind: "message",
+        createdAt: at(0),
+        message: {
+          id: MessageId.make("user"),
+          role: "user",
+          text: "Continue",
+          turnId: null,
+          createdAt: at(0),
+          updatedAt: at(0),
+          streaming: false,
+        },
+      },
+      assistant("first-1", "turn-1", 1),
+      approval("approval-1", 2),
+      assistant("final-1", "turn-1", 3),
+      {
+        id: "coordination",
+        kind: "message",
+        createdAt: at(4),
+        message: {
+          id: MessageId.make("coagent-message:child"),
+          role: "user",
+          text: '<erebus_coagent_message from_thread_id="child" from_title="Parser">\nHandback\n</erebus_coagent_message>',
+          turnId: null,
+          createdAt: at(4),
+          updatedAt: at(4),
+          streaming: false,
+        },
+      },
+      approval("approval-2", 5),
+      assistant("first-2", "turn-2", 6),
+      assistant("final-2", "turn-2", 8),
+    ];
+    const input = {
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    };
+    const rows = deriveMessagesTimelineRows(input);
+    expect(rows.map((row) => row.id)).toEqual([
+      "user",
+      "first-1",
+      "turn-fold:turn-1",
+      "final-1",
+      "first-2",
+      "turn-fold:turn-2",
+      "final-2",
+    ]);
+    const expanded = deriveMessagesTimelineRows({
+      ...input,
+      expandedTurnIds: new Set([TurnId.make("turn-2")]),
+    });
+    expect(expanded.some((row) => row.id === "coordination")).toBe(true);
+    expect(
+      expanded.some(
+        (row) =>
+          row.kind === "work" && row.groupedEntries.some((entry) => entry.id === "approval-2"),
+      ),
+    ).toBe(true);
+    expect(
+      expanded.some(
+        (row) =>
+          row.kind === "work" && row.groupedEntries.some((entry) => entry.id === "approval-1"),
+      ),
+    ).toBe(false);
+    const running = deriveMessagesTimelineRows({
+      ...input,
+      latestTurn: {
+        turnId: TurnId.make("turn-2"),
+        state: "running",
+        startedAt: at(4),
+        completedAt: null,
+      },
+      runningTurnId: TurnId.make("turn-2"),
+    });
+    expect(running.some((row) => row.id === "coordination")).toBe(true);
+    expect(running.some((row) => row.kind === "turn-fold" && row.turnId === "turn-2")).toBe(false);
   });
 
   it("does not fold unkeyed work that is still active", () => {
