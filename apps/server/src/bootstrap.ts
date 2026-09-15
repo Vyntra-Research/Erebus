@@ -63,11 +63,21 @@ export class BootstrapEnvelopeDecodeError extends Schema.TaggedErrorClass<Bootst
   }
 }
 
+export class BootstrapEnvelopeMissingError extends Schema.TaggedErrorClass<BootstrapEnvelopeMissingError>()(
+  "BootstrapEnvelopeMissingError",
+  { fd: Schema.Number, timeoutMs: Schema.Number },
+) {
+  override get message(): string {
+    return `No bootstrap envelope arrived on file descriptor ${this.fd} within ${this.timeoutMs}ms.`;
+  }
+}
+
 export const BootstrapError = Schema.Union([
   BootstrapFdStatError,
   BootstrapInputStreamOpenError,
   BootstrapEnvelopeReadError,
   BootstrapEnvelopeDecodeError,
+  BootstrapEnvelopeMissingError,
 ]);
 export type BootstrapError = typeof BootstrapError.Type;
 
@@ -143,6 +153,17 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
 
     return Effect.sync(cleanup);
   }).pipe(Effect.timeoutOption(timeoutMs), Effect.map(Option.flatten));
+});
+
+export const readRequiredBootstrapEnvelope = Effect.fn("readRequiredBootstrapEnvelope")(function* <
+  A,
+  I,
+>(schema: Schema.Codec<A, I>, fd: number, timeoutMs = 10_000) {
+  const envelope = yield* readBootstrapEnvelope(schema, fd, { timeoutMs });
+  if (Option.isNone(envelope)) {
+    return yield* new BootstrapEnvelopeMissingError({ fd, timeoutMs });
+  }
+  return envelope.value;
 });
 
 const isUnavailableBootstrapFdError = Predicate.compose(

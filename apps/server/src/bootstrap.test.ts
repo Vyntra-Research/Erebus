@@ -1,7 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
-import * as NodePath from "node:path";
-import * as NodeChildProcess from "node:child_process";
+import * as NodeStream from "node:stream";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as FileSystem from "effect/FileSystem";
@@ -17,7 +16,9 @@ import {
   BootstrapEnvelopeDecodeError,
   BootstrapFdStatError,
   BootstrapInputStreamOpenError,
+  BootstrapEnvelopeMissingError,
   readBootstrapEnvelope,
+  readRequiredBootstrapEnvelope,
 } from "./bootstrap.ts";
 import { assertNone, assertSome } from "@effect/vitest/utils";
 
@@ -26,11 +27,21 @@ const openSyncInterceptor = vi.hoisted(() => ({
   errorCode: "ENXIO",
 }));
 const fstatSyncInterceptor = vi.hoisted(() => ({ failFd: null as number | null }));
+const inputInterceptor = vi.hoisted(() => ({
+  fd: null as number | null,
+  stream: null as import("node:stream").Readable | null,
+}));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
+    createReadStream: (...args: Parameters<typeof actual.createReadStream>) =>
+      typeof args[1] === "object" &&
+      args[1]?.fd === inputInterceptor.fd &&
+      inputInterceptor.stream !== null
+        ? inputInterceptor.stream
+        : actual.createReadStream(...args),
     openSync: (...args: Parameters<typeof actual.openSync>) => {
       const [filePath, flags] = args;
       if (
@@ -59,6 +70,14 @@ const TestEnvelopeSchema = Schema.Struct({ mode: Schema.String });
 const encodeTestEnvelopeSchema = Schema.encodeEffect(Schema.fromJsonString(TestEnvelopeSchema));
 
 it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
+  const openEnvelopeFile = Effect.fn(function* (filePath: string) {
+    if ((yield* HostProcessPlatform) === "win32") return NodeFS.openSync(filePath, "r");
+    return yield* Effect.acquireRelease(
+      Effect.sync(() => NodeFS.openSync(filePath, "r")),
+      (fd) => Effect.sync(() => NodeFS.closeSync(fd)),
+    );
+  });
+
   it.effect("reads a bootstrap envelope from a provided fd", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -69,10 +88,7 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
         `${yield* encodeTestEnvelopeSchema({ mode: "desktop" })}\n`,
       );
 
-      const fd = yield* Effect.acquireRelease(
-        Effect.sync(() => NodeFS.openSync(filePath, "r")),
-        (fd) => Effect.sync(() => NodeFS.closeSync(fd)),
-      );
+      const fd = yield* openEnvelopeFile(filePath);
 
       const payload = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, { timeoutMs: 100 });
       assertSome(payload, {
@@ -91,10 +107,7 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
         `${yield* encodeTestEnvelopeSchema({ mode: "desktop" })}\n`,
       );
 
-      // Open without acquireRelease: the direct-stream fallback uses autoClose: true,
-      // so the stream owns the fd lifecycle and closes it asynchronously on end.
-      // Attempting to also close it synchronously in a finalizer races with the
-      // stream's async close and produces an uncaught EBADF.
+      // The direct fallback owns this descriptor on every platform.
       const fd = NodeFS.openSync(filePath, "r");
 
       openSyncInterceptor.failPath = `/proc/self/fd/${fd}`;
@@ -146,7 +159,9 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
 
   it.effect("returns none when the fd is unavailable", () =>
     Effect.gen(function* () {
-      const fd = NodeFS.openSync("/dev/null", "r");
+      const fs = yield* FileSystem.FileSystem;
+      const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-" });
+      const fd = NodeFS.openSync(filePath, "r");
       NodeFS.closeSync(fd);
 
       const payload = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, { timeoutMs: 100 });
@@ -156,8 +171,10 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
 
   it.effect("preserves fd and cause when stat fails for a non-availability reason", () =>
     Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-" });
       const fd = yield* Effect.acquireRelease(
-        Effect.sync(() => NodeFS.openSync("/dev/null", "r")),
+        Effect.sync(() => NodeFS.openSync(filePath, "r")),
         (fd) => Effect.sync(() => NodeFS.closeSync(fd)),
       );
 
@@ -183,10 +200,7 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
       const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-", suffix: ".ndjson" });
       yield* fs.writeFileString(filePath, '{"mode":42}\n');
 
-      const fd = yield* Effect.acquireRelease(
-        Effect.sync(() => NodeFS.openSync(filePath, "r")),
-        (fd) => Effect.sync(() => NodeFS.closeSync(fd)),
-      );
+      const fd = yield* openEnvelopeFile(filePath);
       const error = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, {
         timeoutMs: 100,
       }).pipe(Effect.flip);
@@ -204,37 +218,62 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
   it.effect("returns none when the bootstrap read times out before any value arrives", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bootstrap-" });
-      const fifoPath = NodePath.join(tempDir, "bootstrap.pipe");
-
-      yield* Effect.sync(() => NodeChildProcess.execFileSync("mkfifo", [fifoPath]));
-
-      const _writer = yield* Effect.acquireRelease(
-        Effect.sync(() =>
-          NodeChildProcess.spawn("sh", ["-c", 'exec 3>"$1"; sleep 60', "sh", fifoPath], {
-            stdio: ["ignore", "ignore", "ignore"],
-          }),
-        ),
-        (writer) =>
-          Effect.sync(() => {
-            writer.kill("SIGKILL");
-          }),
-      );
-
+      const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-" });
       const fd = yield* Effect.acquireRelease(
-        Effect.sync(() => NodeFS.openSync(fifoPath, "r")),
+        Effect.sync(() => NodeFS.openSync(filePath, "r")),
         (fd) => Effect.sync(() => NodeFS.closeSync(fd)),
       );
-
-      const fiber = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, {
-        timeoutMs: 100,
-      }).pipe(Effect.forkScoped);
-
-      yield* Effect.yieldNow;
-      yield* TestClock.adjust(Duration.millis(100));
-
-      const payload = yield* Fiber.join(fiber);
-      assertNone(payload);
+      inputInterceptor.fd = fd;
+      inputInterceptor.stream = new NodeStream.PassThrough();
+      try {
+        const fiber = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, {
+          timeoutMs: 100,
+        }).pipe(Effect.provideService(HostProcessPlatform, "win32"), Effect.forkScoped);
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(Duration.millis(100));
+        assertNone(yield* Fiber.join(fiber));
+      } finally {
+        inputInterceptor.fd = null;
+        inputInterceptor.stream = null;
+      }
     }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("allows a required bootstrap to arrive after the old one-second budget", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-" });
+      const fd = yield* Effect.acquireRelease(
+        Effect.sync(() => NodeFS.openSync(filePath, "r")),
+        (fd) => Effect.sync(() => NodeFS.closeSync(fd)),
+      );
+      const stream = new NodeStream.PassThrough();
+      inputInterceptor.fd = fd;
+      inputInterceptor.stream = stream;
+      try {
+        const fiber = yield* readRequiredBootstrapEnvelope(TestEnvelopeSchema, fd).pipe(
+          Effect.provideService(HostProcessPlatform, "win32"),
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(Duration.seconds(2));
+        stream.end('{"mode":"desktop"}\n');
+        assert.deepEqual(yield* Fiber.join(fiber), { mode: "desktop" });
+      } finally {
+        inputInterceptor.fd = null;
+        inputInterceptor.stream = null;
+      }
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("fails a required bootstrap when the input closes without an envelope", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-" });
+      const fd = yield* openEnvelopeFile(filePath);
+      const error = yield* readRequiredBootstrapEnvelope(TestEnvelopeSchema, fd).pipe(Effect.flip);
+      assert.instanceOf(error, BootstrapEnvelopeMissingError);
+      assert.equal(error.fd, fd);
+    }),
   );
 });

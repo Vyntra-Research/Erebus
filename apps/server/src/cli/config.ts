@@ -13,7 +13,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { Argument, Flag } from "effect/unstable/cli";
 
-import { readBootstrapEnvelope } from "../bootstrap.ts";
+import { readRequiredBootstrapEnvelope } from "../bootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
 
@@ -241,7 +241,7 @@ export const resolveServerConfig = (
     const bootstrapFd = Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd;
     const bootstrapEnvelope =
       bootstrapFd !== undefined
-        ? yield* readBootstrapEnvelope(DesktopBackendBootstrap, bootstrapFd)
+        ? Option.some(yield* readRequiredBootstrapEnvelope(DesktopBackendBootstrap, bootstrapFd))
         : Option.none();
     const bootstrap = Option.getOrUndefined(bootstrapEnvelope);
 

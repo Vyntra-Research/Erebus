@@ -33,6 +33,7 @@ const isBackendProcessError = Schema.is(DesktopBackendManager.BackendProcessErro
 const encodeDesktopTelemetryControl = Schema.encodeSync(
   Schema.fromJsonString(DesktopTelemetryControlMessage),
 );
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const baseConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "/electron",
@@ -72,6 +73,8 @@ function makeProcess(options?: {
   readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>;
   readonly kill?: ChildProcessSpawner.ChildProcessHandle["kill"];
   readonly getOutputFd?: ChildProcessSpawner.ChildProcessHandle["getOutputFd"];
+  readonly getInputFd?: ChildProcessSpawner.ChildProcessHandle["getInputFd"];
+  readonly stdin?: ChildProcessSpawner.ChildProcessHandle["stdin"];
 }): ChildProcessSpawner.ChildProcessHandle {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(123),
@@ -81,8 +84,8 @@ function makeProcess(options?: {
     exitCode: options?.exitCode ?? Effect.succeed(ChildProcessSpawner.ExitCode(0)),
     isRunning: Effect.succeed(false),
     kill: options?.kill ?? (() => Effect.void),
-    stdin: Sink.drain,
-    getInputFd: () => Sink.drain,
+    stdin: options?.stdin ?? Sink.drain,
+    getInputFd: options?.getInputFd ?? (() => Sink.drain),
     getOutputFd: options?.getOutputFd ?? (() => Stream.empty),
     unref: Effect.succeed(Effect.void),
   });
@@ -100,10 +103,26 @@ function httpClientLayer(
   handler: (
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse>,
+  bootstrapHandler = (request: HttpClientRequest.HttpClientRequest) =>
+    Effect.succeed(
+      responseForRequest(
+        request,
+        200,
+        encodeJson({
+          access_token: "desktop-bearer-token",
+          issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+          token_type: "Bearer",
+          expires_in: 3600,
+          scope: "orchestration:read orchestration:operate",
+        }),
+      ),
+    ),
 ) {
   return Layer.succeed(
     HttpClient.HttpClient,
-    HttpClient.make((request) => handler(request)),
+    HttpClient.make((request) =>
+      request.url.endsWith("/oauth/token") ? bootstrapHandler(request) : handler(request),
+    ),
   );
 }
 
@@ -200,9 +219,8 @@ describe("DesktopBackendManager", () => {
               spawnedCommand = command;
               if (command._tag === "StandardCommand") {
                 const fd3 = command.options.additionalFds?.fd3;
-                if (fd3?.type === "input" && fd3.stream) {
-                  bootstrapJson = yield* fd3.stream.pipe(Stream.decodeText(), Stream.mkString);
-                }
+                assert.equal(fd3?.type, "input");
+                assert.isUndefined(fd3?.type === "input" ? fd3.stream : undefined);
                 const fd4 = command.options.additionalFds?.fd4;
                 if (fd4?.type === "input" && fd4.stream) {
                   telemetryJson = yield* fd4.stream.pipe(Stream.decodeText(), Stream.mkString);
@@ -210,6 +228,14 @@ describe("DesktopBackendManager", () => {
               }
 
               return makeProcess({
+                getInputFd: (fd) => {
+                  assert.equal(fd, 3);
+                  return Sink.forEach((chunk: Uint8Array) =>
+                    Effect.sync(() => {
+                      bootstrapJson += new TextDecoder().decode(chunk);
+                    }),
+                  );
+                },
                 exitCode: Deferred.await(ready).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
               });
             }),
@@ -340,6 +366,81 @@ describe("DesktopBackendManager", () => {
       );
       assert.isTrue(isBackendProcessError(error));
     }),
+  );
+
+  it.effect("awaits stdin bootstrap delivery before reporting the process started", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let delivered = "";
+        let started = false;
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) => {
+            assert.equal(command._tag, "StandardCommand");
+            if (command._tag === "StandardCommand") assert.equal(command.options.stdin, "pipe");
+            return Effect.succeed(
+              makeProcess({
+                stdin: Sink.forEach((chunk: Uint8Array) =>
+                  Effect.sync(() => {
+                    delivered += new TextDecoder().decode(chunk);
+                  }),
+                ),
+              }),
+            );
+          }),
+        );
+        yield* DesktopBackendManager.runBackendProcess({
+          ...baseConfig,
+          bootstrapDelivery: "stdin",
+          args: [baseConfig.entryPath, "--bootstrap-fd", "0"],
+          desktopTelemetryStream: Stream.empty,
+          onStarted: () =>
+            Effect.sync(() => {
+              assert.isNotEmpty(delivered);
+              started = true;
+            }),
+        }).pipe(Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)));
+        assert.isTrue(started);
+        assert.deepEqual(yield* decodeBootstrap(delivered), baseConfig.bootstrap);
+      }),
+    ),
+  );
+
+  it.effect("surfaces bootstrap write failures instead of reporting readiness", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const writeCause = PlatformError.systemError({
+          _tag: "Unknown",
+          module: "ChildProcessSpawner",
+          method: "fromWritable(fd3)",
+          description: "bootstrap-write-secret-sentinel",
+        });
+        let started = false;
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.succeed(
+              makeProcess({
+                getInputFd: () => Sink.fail(writeCause),
+              }),
+            ),
+          ),
+        );
+        const error = yield* DesktopBackendManager.runBackendProcess({
+          ...baseConfig,
+          desktopTelemetryStream: Stream.empty,
+          onStarted: () =>
+            Effect.sync(() => {
+              started = true;
+            }),
+        }).pipe(Effect.flip, Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)));
+        assert.instanceOf(error, DesktopBackendManager.BackendProcessBootstrapWriteError);
+        assert.equal(error.pid, 123);
+        assert.strictEqual(error.cause, writeCause);
+        assert.notInclude(error.message, "secret-sentinel");
+        assert.isFalse(started);
+      }),
+    ),
   );
 
   it.effect("preserves spawn failures without deriving their message from the cause", () =>
@@ -743,6 +844,67 @@ describe("DesktopBackendManager", () => {
 
         yield* TestClock.adjust(Duration.millis(100));
         assert.equal(readyCount, 1);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("requires the current desktop credential even when the server version matches", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let attempts = 0;
+        let ready = false;
+        const rejected = yield* Deferred.make<void>();
+        const authLayer = httpClientLayer(
+          (request) =>
+            Effect.succeed(responseForRequest(request, 200, '{"serverVersion":"0.6.7"}')),
+          (request) =>
+            Effect.gen(function* () {
+              attempts += 1;
+              if (attempts === 1) {
+                yield* Deferred.succeed(rejected, void 0);
+                return responseForRequest(
+                  request,
+                  401,
+                  encodeJson({
+                    _tag: "EnvironmentAuthInvalidError",
+                    code: "invalid_credential",
+                    message: "Invalid bootstrap credential",
+                  }),
+                );
+              }
+              return responseForRequest(
+                request,
+                200,
+                encodeJson({
+                  access_token: "current-desktop-bearer",
+                  issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+                  token_type: "Bearer",
+                  expires_in: 3600,
+                  scope: "orchestration:read",
+                }),
+              );
+            }),
+        );
+        const probe = yield* DesktopBackendManager.waitForHttpReady({
+          ...baseConfig,
+          timeout: Duration.seconds(1),
+          expectedServerVersion: "0.6.7",
+          desktopBootstrapToken: "current-desktop-bootstrap",
+        }).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              ready = true;
+            }),
+          ),
+          Effect.provide(authLayer),
+          Effect.forkChild,
+        );
+        yield* Deferred.await(rejected);
+        assert.isFalse(ready);
+        yield* TestClock.adjust(Duration.millis(100));
+        yield* Fiber.join(probe);
+        assert.isTrue(ready);
+        assert.equal(attempts, 2);
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );

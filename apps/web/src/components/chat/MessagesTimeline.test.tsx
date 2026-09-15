@@ -4,6 +4,7 @@ import { createRef, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type { LegendListRef } from "@legendapp/list/react";
+import type { TimelineEntry } from "../../session-logic";
 
 vi.mock("@legendapp/list/react", async () => {
   const legendListTestId = "legend-list";
@@ -906,6 +907,79 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("The parser path is exhausted");
     expect(markup).not.toContain("erebus_coagent_message");
     expect(markup).not.toContain("not a user-authored request");
+  });
+
+  it("keeps approvals and co-agent handbacks behind expandable completed runs", () => {
+    const at = (second: number) => `2026-03-17T19:12:${String(second).padStart(2, "0")}.000Z`;
+    const assistant = (id: string, turn: string, second: number): TimelineEntry => ({
+      id,
+      kind: "message",
+      createdAt: at(second),
+      message: {
+        id: MessageId.make(id),
+        role: "assistant",
+        text: id,
+        turnId: TurnId.make(turn),
+        createdAt: at(second),
+        updatedAt: at(second),
+        streaming: false,
+      },
+    });
+    const timelineEntries: Array<TimelineEntry> = [
+      assistant("Opening response", "turn-1", 1),
+      {
+        id: "approval-1",
+        kind: "work",
+        createdAt: at(2),
+        entry: {
+          id: "approval-1",
+          createdAt: at(2),
+          turnId: null,
+          label: "Approval resolved",
+          tone: "info",
+          sourceActivityKind: "approval.resolved",
+        },
+      },
+      assistant("First final response", "turn-1", 3),
+      {
+        id: "coordination",
+        kind: "message",
+        createdAt: at(4),
+        message: {
+          id: MessageId.make("coagent-message:child"),
+          role: "user",
+          text: '<erebus_coagent_message from_thread_id="child" from_title="Parser sink">\nHandback evidence\n</erebus_coagent_message>',
+          turnId: null,
+          createdAt: at(4),
+          updatedAt: at(4),
+          streaming: false,
+        },
+      },
+      {
+        id: "approval-2",
+        kind: "work",
+        createdAt: at(5),
+        entry: {
+          id: "approval-2",
+          createdAt: at(5),
+          turnId: null,
+          label: "Approval resolved",
+          tone: "info",
+          sourceActivityKind: "approval.resolved",
+        },
+      },
+      assistant("Continuation response", "turn-2", 6),
+      assistant("Second final response", "turn-2", 8),
+    ];
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={timelineEntries} />,
+    );
+    expect(markup).not.toContain("Approval resolved");
+    expect(markup).not.toContain("Handback evidence");
+    expect(markup).toContain("First final response");
+    expect(markup).toContain("Second final response");
+    expect(markup.match(/Worked for/g)).toHaveLength(2);
+    expect(markup.match(/aria-expanded="false"/g)).toHaveLength(2);
   });
 
   it("renders completed context compaction as settled work", () => {
