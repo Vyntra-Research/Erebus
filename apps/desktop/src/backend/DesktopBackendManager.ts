@@ -49,6 +49,7 @@ import {
   type DesktopTelemetryControlMessage as DesktopTelemetryControlMessageValue,
 } from "@t3tools/contracts";
 import { waitForHttpReady as waitForHttpReadyShared } from "@t3tools/shared/httpReadiness";
+import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
@@ -166,6 +167,15 @@ export class BackendProcessSpawnError extends Schema.TaggedErrorClass<BackendPro
   }
 }
 
+export class BackendProcessBootstrapWriteError extends Schema.TaggedErrorClass<BackendProcessBootstrapWriteError>()(
+  "BackendProcessBootstrapWriteError",
+  { ...backendProcessContextSchema, pid: Schema.Number, cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return `Failed to deliver the desktop bootstrap to backend process ${this.pid}.`;
+  }
+}
+
 export class BackendProcessOutputReadError extends Schema.TaggedErrorClass<BackendProcessOutputReadError>()(
   "BackendProcessOutputReadError",
   {
@@ -215,6 +225,7 @@ export class BackendProcessExitStatusError extends Schema.TaggedErrorClass<Backe
 export const BackendProcessError = Schema.Union([
   BackendProcessBootstrapEncodeError,
   BackendProcessSpawnError,
+  BackendProcessBootstrapWriteError,
   BackendProcessExitStatusError,
 ]);
 export type BackendProcessError = typeof BackendProcessError.Type;
@@ -369,33 +380,54 @@ const closeRun = (
   );
 };
 
-export const waitForHttpReady = (
+export const waitForHttpReady = Effect.fn("desktop.backendProcess.waitForHttpReady")(function* (
   options: BackendProcessContext & {
     readonly timeout: Duration.Duration;
     readonly expectedServerVersion?: string;
+    readonly desktopBootstrapToken?: string;
   },
-): Effect.Effect<void, BackendReadinessTimeoutError, HttpClient.HttpClient> => {
+): Effect.fn.Return<void, BackendReadinessTimeoutError, HttpClient.HttpClient> {
+  const httpClient = yield* HttpClient.HttpClient;
   const readinessUrl = new URL(BACKEND_READINESS_PATH, options.httpBaseUrl);
-  return waitForHttpReadyShared({
+  return yield* waitForHttpReadyShared({
     baseUrl: options.httpBaseUrl.href,
     path: BACKEND_READINESS_PATH,
     timeoutMs: Duration.toMillis(options.timeout),
     intervalMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_INTERVAL),
     probeTimeoutMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
-    ...(options.expectedServerVersion === undefined
+    ...(options.expectedServerVersion === undefined && options.desktopBootstrapToken === undefined
       ? {}
       : {
-          isReadyResponse: (response: HttpClientResponse.HttpClientResponse) =>
-            response.json.pipe(
-              Effect.map(
-                (body) =>
-                  typeof body === "object" &&
-                  body !== null &&
-                  "serverVersion" in body &&
-                  body.serverVersion === options.expectedServerVersion,
-              ),
+          isReadyResponse: Effect.fn("desktop.backendProcess.checkReadyResponse")(function* (
+            response: HttpClientResponse.HttpClientResponse,
+          ) {
+            if (options.expectedServerVersion !== undefined) {
+              const matches = yield* response.json.pipe(
+                Effect.map(
+                  (body) =>
+                    typeof body === "object" &&
+                    body !== null &&
+                    "serverVersion" in body &&
+                    body.serverVersion === options.expectedServerVersion,
+                ),
+                Effect.orElseSucceed(() => false),
+              );
+              if (!matches) return false;
+            } else {
+              yield* response.text.pipe(Effect.ignore);
+            }
+            if (options.desktopBootstrapToken === undefined) return true;
+            return yield* bootstrapRemoteBearerSession({
+              httpBaseUrl: options.httpBaseUrl.href,
+              credential: options.desktopBootstrapToken,
+              timeoutMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
+              clientMetadata: { label: "Erebus Desktop", deviceType: "desktop" },
+            }).pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
+              Effect.as(true),
               Effect.orElseSucceed(() => false),
-            ),
+            );
+          }),
         }),
     makeError: ({ cause }) =>
       new BackendReadinessTimeoutError({
@@ -408,7 +440,7 @@ export const waitForHttpReady = (
         cause,
       }),
   });
-};
+});
 
 function drainBackendOutput(
   context: BackendProcessContext & { readonly pid: number },
@@ -476,7 +508,6 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   if (options.bootstrapDelivery === "fd3") {
     additionalFds.fd3 = {
       type: "input",
-      stream: bootstrapStream,
     };
     if (options.bootstrap.desktopTelemetryFd !== undefined) {
       additionalFds[`fd${options.bootstrap.desktopTelemetryFd}`] = {
@@ -496,7 +527,7 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     extendEnv: options.extendEnv,
     // In Electron main, process.execPath points to the Electron binary.
     // Run the child in Node mode so this backend process does not become a GUI app instance.
-    stdin: options.bootstrapDelivery === "stdin" ? bootstrapStream : "ignore",
+    stdin: options.bootstrapDelivery === "stdin" ? "pipe" : "ignore",
     stdout: options.captureOutput ? "pipe" : "inherit",
     stderr: options.captureOutput ? "pipe" : "inherit",
     killSignal: "SIGTERM",
@@ -520,6 +551,25 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     ),
   );
   const outputFibers: Array<Fiber.Fiber<void, never>> = [];
+
+  // Await the write so a broken bootstrap pipe fails this process run rather
+  // than disappearing in the spawner's detached input-stream fiber.
+  yield* Stream.run(
+    bootstrapStream,
+    options.bootstrapDelivery === "stdin" ? handle.stdin : handle.getInputFd(3),
+  ).pipe(
+    Effect.mapError(
+      (cause) =>
+        new BackendProcessBootstrapWriteError({
+          executablePath: options.executablePath,
+          entryPath: options.entryPath,
+          cwd: options.cwd,
+          httpBaseUrl: options.httpBaseUrl,
+          pid: Number(handle.pid),
+          cause,
+        }),
+    ),
+  );
 
   yield* options.onStarted?.(handle.pid) ?? Effect.void;
   if (
@@ -600,6 +650,7 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
       cwd: options.cwd,
       httpBaseUrl: options.httpBaseUrl,
       timeout: options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT,
+      desktopBootstrapToken: options.bootstrap.desktopBootstrapToken,
       ...(options.expectedServerVersion === undefined
         ? {}
         : { expectedServerVersion: options.expectedServerVersion }),

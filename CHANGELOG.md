@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.7 - 2026-09-15
+
+### Fixed
+
+- Wait for desktop bootstrap delivery and stop startup when the required envelope is missing, rather than silently starting in web mode.
+- Verify desktop authentication before marking the local server ready, including when another server reports the same version.
+
 ## 0.6.6 - 2026-09-15
 
 ### Fixed
