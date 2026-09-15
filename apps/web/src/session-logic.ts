@@ -173,7 +173,7 @@ export function deriveThreadGoal(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ThreadGoalState | null {
   let goal: ThreadGoalState | null = null;
-  for (const activity of [...activities].toSorted(compareActivitiesByOrder)) {
+  for (const activity of [...activities].toSorted(compareGoalActivitiesByOrder)) {
     if (activity.kind === "thread.goal.cleared") {
       goal = null;
       continue;
@@ -1915,6 +1915,35 @@ function compareActivitiesByOrder(
   left: OrchestrationThreadActivity,
   right: OrchestrationThreadActivity,
 ): number {
+  const orderComparison = compareActivitiesBeforeId(left, right);
+  if (orderComparison !== 0) {
+    return orderComparison;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function compareGoalActivitiesByOrder(
+  left: OrchestrationThreadActivity,
+  right: OrchestrationThreadActivity,
+): number {
+  const orderComparison = compareActivitiesBeforeId(left, right);
+  if (orderComparison !== 0) {
+    return orderComparison;
+  }
+
+  const terminalRankComparison = goalTerminalRank(left) - goalTerminalRank(right);
+  if (terminalRankComparison !== 0) {
+    return terminalRankComparison;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function compareActivitiesBeforeId(
+  left: OrchestrationThreadActivity,
+  right: OrchestrationThreadActivity,
+): number {
   if (left.sequence !== undefined && right.sequence !== undefined) {
     if (left.sequence !== right.sequence) {
       return left.sequence - right.sequence;
@@ -1936,7 +1965,23 @@ function compareActivitiesByOrder(
     return lifecycleRankComparison;
   }
 
-  return left.id.localeCompare(right.id);
+  return 0;
+}
+
+function goalTerminalRank(activity: OrchestrationThreadActivity): number {
+  if (activity.kind === "thread.goal.cleared") {
+    return 2;
+  }
+  if (
+    activity.kind === "thread.goal.updated" &&
+    activity.payload &&
+    typeof activity.payload === "object" &&
+    "status" in activity.payload &&
+    activity.payload.status === "complete"
+  ) {
+    return 1;
+  }
+  return 0;
 }
 
 function compareActivityLifecycleRank(kind: string): number {

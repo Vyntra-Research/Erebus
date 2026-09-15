@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.6 - 2026-09-15
+
+### Fixed
+
+- Keep completed or removed native goals ahead of stale active updates when provider events share the same timestamp.
+
 ## 0.6.5 - 2026-09-14
 
 ### Fixed
