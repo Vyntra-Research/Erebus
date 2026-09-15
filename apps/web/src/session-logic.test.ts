@@ -91,6 +91,42 @@ describe("deriveThreadGoal", () => {
       deriveThreadGoal([update, makeActivity({ kind: "thread.goal.cleared", payload: {} })]),
     ).toBeNull();
   });
+
+  it("keeps a terminal goal event after an active update with the same timestamp", () => {
+    const payload = {
+      objective: "Map the target",
+      tokensUsed: 4200,
+      tokenBudget: null,
+      timeUsedSeconds: 90,
+      createdAt: 10,
+      updatedAt: 20,
+    };
+    const completed = makeActivity({
+      id: "a-complete",
+      createdAt: "2026-02-23T00:00:20.000Z",
+      kind: "thread.goal.updated",
+      payload: { ...payload, status: "complete" },
+    });
+    const staleActive = makeActivity({
+      id: "z-active",
+      createdAt: "2026-02-23T00:00:20.000Z",
+      kind: "thread.goal.updated",
+      payload: { ...payload, status: "active" },
+    });
+
+    expect(deriveThreadGoal([completed, staleActive])?.status).toBe("complete");
+    expect(
+      deriveThreadGoal([
+        makeActivity({
+          id: "a-cleared",
+          createdAt: "2026-02-23T00:00:20.000Z",
+          kind: "thread.goal.cleared",
+          payload: {},
+        }),
+        staleActive,
+      ]),
+    ).toBeNull();
+  });
 });
 
 describe("resolved request work logs", () => {
