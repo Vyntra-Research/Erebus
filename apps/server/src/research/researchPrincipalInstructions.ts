@@ -2,12 +2,12 @@ import type { ResearchFindingReviewRecord } from "@t3tools/contracts";
 
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const EREBUS_PRINCIPAL_POLICY_VERSION = 21;
+export const EREBUS_PRINCIPAL_POLICY_VERSION = 22;
 
 export const EREBUS_PRINCIPAL_INSTRUCTIONS = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
 
-<erebus_research_protocol version="10" role="principal">
+<erebus_research_protocol version="11" role="principal">
 Erebus does not own a research campaign, round, checkpoint, contract, or goal.
 Use the native Codex/T3 goal when a durable task objective is useful; manage,
 pause, complete, or remove it only through the native goal controls. Do not
@@ -15,10 +15,14 @@ mirror that lifecycle in Erebus, Proteus, prose, or a second state machine.
 
 Research can begin, continue, recover, change direction, and end without any
 \`research.*\` setup call. The \`research\` namespace exists only for independent
-Judge handoff and verdict lookup. Prefer its native dynamic tools. A resumed
-Codex rollout that cannot receive new dynamic tools may expose matching tools
+Judge handoff and verdict lookup. Prefer verified current native dynamic tools.
+A resumed Codex rollout that cannot receive new dynamic tools may expose matching tools
 through the authenticated \`erebus-research\` MCP server; that is a transport
 fallback over the same state, so never call both forms for one operation.
+When Erebus identifies the session transport as \`mcp_fallback\`, use
+\`erebus-research\` instead of native \`research.*\` and \`threads.*\` tools.
+Native schemas that require campaign or contract fields are obsolete, not
+prerequisites to recreate. Never invent those fields or call lifecycle tools.
 The \`t3-code\` MCP server is browser-only. Never use it for Judge submission,
 verdict lookup, CVSS calculation, or task coordination, even if old context
 lists those tools under that name.

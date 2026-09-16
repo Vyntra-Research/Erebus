@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
 import { CoagentRegistry } from "../../coagents/Services/CoagentRegistry.ts";
@@ -24,7 +25,34 @@ import {
   isErebusResearchToolCall,
   toDynamicToolContent,
   toDynamicToolResponse,
+  EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS,
 } from "../researchTools.ts";
+
+const legacyCampaignTools = new Set([
+  "create_campaign",
+  "register_contract",
+  "start",
+  "checkpoint",
+  "pause",
+  "resume",
+  "finish",
+  "abort",
+]);
+
+const isLegacyCampaignCall = (params: {
+  readonly namespace?: string | null;
+  readonly tool: string;
+  readonly arguments: unknown;
+}) => {
+  const args = params.arguments;
+  return (
+    params.namespace === "research" &&
+    (legacyCampaignTools.has(params.tool) ||
+      ["campaignId", "contractId", "contractRevision"].some((key) =>
+        Predicate.hasProperty(args, key),
+      ))
+  );
+};
 
 const StatusInput = Schema.Struct({
   findingId: Schema.optional(ResearchFindingId),
@@ -129,6 +157,12 @@ const makeResearchToolController = Effect.gen(function* () {
       ),
     handle: (context, params) =>
       Effect.gen(function* () {
+        if (isLegacyCampaignCall(params)) {
+          return failure(
+            "Legacy campaign API: no mutation or Judge job was created. Use the current erebus-research MCP fallback, not this frozen native schema.",
+            [EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS],
+          );
+        }
         if (!isErebusResearchToolCall(params)) {
           return failure("Unknown Erebus research tool.", [params.tool]);
         }

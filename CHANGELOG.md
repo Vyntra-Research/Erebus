@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.9 - 2026-09-15
+
+### Fixed
+
+- Restore campaign-free Judge tools for resumed Codex tasks whose native tools still use legacy schemas, without replacing their history.
+- Verify the native tool contract on resume and explain which authenticated transport to use; reject obsolete campaign calls without changing research state.
+
 ## 0.6.8 - 2026-09-15
 
 ### Fixed

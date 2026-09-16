@@ -5,7 +5,22 @@ import {
   toDynamicToolContent,
   toDynamicToolResponse,
   EREBUS_RESEARCH_DYNAMIC_TOOL,
+  EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS,
 } from "./researchTools.ts";
+
+it("identifies the current transport and required fields when native schemas are frozen", () => {
+  assert.include(EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS, 'mode="mcp_fallback"');
+  assert.include(
+    EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS,
+    "even when a native tool has the same name",
+  );
+  assert.include(EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS, "discover it on erebus-research");
+  assert.match(EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS, /get_status accepts \{\}/);
+  assert.match(
+    EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS,
+    /require exactly findingId, revision,[\s\S]*supersedesEvaluationId, title, target, findingPath, and pocPath/,
+  );
+});
 
 it("exposes the local CVSS calculator and independent Judge handoff tools", () => {
   assert.deepStrictEqual(

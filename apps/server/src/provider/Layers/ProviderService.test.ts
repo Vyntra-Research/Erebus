@@ -15,10 +15,10 @@ import type {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
-  EnvironmentId,
   EventId,
   ProviderDriverKind,
   ProviderInstanceId,
+  ProjectId,
   ProviderSessionStartInput,
   ThreadId,
   TurnId,
@@ -64,6 +64,10 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
+import {
+  EREBUS_NATIVE_CONTROL_FINGERPRINT,
+  EREBUS_NATIVE_CONTROL_VERSION,
+} from "../nativeControlTools.ts";
 
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
 const serverConfigTestLayer = ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
@@ -2267,6 +2271,8 @@ describe("agent browser access", () => {
     enableAgentBrowserAccess: boolean,
     threadId: ThreadId,
     resumeCursor?: { readonly threadId: string },
+    runtimePayload?: Record<string, unknown>,
+    recoverOnSend = false,
   ) =>
     Effect.gen(function* () {
       const issued: Array<McpSessionRegistry.McpCredentialRequest> = [];
@@ -2290,7 +2296,7 @@ describe("agent browser access", () => {
         revokeMcpCredential: (revoked) => Effect.sync(() => void revokedThreads.push(revoked)),
       }).pipe(
         Layer.provide(providerAdapterLayer),
-        Layer.provide(directoryLayer),
+        Layer.provideMerge(directoryLayer),
         Layer.provide(ServerSettings.ServerSettingsService.layerTest({ enableAgentBrowserAccess })),
         Layer.provide(serverConfigTestLayer),
         Layer.provide(AnalyticsService.layerTest),
@@ -2304,13 +2310,52 @@ describe("agent browser access", () => {
 
       yield* Effect.gen(function* () {
         const provider = yield* ProviderService.ProviderService;
-        return yield* provider.startSession(threadId, {
-          provider: CODEX_DRIVER,
-          providerInstanceId: codexInstanceId,
-          threadId,
-          runtimeMode: "full-access",
-          ...(resumeCursor ? { resumeCursor } : {}),
-        });
+        const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+        if (runtimePayload) {
+          yield* directory.upsert({
+            provider: CODEX_DRIVER,
+            providerInstanceId: codexInstanceId,
+            threadId,
+            runtimeMode: "full-access",
+            status: "stopped",
+            resumeCursor,
+            runtimePayload,
+          });
+        }
+        if (recoverOnSend) {
+          yield* provider.sendTurn({ threadId, input: "Test resumed turn", attachments: [] });
+        } else {
+          yield* provider.startSession(threadId, {
+            provider: CODEX_DRIVER,
+            providerInstanceId: codexInstanceId,
+            threadId,
+            projectId: ProjectId.make("research-project"),
+            runtimeMode: "full-access",
+            ...(resumeCursor ? { resumeCursor } : {}),
+          });
+        }
+        assert.deepEqual(codex.startSession.mock.calls[0]?.[0].resumeCursor, resumeCursor);
+        const binding = Option.getOrThrow(yield* directory.getBinding(threadId));
+        if (runtimePayload) {
+          // A resume must not label frozen schemas as newly installed tools.
+          assert.equal(
+            (binding.runtimePayload as Record<string, unknown>).erebusNativeControlVersion,
+            runtimePayload.erebusNativeControlVersion,
+          );
+          assert.equal(
+            (binding.runtimePayload as Record<string, unknown>).erebusNativeControlFingerprint,
+            runtimePayload.erebusNativeControlFingerprint,
+          );
+        } else if (!resumeCursor) {
+          assert.equal(
+            (binding.runtimePayload as Record<string, unknown>).erebusNativeControlVersion,
+            EREBUS_NATIVE_CONTROL_VERSION,
+          );
+          assert.equal(
+            (binding.runtimePayload as Record<string, unknown>).erebusNativeControlFingerprint,
+            EREBUS_NATIVE_CONTROL_FINGERPRINT,
+          );
+        }
       }).pipe(Effect.provide(providerLayer));
 
       return issued;
@@ -2375,5 +2420,58 @@ describe("agent browser access", () => {
 
       assert.deepEqual(Array.from(issued[0]?.capabilities ?? []), ["preview", "researchFallback"]);
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "restores Judge fallback for version-3 tasks without replacing their resume cursor",
+    () =>
+      Effect.gen(function* () {
+        const issued = yield* startSessionWith(
+          false,
+          asThreadId("legacy-campaign-tools"),
+          { threadId: "original-provider-thread" },
+          { erebusResearchNativeTools: true, erebusNativeControlVersion: 3 },
+        );
+        assert.deepEqual(Array.from(issued[0]?.capabilities ?? []), ["researchFallback"]);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps verified current native tools and falls back on a contract mismatch", () =>
+    Effect.gen(function* () {
+      const marker = {
+        erebusResearchNativeTools: true,
+        erebusNativeControlVersion: EREBUS_NATIVE_CONTROL_VERSION,
+        erebusNativeControlFingerprint: EREBUS_NATIVE_CONTROL_FINGERPRINT,
+      };
+      const native = yield* startSessionWith(
+        false,
+        asThreadId("verified-native-tools"),
+        { threadId: "current-provider-thread" },
+        marker,
+      );
+      assert.deepEqual(native, []);
+      const stale = yield* startSessionWith(
+        false,
+        asThreadId("changed-native-tools"),
+        { threadId: "stale-provider-thread" },
+        { ...marker, erebusNativeControlFingerprint: "obsolete-contract" },
+      );
+      assert.deepEqual(Array.from(stale[0]?.capabilities ?? []), ["researchFallback"]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "enables fallback on lazy recovery and retains frozen metadata after sending a turn",
+    () =>
+      Effect.gen(function* () {
+        const issued = yield* startSessionWith(
+          false,
+          asThreadId("lazy-legacy-recovery"),
+          { threadId: "original-provider-thread" },
+          { erebusResearchNativeTools: true, erebusNativeControlVersion: 3, cwd: process.cwd() },
+          true,
+        );
+        assert.deepEqual(Array.from(issued[0]?.capabilities ?? []), ["researchFallback"]);
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

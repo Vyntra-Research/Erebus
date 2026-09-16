@@ -3,8 +3,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
@@ -14,6 +16,11 @@ import {
   type ResearchToolControllerShape,
 } from "../research/Services/ResearchToolController.ts";
 import { EREBUS_RESEARCH_TOOL_NAMES } from "../research/researchTools.ts";
+import { ResearchToolControllerLive } from "../research/Layers/ResearchToolController.ts";
+import { FindingReviewStoreLive } from "../research/Layers/FindingReviewStore.ts";
+import { FindingReviewStore } from "../research/Services/FindingReviewStore.ts";
+import { CoagentRegistryLive } from "../coagents/Layers/CoagentRegistry.ts";
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import { McpSessionRegistry } from "./McpSessionRegistry.ts";
@@ -69,8 +76,13 @@ const projection = ProjectionSnapshotQuery.of({
   getThreadDetailSnapshot: unused,
 });
 const toolList = Schema.Struct({
-  result: Schema.Struct({ tools: Schema.Array(Schema.Struct({ name: Schema.String })) }),
+  result: Schema.Struct({
+    tools: Schema.Array(Schema.Struct({ name: Schema.String, inputSchema: Schema.Unknown })),
+  }),
 });
+const requiredFields = Schema.decodeUnknownSync(
+  Schema.Struct({ required: Schema.Array(Schema.String) }),
+);
 const callResult = Schema.Struct({
   result: Schema.Struct({
     isError: Schema.optional(Schema.Boolean),
@@ -83,6 +95,25 @@ const callResult = Schema.Struct({
 it.effect("isolates browser and research catalogs and routes authorized Judge handoffs", () =>
   Effect.scoped(
     Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "erebus-fallback-test-" });
+      yield* fileSystem.makeDirectory(path.join(root, "findings"));
+      yield* fileSystem.makeDirectory(path.join(root, "pocs", "finding-1"), { recursive: true });
+      yield* fileSystem.writeFileString(path.join(root, "findings", "finding-1.md"), "Finding");
+      const reviewContext = yield* Layer.build(
+        ResearchToolControllerLive.pipe(
+          Layer.provideMerge(FindingReviewStoreLive),
+          Layer.provide(CoagentRegistryLive),
+          Layer.provide(SqlitePersistenceMemory),
+          Layer.provide(NodeServices.layer),
+        ),
+      );
+      const realController = yield* Effect.service(ResearchToolController).pipe(
+        Effect.provide(reviewContext),
+      );
+      const reviews = yield* Effect.service(FindingReviewStore).pipe(Effect.provide(reviewContext));
+      expect(realController).toBeDefined();
       const handled: Array<{
         readonly tool: string;
         readonly namespace: string | null | undefined;
@@ -92,24 +123,34 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
         principalInstructions: () => Effect.succeed(""),
         handle: (context, params) =>
           Effect.sync(() => {
-            expect(context).toEqual({ projectId, threadId, cwd: "/workspace" });
+            expect(context).toEqual({ projectId, threadId, cwd: root });
             handled.push({
               tool: params.tool,
               namespace: params.namespace,
               threadId: context.threadId,
             });
-            return {
-              success: true,
-              contentItems: [{ type: "inputText" as const, text: '{"accepted":true}' }],
-            };
-          }),
+          }).pipe(Effect.andThen(realController!.handle(context, params))),
       };
       const transports = Layer.mergeAll(
         McpHttpServer.layer,
         ResearchFallbackMcpHttpServer.layer,
       ).pipe(
         Layer.provide(Layer.succeed(McpSessionRegistry, registry)),
-        Layer.provide(Layer.succeed(ProjectionSnapshotQuery, projection)),
+        Layer.provide(
+          Layer.succeed(ProjectionSnapshotQuery, {
+            ...projection,
+            getThreadCheckpointContext: () =>
+              Effect.succeed(
+                Option.some({
+                  threadId,
+                  projectId,
+                  workspaceRoot: root,
+                  worktreePath: null,
+                  checkpoints: [],
+                }),
+              ),
+          }),
+        ),
         Layer.provide(Layer.succeed(ResearchToolController, controller)),
         Layer.provide(PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer))),
       );
@@ -160,16 +201,44 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
       const browserNames = (yield* Schema.decodeUnknownEffect(toolList)(
         browserList.body,
       )).result.tools.map((t) => t.name);
-      const researchNames = (yield* Schema.decodeUnknownEffect(toolList)(
-        researchList.body,
-      )).result.tools.map((t) => t.name);
+      const researchTools = (yield* Schema.decodeUnknownEffect(toolList)(researchList.body)).result
+        .tools;
+      const researchNames = researchTools.map((t) => t.name);
       expect(browserNames).toContain("preview_status");
       expect(browserNames.some((name) => EREBUS_RESEARCH_TOOL_NAMES.includes(name))).toBe(false);
       expect(browserNames.some((name) => name.startsWith("threads_"))).toBe(false);
       expect(researchNames).toEqual(expect.arrayContaining(EREBUS_RESEARCH_TOOL_NAMES));
       expect(researchNames).toContain("threads_spawn");
       expect(researchNames.some((name) => name.startsWith("preview_"))).toBe(false);
-      const call = { name: "submit_finding", arguments: {} };
+      expect(
+        requiredFields(researchTools.find((tool) => tool.name === "get_status")?.inputSchema)
+          .required,
+      ).toEqual([]);
+      expect(
+        requiredFields(researchTools.find((tool) => tool.name === "submit_finding")?.inputSchema)
+          .required,
+      ).toEqual([
+        "findingId",
+        "revision",
+        "supersedesEvaluationId",
+        "title",
+        "target",
+        "findingPath",
+        "pocPath",
+      ]);
+      expect(researchNames).not.toContain("create_campaign");
+      const call = {
+        name: "submit_finding",
+        arguments: {
+          findingId: "finding-1",
+          revision: 1,
+          supersedesEvaluationId: null,
+          title: "Boundary confusion",
+          target: "Target 1.0 local test",
+          findingPath: "findings/finding-1.md",
+          pocPath: "pocs/finding-1",
+        },
+      };
       const submitted = yield* rpc(
         "/research-mcp",
         "research",
@@ -181,6 +250,10 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
         (yield* Schema.decodeUnknownEffect(callResult)(submitted.body)).result.isError,
       ).not.toBe(true);
       expect(handled).toEqual([{ tool: "submit_finding", namespace: "research", threadId }]);
+      const persisted = yield* reviews.listByThread(threadId);
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0]?.submission.findingId).toBe("finding-1");
+      expect(persisted[0]?.submission.revision).toBe(1);
       const denied = yield* rpc(
         "/research-mcp",
         "preview",
@@ -192,6 +265,7 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
         true,
       );
       expect(handled).toEqual([{ tool: "submit_finding", namespace: "research", threadId }]);
+      expect(yield* reviews.listByThread(threadId)).toHaveLength(1);
     }),
-  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  ).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpServer.layerTest))),
 );

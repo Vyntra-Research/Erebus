@@ -7,6 +7,7 @@ import {
   ApprovalRequestId,
   CodexSettings,
   EventId,
+  EnvironmentId,
   MessageId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -48,6 +49,7 @@ import {
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
@@ -518,6 +520,66 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       NodeAssert.equal(runtime.options.launchArgs, "--strict-config --enable foo");
     }).pipe(Effect.provide(layer));
   });
+
+  it.effect(
+    "configures current Judge fallback and injects transport guidance on every recovered turn",
+    () => {
+      const runtimeFactory = makeRuntimeFactory();
+      const threadId = asThreadId("session-legacy-research");
+      const layer = Layer.effect(
+        CodexAdapter,
+        makeCodexAdapter(decodeCodexSettings({}), { makeRuntime: runtimeFactory.factory }),
+      ).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(ServerSettingsService.layerTest()),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      return Effect.gen(function* () {
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make("legacy-environment"),
+          threadId,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providerSessionId: "legacy-session",
+          endpoint: "http://127.0.0.1:12345/mcp",
+          previewEnabled: false,
+          researchFallbackEndpoint: "http://127.0.0.1:12345/research-mcp",
+          authorizationHeader: "Bearer test-only-credential",
+        });
+        try {
+          const adapter = yield* CodexAdapter;
+          yield* adapter.startSession({
+            provider: ProviderDriverKind.make("codex"),
+            threadId,
+            resumeCursor: { threadId: "original-provider-thread" },
+            runtimeMode: "full-access",
+          });
+          const runtime = runtimeFactory.lastRuntime;
+          NodeAssert.ok(runtime);
+          NodeAssert.deepEqual(runtime.options.resumeCursor, {
+            threadId: "original-provider-thread",
+          });
+          NodeAssert.ok(
+            runtime.options.appServerArgs?.includes(
+              "mcp_servers.erebus-research.url=http://127.0.0.1:12345/research-mcp",
+            ),
+          );
+          NodeAssert.equal(
+            runtime.options.appServerArgs?.some((arg) => arg.startsWith("mcp_servers.t3-code.")),
+            false,
+          );
+          NodeAssert.ok(runtime.options.getAdditionalDeveloperInstructions);
+          for (let i = 0; i < 2; i++) {
+            const instructions = yield* runtime.options.getAdditionalDeveloperInstructions();
+            NodeAssert.match(instructions, /mode="mcp_fallback"/);
+            NodeAssert.match(instructions, /Never invent campaignId/);
+          }
+        } finally {
+          McpProviderSession.clearMcpProviderSession(threadId);
+        }
+      }).pipe(Effect.provide(layer));
+    },
+  );
 
   it.effect("uses T3CODE_CODEX_LAUNCH_ARGS for the session runtime", () => {
     const runtimeFactory = makeRuntimeFactory();
