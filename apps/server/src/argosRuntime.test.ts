@@ -54,8 +54,20 @@ it.layer(NodeServices.layer)("managed Argos runtime", (it) => {
       const first = yield* installManagedArgosForCodex(codexHome);
       const second = yield* installManagedArgosForCodex(codexHome);
       const manifestPath = path.join(first.installedPluginRoot, ".codex-plugin", "plugin.json");
+      const cachedPluginRoot = path.join(
+        codexHome,
+        "plugins",
+        "cache",
+        "argos-marketplace",
+        "argos",
+        first.version,
+      );
+      const cachedManifestPath = path.join(cachedPluginRoot, ".codex-plugin", "plugin.json");
       const manifest = yield* fileSystem
         .readFileString(manifestPath)
+        .pipe(Effect.flatMap(decodeArgosPluginManifest));
+      const cachedManifest = yield* fileSystem
+        .readFileString(cachedManifestPath)
         .pipe(Effect.flatMap(decodeArgosPluginManifest));
       const config = yield* fileSystem.readFileString(configPath);
 
@@ -70,6 +82,8 @@ it.layer(NodeServices.layer)("managed Argos runtime", (it) => {
       expect(manifest.mcpServers.argos.args).toEqual([first.mcpPath]);
       expect(manifest.mcpServers.argos.env).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
       expect(manifest.skills).toBe("./skills/");
+      expect(cachedManifest.mcpServers.argos).toEqual(manifest.mcpServers.argos);
+      expect(cachedManifest.skills).toBe("./skills/");
       expect(
         yield* fileSystem.exists(
           path.join(first.installedPluginRoot, "skills", "argos", "SKILL.md"),
@@ -79,6 +93,9 @@ it.layer(NodeServices.layer)("managed Argos runtime", (it) => {
         yield* fileSystem.exists(
           path.join(first.installedPluginRoot, "skills", "chain-discovery", "SKILL.md"),
         ),
+      ).toBe(true);
+      expect(
+        yield* fileSystem.exists(path.join(cachedPluginRoot, "skills", "argos", "SKILL.md")),
       ).toBe(true);
       expect(
         yield* fileSystem.exists(path.join(first.marketplaceRoot, ".erebus-managed.json")),

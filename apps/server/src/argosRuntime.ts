@@ -702,21 +702,28 @@ export const installManagedArgosForCodex = Effect.fn("ArgosRuntime.installForCod
       }
 
       await writeManagedArgosManifest(manifestPath, runtime.version, runtime.mcpPath, true);
-      await writeManagedArgosManifest(
-        NodePath.join(
-          codexHome,
-          "plugins",
-          "cache",
-          MARKETPLACE_NAME,
-          "argos",
-          runtime.version,
-          ".codex-plugin",
-          "plugin.json",
-        ),
+      const cachedPluginRoot = NodePath.join(
+        codexHome,
+        "plugins",
+        "cache",
+        MARKETPLACE_NAME,
+        "argos",
         runtime.version,
-        runtime.mcpPath,
-        false,
       );
+      const cachedManifestPath = NodePath.join(cachedPluginRoot, ".codex-plugin", "plugin.json");
+      const cachedFilesExist = await Promise.all([
+        NodeFSP.access(cachedManifestPath),
+        NodeFSP.access(NodePath.join(cachedPluginRoot, "skills", "argos", "SKILL.md")),
+      ])
+        .then(() => true)
+        .catch(() => false);
+      if (!cachedFilesExist) {
+        // Codex normally hydrates this cache while its app-server starts. A new
+        // session can finish skill discovery first on a cold home, leaving the
+        // initial turn without Argos skills even though its MCP loads later.
+        await copyFilesystemTree(installedPluginRoot, cachedPluginRoot);
+      }
+      await writeManagedArgosManifest(cachedManifestPath, runtime.version, runtime.mcpPath, true);
 
       const configPath = NodePath.join(codexHome, "config.toml");
       const currentConfig = await NodeFSP.readFile(configPath, "utf8").catch((error: unknown) => {

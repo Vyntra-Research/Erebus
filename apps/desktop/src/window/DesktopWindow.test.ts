@@ -432,7 +432,14 @@ describe("DesktopWindow", () => {
     });
   });
 
-  it("keeps non-Windows windows opaque", () => {
+  it("uses a transparent window on Linux", () => {
+    assert.deepStrictEqual(DesktopWindow.getMainWindowMaterialOptions(true, "linux"), {
+      backgroundColor: "#00000000",
+      transparent: true,
+    });
+  });
+
+  it("keeps macOS windows opaque", () => {
     assert.deepStrictEqual(DesktopWindow.getMainWindowMaterialOptions(true, "darwin"), {
       backgroundColor: "#0a0a0a",
     });
