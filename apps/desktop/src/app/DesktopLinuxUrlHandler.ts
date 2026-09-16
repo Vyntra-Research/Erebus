@@ -100,7 +100,7 @@ export function renderUrlHandlerDesktopEntry(input: {
     `Name=${escapeDesktopEntryString(input.displayName)}`,
     `Exec=gtk-launch ${desktopEntryApplicationId(input.launcherDesktopEntryName)} %U`,
     "Terminal=false",
-    "NoDisplay=true",
+    "Categories=Development;",
     "StartupNotify=false",
     `Icon=${escapeDesktopEntryString(input.iconPath)}`,
     `StartupWMClass=${escapeDesktopEntryString(input.startupWmClass)}`,

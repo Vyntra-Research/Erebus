@@ -19,7 +19,7 @@ chmod +x Erebus-*.AppImage
 ./Erebus-*.AppImage
 ```
 
-Erebus uses GNOME Keyring through libsecret on GNOME, Hyprland, and other non-KDE desktops. KDE can use KWallet. `xdg-utils` and an active, unlocked Secret Service must be available in the graphical session so Erebus can protect credentials and register `erebus://` login callbacks.
+Erebus uses GNOME Keyring through libsecret on GNOME, Hyprland, and other non-KDE desktops. KDE can use KWallet. `xdg-utils` and an active, unlocked Secret Service must be available in the graphical session so Erebus can protect credentials and register its application launcher and `erebus://` login callbacks.
 
 Erebus keeps its Codex profile under its own application data. It does not reuse the Codex desktop app's `CODEX_HOME`, session database, or configuration.
 

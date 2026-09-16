@@ -164,6 +164,8 @@ describe("DesktopLinuxUrlHandler", () => {
     assert.include(entry, "Icon=/home/alice/.local/share/icons/research.vyntra.erebus.png");
     assert.include(entry, "StartupWMClass=erebus");
     assert.include(entry, "MimeType=x-scheme-handler/erebus;");
+    assert.include(entry, "Categories=Development;");
+    assert.notInclude(entry, "NoDisplay=true");
   });
 
   it("carries structured context on registration errors", () => {
