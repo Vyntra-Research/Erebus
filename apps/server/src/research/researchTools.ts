@@ -3,6 +3,31 @@ import type * as CodexSchema from "effect-codex-app-server/schema";
 
 export const EREBUS_RESEARCH_NAMESPACE = "research";
 
+export const EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS = `
+<erebus_control_transport mode="mcp_fallback">
+This resumed Codex rollout does not have a verified current native Erebus
+toolset. Its native research.* and threads.* schemas may be frozen legacy
+contracts. Use the authenticated erebus-research MCP server for Erebus control
+operations instead, even when a native tool has the same name. Do not call both
+transports for one operation. The t3-code MCP server is browser-only.
+
+The current erebus-research tools are calculate_cvss, get_status,
+submit_finding, revise_finding, and threads_* for task coordination.
+get_status accepts {} or {findingId}; calculate_cvss requires {vector}.
+submit_finding and revise_finding require exactly findingId, revision,
+supersedesEvaluationId, title, target, findingPath, and pocPath. For revision 1,
+use submit_finding with supersedesEvaluationId=null. Artifact paths are
+workspace-relative under findings/ and pocs/; pocPath may be null only when the
+finding explains why no PoC applies. Never invent campaignId, contractId, or
+contractRevision to satisfy a legacy schema. Campaign lifecycle tools are
+obsolete and must not be called. Research itself needs no setup operation.
+
+If a fallback tool is not initially listed, discover it on erebus-research
+before claiming the Judge is unavailable. Do not reuse a browser credential,
+edit authentication, recreate this task, or submit through a legacy campaign
+API. An accepted Judge submission ends the turn; no duplicate call or polling.
+</erebus_control_transport>`.trim();
+
 const objectSchema = (
   properties: Readonly<Record<string, unknown>>,
   required: ReadonlyArray<string>,

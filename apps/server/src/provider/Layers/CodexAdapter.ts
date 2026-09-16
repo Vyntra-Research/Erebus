@@ -49,7 +49,10 @@ import {
   isErebusThreadsToolCall,
 } from "../../coagents/coagentTools.ts";
 import type { ResearchToolControllerShape } from "../../research/Services/ResearchToolController.ts";
-import { EREBUS_RESEARCH_DYNAMIC_TOOL } from "../../research/researchTools.ts";
+import {
+  EREBUS_RESEARCH_DYNAMIC_TOOL,
+  EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS,
+} from "../../research/researchTools.ts";
 
 import {
   ProviderAdapterRequestError,
@@ -1849,22 +1852,32 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                             },
                           ],
                         }),
+              }
+            : {}),
+          ...(mcpSession?.researchFallbackEndpoint ||
+          (projectId && (researchToolController || coagentToolController))
+            ? {
                 getAdditionalDeveloperInstructions: () =>
                   Effect.all([
-                    researchToolController
+                    projectId && researchToolController
                       ? researchToolController.principalInstructions({
                           projectId,
                           threadId: input.threadId,
                           cwd: input.cwd ?? process.cwd(),
                         })
                       : Effect.succeed(""),
-                    coagentToolController
+                    projectId && coagentToolController
                       ? coagentToolController.instructions({
                           projectId,
                           threadId: input.threadId,
                           cwd: input.cwd ?? process.cwd(),
                         })
                       : Effect.succeed(""),
+                    Effect.succeed(
+                      mcpSession?.researchFallbackEndpoint
+                        ? EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS
+                        : "",
+                    ),
                   ]).pipe(Effect.map((parts) => parts.filter(Boolean).join("\n\n"))),
               }
             : {}),

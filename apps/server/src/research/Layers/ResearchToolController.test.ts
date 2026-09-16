@@ -11,6 +11,7 @@ import { CoagentRegistryLive } from "../../coagents/Layers/CoagentRegistry.ts";
 import { CoagentRegistry } from "../../coagents/Services/CoagentRegistry.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ResearchToolController } from "../Services/ResearchToolController.ts";
+import { FindingReviewStore } from "../Services/FindingReviewStore.ts";
 import { FindingReviewStoreLive } from "./FindingReviewStore.ts";
 import { ResearchToolControllerLive } from "./ResearchToolController.ts";
 
@@ -41,6 +42,63 @@ const jsonFromResponse = (response: {
 };
 
 layer("ResearchToolController", (it) => {
+  it.effect(
+    "rejects frozen campaign calls with current fallback guidance and no persisted finding",
+    () =>
+      Effect.gen(function* () {
+        const controller = yield* ResearchToolController;
+        const reviews = yield* FindingReviewStore;
+        assert(controller);
+        const threadId = ThreadId.make("legacy-tool-thread");
+        const context = {
+          projectId: ProjectId.make("legacy-project"),
+          threadId,
+          cwd: process.cwd(),
+        };
+        for (const [tool, args] of [
+          ["create_campaign", { target: "Target 1.0" }],
+          ["get_status", { campaignId: "legacy-campaign" }],
+          [
+            "submit_finding",
+            {
+              findingId: "finding-legacy",
+              revision: 1,
+              campaignId: "legacy-campaign",
+              contractId: "legacy-contract",
+            },
+          ],
+        ] as const) {
+          const result = resultFromResponse(
+            yield* controller.handle(context, {
+              namespace: "research",
+              tool,
+              arguments: args,
+              callId: `legacy-${tool}`,
+              threadId,
+              turnId: "legacy-turn",
+            }),
+          );
+          assert.isFalse(result.accepted);
+          assert.include(result.message, "no mutation or Judge job was created");
+          assert.include(result.issues.join("\n"), "erebus-research MCP server");
+          assert.include(result.issues.join("\n"), "findingPath");
+        }
+        assert.deepEqual(yield* reviews.listByThread(threadId), []);
+        const status = resultFromResponse(
+          yield* controller.handle(context, {
+            namespace: "research",
+            tool: "get_status",
+            arguments: {},
+            callId: "current-status",
+            threadId,
+            turnId: "legacy-turn",
+          }),
+        );
+        assert.isTrue(status.accepted);
+        assert.equal(status.status, "empty");
+      }),
+  );
+
   it.effect("calculates CVSS locally without Judge or Proteus state", () =>
     Effect.gen(function* () {
       const controller = yield* ResearchToolController;

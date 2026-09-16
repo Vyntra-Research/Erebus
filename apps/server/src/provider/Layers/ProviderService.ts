@@ -64,6 +64,11 @@ import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
+import {
+  EREBUS_NATIVE_CONTROL_FINGERPRINT,
+  EREBUS_NATIVE_CONTROL_VERSION,
+  hasCurrentNativeControlTools,
+} from "../nativeControlTools.ts";
 const isModelSelection = Schema.is(ModelSelection);
 
 /**
@@ -145,6 +150,7 @@ function toRuntimePayloadFromSession(
     readonly lastRuntimeEventAt?: string;
     readonly erebusResearchNativeTools?: boolean;
     readonly erebusNativeControlVersion?: number;
+    readonly erebusNativeControlFingerprint?: string;
   },
 ): Record<string, unknown> {
   return {
@@ -162,6 +168,9 @@ function toRuntimePayloadFromSession(
       : {}),
     ...(extra?.erebusNativeControlVersion !== undefined
       ? { erebusNativeControlVersion: extra.erebusNativeControlVersion }
+      : {}),
+    ...(extra?.erebusNativeControlFingerprint !== undefined
+      ? { erebusNativeControlFingerprint: extra.erebusNativeControlFingerprint }
       : {}),
   };
 }
@@ -186,21 +195,6 @@ function readPersistedCwd(
   if (typeof rawCwd !== "string") return undefined;
   const trimmed = rawCwd.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-const EREBUS_NATIVE_CONTROL_VERSION = 3;
-
-function readPersistedNativeControlIsCurrent(
-  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
-): boolean {
-  return (
-    runtimePayload !== null &&
-    typeof runtimePayload === "object" &&
-    !Array.isArray(runtimePayload) &&
-    "erebusNativeControlVersion" in runtimePayload &&
-    typeof runtimePayload.erebusNativeControlVersion === "number" &&
-    runtimePayload.erebusNativeControlVersion >= EREBUS_NATIVE_CONTROL_VERSION
-  );
 }
 
 export function needsResearchMcpFallback(input: {
@@ -374,6 +368,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly lastRuntimeEventAt?: string;
       readonly erebusResearchNativeTools?: boolean;
       readonly erebusNativeControlVersion?: number;
+      readonly erebusNativeControlFingerprint?: string;
     },
   ) =>
     Effect.gen(function* () {
@@ -513,7 +508,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         providerInstanceId: bindingInstanceId,
         provider: input.binding.provider,
         resumeCursor: input.binding.resumeCursor,
-        hasNativeResearchTools: readPersistedNativeControlIsCurrent(input.binding.runtimePayload),
+        hasNativeResearchTools: hasCurrentNativeControlTools(input.binding.runtimePayload),
       });
       const resumed = yield* adapter
         .startSession({
@@ -730,7 +725,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: resolvedInstanceId,
           provider: resolvedProvider,
           resumeCursor: effectiveResumeCursor,
-          hasNativeResearchTools: readPersistedNativeControlIsCurrent(
+          hasNativeResearchTools: hasCurrentNativeControlTools(
             persistedBinding?.runtimePayload ?? null,
           ),
         });
@@ -762,6 +757,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             ? {
                 erebusResearchNativeTools: true,
                 erebusNativeControlVersion: EREBUS_NATIVE_CONTROL_VERSION,
+                erebusNativeControlFingerprint: EREBUS_NATIVE_CONTROL_FINGERPRINT,
               }
             : {}),
         });

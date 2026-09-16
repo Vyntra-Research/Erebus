@@ -2,6 +2,8 @@
 
 Erebus does not create research campaigns. A task can start, resume, change direction, or end without a research setup call. If the work needs a durable objective, use the native Codex/T3 goal.
 
+Older Codex tasks keep the tool schemas they received when first created. Erebus uses the authenticated `erebus-research` fallback when those schemas do not match the current tools. This preserves the task's history and finding state. Campaign and contract fields in old tools are not prerequisites: the agent must use the current fallback instead. The `t3-code` MCP server only provides browser tools.
+
 ## Research context
 
 Erebus keeps a short set of rules in the principal and co-agent context. These cover realistic attacker control, evidence scope, natural exploit chains, dedupe, safe execution, anti-tunnel checks, and Post-AI blind spots.
