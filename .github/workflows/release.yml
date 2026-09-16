@@ -110,6 +110,7 @@ jobs:
           } else {
             throw "Failed to check whether $env:TAG already has a release: $($output | Out-String)"
           }
+          exit 0
 
   windows:
     name: Windows x64
