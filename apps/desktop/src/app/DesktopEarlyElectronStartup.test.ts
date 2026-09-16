@@ -81,7 +81,9 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.deepEqual(options, {
+      isDevelopment: true,
       linuxWmClass: "erebus-dev",
+      linuxDesktopEntryName: "research.vyntra.erebus.dev.desktop",
       passwordStore: "gnome-libsecret",
     });
   });

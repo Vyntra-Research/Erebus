@@ -23,10 +23,16 @@ const makeEnvironment = (overrides: Record<string, unknown> = {}) =>
     isPackaged: true,
     isDevelopment: false,
     displayName: "Erebus (Alpha)",
+    linuxDesktopEntryName: "research.vyntra.erebus.desktop",
     linuxWmClass: "erebus",
     linuxApplicationsDir: "/home/alice/.local/share/applications",
     appImagePath: Option.some("/home/alice/Applications/T3-Code.AppImage"),
-    path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
+    resourcesPath: "/opt/erebus/resources",
+    resolveResourcePathCandidates: () => [],
+    path: {
+      dirname: (path: string) => path.slice(0, path.lastIndexOf("/")),
+      join: (...parts: ReadonlyArray<string>) => parts.join("/"),
+    },
     ...overrides,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
@@ -49,6 +55,7 @@ const makeHandlerLayer = (
   recorded: RecordedRegistration,
   input: {
     readonly environment?: Record<string, unknown>;
+    readonly existingContents?: Readonly<Record<string, string>>;
     readonly xdgMimeExitCode?: number;
     readonly writeError?: PlatformError.PlatformError;
   } = {},
@@ -58,6 +65,18 @@ const makeHandlerLayer = (
       Layer.mergeAll(
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, makeEnvironment(input.environment)),
         FileSystem.layerNoop({
+          readFileString: (path) =>
+            input.existingContents?.[path] === undefined
+              ? Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "NotFound",
+                    module: "FileSystem",
+                    method: "readFileString",
+                    description: "missing",
+                    pathOrDescriptor: path,
+                  }),
+                )
+              : Effect.succeed(input.existingContents[path]),
           makeDirectory: (path) =>
             Effect.sync(() => {
               recorded.directories.push(path);
@@ -103,11 +122,10 @@ const emptyRecording = (): RecordedRegistration => ({
 });
 
 describe("DesktopLinuxUrlHandler", () => {
-  it("renders a scheme-handler desktop entry with freedesktop Exec quoting", () => {
-    const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+  it("renders the AppImage launcher entry with freedesktop Exec quoting", () => {
+    const entry = DesktopLinuxUrlHandler.renderAppLauncherDesktopEntry({
       displayName: "Erebus (Nightly)",
       execTarget: '/home/al ice/Apps/T3 "100%" $HOME\\x.AppImage',
-      scheme: "t3code",
     });
 
     assert.include(entry, "[Desktop Entry]");
@@ -121,7 +139,31 @@ describe("DesktopLinuxUrlHandler", () => {
     );
     assert.include(entry, "NoDisplay=true");
     assert.notInclude(entry, "StartupWMClass=");
-    assert.include(entry, "MimeType=x-scheme-handler/t3code;");
+    assert.notInclude(entry, "MimeType=");
+  });
+
+  it("leaves a safe executable path unquoted for xdg-utils compatibility", () => {
+    const entry = DesktopLinuxUrlHandler.renderAppLauncherDesktopEntry({
+      displayName: "Erebus",
+      execTarget: "/home/alice/Applications/Erebus.AppImage",
+    });
+
+    assert.include(entry, "Exec=/home/alice/Applications/Erebus.AppImage %U");
+  });
+
+  it("keeps the scheme handler parseable by xdg-utils for AppImage paths with spaces", () => {
+    const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+      displayName: "Erebus",
+      iconPath: "/home/alice/.local/share/icons/research.vyntra.erebus.png",
+      launcherDesktopEntryName: "research.vyntra.erebus.launcher.desktop",
+      scheme: "erebus",
+      startupWmClass: "erebus",
+    });
+
+    assert.include(entry, "Exec=gtk-launch research.vyntra.erebus.launcher %U");
+    assert.include(entry, "Icon=/home/alice/.local/share/icons/research.vyntra.erebus.png");
+    assert.include(entry, "StartupWMClass=erebus");
+    assert.include(entry, "MimeType=x-scheme-handler/erebus;");
   });
 
   it("carries structured context on registration errors", () => {
@@ -158,26 +200,34 @@ describe("DesktopLinuxUrlHandler", () => {
       yield* runRegister(recorded);
 
       assert.deepEqual(recorded.directories, ["/home/alice/.local/share/applications"]);
-      assert.equal(recorded.files.length, 1);
+      assert.equal(recorded.files.length, 2);
       assert.equal(
         recorded.files[0]?.path,
-        "/home/alice/.local/share/applications/erebus-url-handler.desktop",
+        "/home/alice/.local/share/applications/research.vyntra.erebus.launcher.desktop",
       );
       assert.include(
         recorded.files[0]?.content,
-        'Exec="/home/alice/Applications/T3-Code.AppImage" %U',
+        "Exec=/home/alice/Applications/T3-Code.AppImage %U",
       );
-      assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/erebus;");
+      assert.equal(
+        recorded.files[1]?.path,
+        "/home/alice/.local/share/applications/research.vyntra.erebus.desktop",
+      );
+      assert.include(
+        recorded.files[1]?.content,
+        "Exec=gtk-launch research.vyntra.erebus.launcher %U",
+      );
+      assert.include(recorded.files[1]?.content, "MimeType=x-scheme-handler/erebus;");
       assert.deepEqual(recorded.commands, [
         {
           command: "xdg-mime",
-          args: ["default", "erebus-url-handler.desktop", "x-scheme-handler/erebus"],
+          args: ["default", "research.vyntra.erebus.desktop", "x-scheme-handler/erebus"],
         },
       ]);
     });
   });
 
-  it.effect("falls back to the process executable outside an AppImage", () => {
+  it.effect("falls back to the process executable in a packaged non-AppImage build", () => {
     const recorded = emptyRecording();
 
     return Effect.gen(function* () {
@@ -190,7 +240,7 @@ describe("DesktopLinuxUrlHandler", () => {
     });
   });
 
-  it.effect("does nothing on other platforms or unpackaged builds", () => {
+  it.effect("does nothing on other platforms or in unpackaged development", () => {
     const nonLinux = emptyRecording();
     const unpackaged = emptyRecording();
 
@@ -198,11 +248,46 @@ describe("DesktopLinuxUrlHandler", () => {
       yield* runRegister(nonLinux, { environment: { platform: "darwin" } });
       yield* runRegister(unpackaged, { environment: { isPackaged: false } });
 
-      for (const recorded of [nonLinux, unpackaged]) {
-        assert.deepEqual(recorded.directories, []);
-        assert.deepEqual(recorded.files, []);
-        assert.deepEqual(recorded.commands, []);
-      }
+      assert.deepEqual(nonLinux.directories, []);
+      assert.deepEqual(nonLinux.files, []);
+      assert.deepEqual(nonLinux.commands, []);
+
+      assert.deepEqual(unpackaged.directories, []);
+      assert.deepEqual(unpackaged.files, []);
+      assert.deepEqual(unpackaged.commands, []);
+    });
+  });
+
+  it.effect("does not rewrite a canonical entry whose content is current", () => {
+    const recorded = emptyRecording();
+    const launcherDesktopEntryName = "research.vyntra.erebus.launcher.desktop";
+    const existingContents = {
+      "/home/alice/.local/share/applications/research.vyntra.erebus.desktop":
+        DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+          displayName: "Erebus (Alpha)",
+          iconPath: "/home/alice/.local/share/icons/research.vyntra.erebus.png",
+          launcherDesktopEntryName,
+          scheme: "erebus",
+          startupWmClass: "erebus",
+        }),
+      "/home/alice/.local/share/applications/research.vyntra.erebus.launcher.desktop":
+        DesktopLinuxUrlHandler.renderAppLauncherDesktopEntry({
+          displayName: "Erebus (Alpha) launcher",
+          execTarget: "/home/alice/Applications/T3-Code.AppImage",
+        }),
+    };
+
+    return Effect.gen(function* () {
+      yield* runRegister(recorded, { existingContents });
+
+      assert.deepEqual(recorded.directories, ["/home/alice/.local/share/applications"]);
+      assert.deepEqual(recorded.files, []);
+      assert.deepEqual(recorded.commands, [
+        {
+          command: "xdg-mime",
+          args: ["default", "research.vyntra.erebus.desktop", "x-scheme-handler/erebus"],
+        },
+      ]);
     });
   });
 
@@ -218,11 +303,11 @@ describe("DesktopLinuxUrlHandler", () => {
           module: "FileSystem",
           method: "writeFileString",
           description: "read-only filesystem",
-          pathOrDescriptor: "/home/alice/.local/share/applications/t3code-url-handler.desktop",
+          pathOrDescriptor: "/home/alice/.local/share/applications/research.vyntra.erebus.desktop",
         }),
       });
 
-      assert.equal(xdgMimeFailed.files.length, 1);
+      assert.equal(xdgMimeFailed.files.length, 2);
       assert.deepEqual(writeFailed.commands, []);
     });
   });

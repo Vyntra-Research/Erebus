@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0 - 2026-09-16
+
+### Added
+
+- Ship the x64 Linux desktop as an AppImage with native Wayland identity, `erebus://` links, and desktop-managed updates.
+
+### Changed
+
+- Build and publish matching Windows and Linux release assets through one release workflow.
+- Document installation, provider storage, and update requirements for Arch-based and Debian-based Linux systems.
+
+### Fixed
+
+- Stop the Linux backend and resource monitor when the desktop process exits unexpectedly.
+- Use a static AppImage runtime so current Arch-based systems do not need the legacy FUSE 2 library.
+
 ## 0.6.9 - 2026-09-15
 
 ### Fixed

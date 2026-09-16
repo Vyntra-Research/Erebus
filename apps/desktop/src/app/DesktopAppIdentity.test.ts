@@ -36,6 +36,7 @@ type TestEnvironmentInput = Partial<DesktopEnvironment.MakeDesktopEnvironmentInp
 
 interface ElectronAppCalls {
   readonly setAboutPanelOptions: Array<Electron.AboutPanelOptionsOptions>;
+  readonly setDesktopName: string[];
   readonly setDockIcon: string[];
   readonly setName: string[];
 }
@@ -63,7 +64,10 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
     getAppMetrics: Effect.succeed([]),
     isDefaultProtocolClient: () => Effect.succeed(false),
     setAsDefaultProtocolClient: () => Effect.succeed(true),
-    setDesktopName: () => Effect.void,
+    setDesktopName: (desktopName) =>
+      Effect.sync(() => {
+        calls.setDesktopName.push(desktopName);
+      }),
     setDockIcon: (iconPath) =>
       Effect.sync(() => {
         calls.setDockIcon.push(iconPath);
@@ -121,6 +125,7 @@ const withIdentity = <A, E, R>(
 ) => {
   const calls: ElectronAppCalls = input.calls ?? {
     setAboutPanelOptions: [],
+    setDesktopName: [],
     setDockIcon: [],
     setName: [],
   };
@@ -186,6 +191,7 @@ describe("DesktopAppIdentity", () => {
   it.effect("configures app identity from the environment commit override", () => {
     const calls: ElectronAppCalls = {
       setAboutPanelOptions: [],
+      setDesktopName: [],
       setDockIcon: [],
       setName: [],
     };
@@ -218,6 +224,7 @@ describe("DesktopAppIdentity", () => {
   it.effect("sets the dock icon only when running unpackaged", () => {
     const calls: ElectronAppCalls = {
       setAboutPanelOptions: [],
+      setDesktopName: [],
       setDockIcon: [],
       setName: [],
     };
@@ -235,6 +242,28 @@ describe("DesktopAppIdentity", () => {
         calls,
         environment: { isPackaged: false },
         pngIconPath: Option.some("/icon.png"),
+      },
+    );
+  });
+
+  it.effect("leaves Linux desktop identity to the pre-ready bootstrap", () => {
+    const calls: ElectronAppCalls = {
+      setAboutPanelOptions: [],
+      setDesktopName: [],
+      setDockIcon: [],
+      setName: [],
+    };
+
+    return withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        yield* identity.configure;
+
+        assert.deepEqual(calls.setDesktopName, []);
+      }),
+      {
+        calls,
+        environment: { platform: "linux" },
       },
     );
   });

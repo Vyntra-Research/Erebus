@@ -332,6 +332,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           t3Home: baseDir,
           noBrowser: true,
           desktopBootstrapToken: "desktop-token",
+          desktopParentPid: 4321,
           desktopTelemetryFd: 4,
           desktopTelemetryControlFd: 5,
           tailscaleServeEnabled: false,
@@ -389,6 +390,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         noBrowser: true,
         startupPresentation: "browser",
         desktopBootstrapToken: "desktop-token",
+        desktopParentPid: 4321,
         desktopTelemetryFd: 4,
         desktopTelemetryControlFd: 5,
         resourceMonitorPath: undefined,
@@ -398,6 +400,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         tailscaleServePort: 443,
       });
       assert.equal(join(baseDir, "userdata"), resolved.stateDir);
+      assert.equal(resolved.desktopParentPid, 4321);
       assert.equal(resolved.desktopTelemetryFd, 4);
       assert.equal(resolved.desktopTelemetryControlFd, 5);
     }),

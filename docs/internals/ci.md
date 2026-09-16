@@ -13,9 +13,11 @@ and pushes to `main`:
   Linux jobs.
 - **Rust**: checks formatting and tests the resource monitor.
 
-`.github/workflows/release.yml` starts after CI passes on `main`. It builds the unsigned Windows x64
-installer, creates the version tag, and publishes the installer and update metadata in one GitHub
-Release. Other platform, mobile, relay, hosted preview, and package publication workflows are not
-enabled in the current release.
+`.github/workflows/release.yml` starts after CI passes on `main`. A metadata gate resolves the
+version and skips an existing release. Windows and Linux jobs then build the unsigned Windows x64
+installer and Linux x64 AppImage in parallel. The Linux job extracts the AppImage and checks its
+payload. After both builds pass, one publish job tags the tested revision and publishes both apps
+and their update metadata in one GitHub Release. macOS, ARM64 desktop, mobile, relay, hosted
+preview, and package publication remain disabled.
 
 See [Release Checklist](../operations/release.md) for the full release/signing setup checklist.

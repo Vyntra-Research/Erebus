@@ -16,11 +16,11 @@ on:
         type: string
 
 concurrency:
-  group: release-${{ github.event.workflow_run.head_sha || github.sha }}
+  group: release-stable
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
 
 jobs:
@@ -56,12 +56,16 @@ jobs:
             echo "should_release=false" >> "$GITHUB_OUTPUT"
           fi
 
-  windows:
-    name: Windows x64
+  metadata:
+    name: Release metadata
     needs: gate
     if: needs.gate.outputs.should_release == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      tag: ${{ steps.version.outputs.tag }}
+      release_exists: ${{ steps.existing.outputs.release }}
     steps:
       - name: Checkout tested revision
         uses: actions/checkout@v6
@@ -79,13 +83,13 @@ jobs:
         env:
           DISPATCH_VERSION: ${{ inputs.version }}
         run: |
-          $requested = $env:DISPATCH_VERSION.Trim() -replace '^v', ''
+          $requested = ([string]$env:DISPATCH_VERSION).Trim() -replace '^v', ''
           $version = if ($requested) {
             $requested
           } else {
             (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).version
           }
-          if ($version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
             throw "Invalid release version: $version"
           }
           "value=$version" >> $env:GITHUB_OUTPUT
@@ -98,13 +102,33 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
-          $releaseExists = $LASTEXITCODE -eq 0
-          "release=$($releaseExists.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-          exit 0
+          $output = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:TAG" --silent 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            "release=true" >> $env:GITHUB_OUTPUT
+          } elseif (($output | Out-String) -match 'HTTP 404|Not Found') {
+            "release=false" >> $env:GITHUB_OUTPUT
+          } else {
+            throw "Failed to check whether $env:TAG already has a release: $($output | Out-String)"
+          }
+
+  windows:
+    name: Windows x64
+    needs: metadata
+    if: needs.metadata.outputs.release_exists != 'true'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout tested revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
-        if: steps.existing.outputs.release != 'true'
         uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
@@ -112,57 +136,215 @@ jobs:
           run-install: true
 
       - name: Ensure Electron runtime is installed
-        if: steps.existing.outputs.release != 'true'
         run: vp run --filter @t3tools/desktop ensure:electron
 
       - name: Build unsigned Windows installer
-        if: steps.existing.outputs.release != 'true'
         env:
-          T3CODE_DESKTOP_VERSION: ${{ steps.version.outputs.value }}
+          T3CODE_DESKTOP_VERSION: ${{ needs.metadata.outputs.version }}
           T3CODE_DESKTOP_OUTPUT_DIR: release
         run: vp run dist:desktop:win:x64
 
       - name: Generate release notes from changelog
-        if: steps.existing.outputs.release != 'true'
         shell: pwsh
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ needs.metadata.outputs.tag }}
         run: node scripts/generate-changelog.mjs --version $env:TAG --out release/CHANGELOG.md
 
+      - name: Validate Windows release files
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          $installerName = "Erebus-$env:VERSION-x64.exe"
+          $required = @(
+            "release/$installerName",
+            "release/$installerName.blockmap",
+            "release/latest.yml",
+            "release/CHANGELOG.md"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Missing Windows release file: $path"
+            }
+          }
+          if (-not (Select-String -LiteralPath "release/latest.yml" -SimpleMatch $installerName -Quiet)) {
+            throw "latest.yml does not reference $installerName"
+          }
+
       - name: Upload workflow artifact
-        if: steps.existing.outputs.release != 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: erebus-windows-x64-${{ steps.version.outputs.value }}
+          name: erebus-windows-x64-${{ needs.metadata.outputs.version }}
           path: |
-            release/Erebus-${{ steps.version.outputs.value }}-x64.exe
-            release/Erebus-${{ steps.version.outputs.value }}-x64.exe.blockmap
+            release/Erebus-${{ needs.metadata.outputs.version }}-x64.exe
+            release/Erebus-${{ needs.metadata.outputs.version }}-x64.exe.blockmap
             release/latest.yml
+            release/CHANGELOG.md
           if-no-files-found: error
 
+  linux:
+    name: Linux x64 AppImage
+    needs: metadata
+    if: needs.metadata.outputs.release_exists != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout tested revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential imagemagick python3
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Build Linux AppImage
+        env:
+          T3CODE_DESKTOP_VERSION: ${{ needs.metadata.outputs.version }}
+          T3CODE_DESKTOP_OUTPUT_DIR: release
+        run: vp run dist:desktop:linux
+
+      - name: Validate Linux AppImage payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          appimages=(release/*.AppImage)
+          if [[ ${#appimages[@]} -ne 1 ]]; then
+            echo "Expected one AppImage, found ${#appimages[@]}." >&2
+            exit 1
+          fi
+          chmod +x "${appimages[0]}"
+          "${appimages[0]}" --appimage-extract >/dev/null
+          test -x squashfs-root/AppRun
+          test -n "$(find squashfs-root -type f -name app.asar -print -quit)"
+          monitor_path="$(find squashfs-root -type f -name t3-resource-monitor -print -quit)"
+          test -n "$monitor_path"
+          test -x "$monitor_path"
+          test -f release/latest-linux.yml
+          grep -F -- "$(basename "${appimages[0]}")" release/latest-linux.yml >/dev/null
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: erebus-linux-x64-${{ needs.metadata.outputs.version }}
+          path: |
+            release/*.AppImage
+            release/latest-linux.yml
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [metadata, windows, linux]
+    if: >-
+      ${{
+        always() &&
+        needs.metadata.result == 'success' &&
+        needs.metadata.outputs.release_exists != 'true' &&
+        needs.windows.result == 'success' &&
+        needs.linux.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tested revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: erebus-*-${{ needs.metadata.outputs.version }}
+          path: release
+          merge-multiple: true
+
       - name: Create version tag and GitHub release
-        if: steps.existing.outputs.release != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.value }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          VERSION: ${{ needs.metadata.outputs.version }}
           TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          git rev-parse "refs/tags/$env:TAG" *> $null
-          if ($LASTEXITCODE -ne 0) {
+          git show-ref --verify --quiet "refs/tags/$env:TAG"
+          if ($LASTEXITCODE -eq 0) {
+            $taggedSha = (git rev-list -n 1 "refs/tags/$env:TAG").Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to resolve existing tag $env:TAG."
+            }
+            if ($taggedSha -ne $env:TARGET_SHA) {
+              throw "Existing tag $env:TAG points to $taggedSha, expected $env:TARGET_SHA."
+            }
+          } else {
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git tag -a $env:TAG $env:TARGET_SHA -m "Release $env:TAG"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to create tag $env:TAG."
+            }
             git push origin $env:TAG
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to push tag $env:TAG."
+            }
+          }
+          $windowsInstaller = "Erebus-$env:VERSION-x64.exe"
+          $required = @(
+            "release/$windowsInstaller",
+            "release/$windowsInstaller.blockmap",
+            "release/latest.yml",
+            "release/latest-linux.yml",
+            "release/CHANGELOG.md"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Missing release file: $path"
+            }
+          }
+          $appImages = @(Get-ChildItem release -File -Filter "*.AppImage")
+          if ($appImages.Count -ne 1) {
+            throw "Expected one Linux AppImage, found $($appImages.Count)."
+          }
+          if (-not (Select-String -LiteralPath "release/latest.yml" -SimpleMatch $windowsInstaller -Quiet)) {
+            throw "latest.yml does not reference $windowsInstaller"
+          }
+          if (-not (Select-String -LiteralPath "release/latest-linux.yml" -SimpleMatch $appImages[0].Name -Quiet)) {
+            throw "latest-linux.yml does not reference $($appImages[0].Name)"
+          }
+          $assets = @(Get-ChildItem release -File |
+            Where-Object { $_.Name -ne "CHANGELOG.md" } |
+            ForEach-Object { $_.FullName })
+          if ($assets.Count -eq 0) {
+            throw "No release assets were downloaded."
           }
           $releaseArgs = @(
             "release",
             "create",
-            $env:TAG,
-            "release/Erebus-$env:VERSION-x64.exe",
-            "release/Erebus-$env:VERSION-x64.exe.blockmap",
-            "release/latest.yml",
+            $env:TAG
+          ) + $assets + @(
             "--repo",
             $env:GITHUB_REPOSITORY,
             "--target",
