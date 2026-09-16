@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 - 2026-09-16
+
+### Fixed
+
+- Show the Linux AppImage launcher in desktop application menus while keeping its internal callback launcher hidden.
+
 ## 0.7.0 - 2026-09-16
 
 ### Added
