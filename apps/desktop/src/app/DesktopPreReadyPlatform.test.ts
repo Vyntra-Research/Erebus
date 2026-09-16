@@ -266,6 +266,7 @@ describe("DesktopPreReadyPlatform", () => {
       );
       assert.include(writeFileSyncMock.mock.calls[1]?.[1], "StartupWMClass=erebus");
       assert.include(writeFileSyncMock.mock.calls[1]?.[1], "MimeType=x-scheme-handler/erebus;");
+      assert.notInclude(writeFileSyncMock.mock.calls[1]?.[1], "NoDisplay=true");
       assert.equal(writeFileSyncMock.mock.calls[1]?.[2], "utf8");
       assert.deepEqual(setDesktopNameMock.mock.calls, [["research.vyntra.erebus.desktop"]]);
     }).pipe(
