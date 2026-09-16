@@ -2177,6 +2177,14 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "linux") {
+    // electron-builder 26 still defaults to the legacy AppImage runtime,
+    // which requires the deprecated FUSE2 library that current Arch systems
+    // no longer install by default. The static runtime mounts the image
+    // without a host FUSE dependency and keeps Chromium's sandbox enabled
+    // whenever the host supports unprivileged user namespaces.
+    buildConfig.toolsets = {
+      appimage: "1.0.3",
+    };
     buildConfig.linux = {
       target: [target],
       executableName: "erebus",

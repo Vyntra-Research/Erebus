@@ -6,7 +6,7 @@
 
 Erebus is a desktop harness for long-running security research with Codex. It keeps a small set of research rules in the agent context, coordinates parallel tasks, and sends finished findings to an independent Judge. Research itself stays direct: there is no Erebus campaign to register or maintain.
 
-Erebus is based on [T3 Code](https://github.com/pingdotgg/t3code). The current release supports Windows and Codex. Other platforms and provider bindings remain disabled while they are tested.
+Erebus is based on [T3 Code](https://github.com/pingdotgg/t3code). The current release supports Windows, Linux x64, and Codex. Other platforms and provider bindings remain disabled while they are tested.
 
 ## What it does
 
@@ -33,14 +33,16 @@ The Judge checks fixed evidence gates. It does not run a new research project, f
 
 ## Install
 
-Download the current Windows x64 installer from [GitHub Releases](https://github.com/Vyntra-Research/Erebus/releases/latest).
+Download the Windows x64 installer or Linux x64 AppImage from [GitHub Releases](https://github.com/Vyntra-Research/Erebus/releases/latest).
 
 You need:
 
-- Windows 10 or newer
+- Windows 10 or newer, or a current glibc-based Linux distribution
 - Git for repository projects
 - a ChatGPT account with access to Codex
 - the Codex CLI available on `PATH`
+
+On Linux, make the AppImage executable before opening it. GTK 3 tools (`gtk-launch`), `xdg-utils`, and an active, unlocked Secret Service are required; GNOME Keyring and KWallet are supported.
 
 Open **Settings > Providers > Codex** after installation to sign in. Erebus uses Codex's browser login and stores the session in its own profile. It does not copy or modify the Codex desktop app profile.
 
@@ -52,9 +54,9 @@ See the [installation guide](./docs/user/install.md), [research and Judge guide]
 
 ## Development
 
-Source builds need Node.js 24 or newer and pnpm.
+Source builds need Node.js 24.13.1 or newer within the Node 24 line, plus pnpm 11. Install the platform prerequisites in the [installation guide](./docs/user/install.md#build-from-source) before `pnpm install`; Linux packages such as `node-pty` may compile during installation.
 
-```powershell
+```sh
 pnpm install
 pnpm dev
 ```
@@ -65,7 +67,13 @@ Build the Windows x64 installer with:
 pnpm dist:desktop:win:x64
 ```
 
-Development state stays in the worktree-local `.t3` directory inherited from T3 Code. Packaged builds use an Erebus desktop profile and `~/.erebus`.
+Build the Linux x64 AppImage on Linux with:
+
+```sh
+pnpm dist:desktop:linux
+```
+
+Development state stays in the worktree-local `.t3` directory inherited from T3 Code. Packaged builds use an Erebus desktop profile in the user's `.erebus` directory.
 
 Read the [developer documentation](./docs/README.md) before changing provider, desktop lifecycle, or release code. Contributions should follow [CONTRIBUTING.md](./CONTRIBUTING.md). Report security problems through [SECURITY.md](./SECURITY.md), not a public issue.
 

@@ -20,8 +20,6 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // our own handler entry pointing at the current AppImage and claim the
 // scheme default via xdg-mime, exactly what the file manager's "set as
 // default" checkbox would record in mimeapps.list.
-export const URL_HANDLER_DESKTOP_ENTRY_NAME = "erebus-url-handler.desktop";
-
 const { logInfo, logWarning } = makeComponentLogger("desktop-linux-url-handler");
 
 export class DesktopLinuxUrlHandlerRegistrationError extends Schema.TaggedErrorClass<DesktopLinuxUrlHandlerRegistrationError>()(
@@ -56,6 +54,13 @@ const escapeDesktopEntryString = (value: string): string =>
 // general string escaping is applied on top: a literal backslash ends up as
 // four backslashes in the file, a quote as \\", a dollar sign as \\$.
 export function escapeDesktopEntryExecArgument(value: string): string {
+  // xdg-utils 1.2.1 fails to resolve a quoted first Exec token even though it
+  // is valid freedesktop syntax. Keep ordinary absolute paths unquoted while
+  // retaining full quoting for paths that require it.
+  if (!/[\s"'\\><~|&;$*?#()`]/u.test(value)) {
+    return escapeDesktopEntryString(value.replaceAll("%", () => "%%"));
+  }
+
   const quoted = value
     .replaceAll("\\", () => "\\\\")
     .replaceAll("`", () => "\\`")
@@ -65,12 +70,48 @@ export function escapeDesktopEntryExecArgument(value: string): string {
   return escapeDesktopEntryString(`"${quoted}"`);
 }
 
-// The AppImage integration entry owns the window identity and icon. This
-// hidden URL-only entry must not compete with it for StartupWMClass matching.
+export function resolveLinuxLauncherDesktopEntryName(desktopEntryName: string): string {
+  const suffix = ".desktop";
+  return desktopEntryName.endsWith(suffix)
+    ? `${desktopEntryName.slice(0, -suffix.length)}.launcher${suffix}`
+    : `${desktopEntryName}.launcher${suffix}`;
+}
+
+export const desktopEntryApplicationId = (desktopEntryName: string): string =>
+  desktopEntryName.endsWith(".desktop")
+    ? desktopEntryName.slice(0, -".desktop".length)
+    : desktopEntryName;
+
+// xdg-utils 1.2.1 does not parse a quoted first Exec token. Keep the scheme
+// handler's command and arguments space-free, then let GTK parse the actual
+// AppImage path from a second desktop entry according to the freedesktop spec.
+// The canonical entry also carries stable icon and window metadata for
+// Wayland shells. Both entries remain hidden from application menus.
 export function renderUrlHandlerDesktopEntry(input: {
   readonly displayName: string;
-  readonly execTarget: string;
+  readonly iconPath: string;
+  readonly launcherDesktopEntryName: string;
   readonly scheme: string;
+  readonly startupWmClass: string;
+}): string {
+  return [
+    "[Desktop Entry]",
+    "Type=Application",
+    `Name=${escapeDesktopEntryString(input.displayName)}`,
+    `Exec=gtk-launch ${desktopEntryApplicationId(input.launcherDesktopEntryName)} %U`,
+    "Terminal=false",
+    "NoDisplay=true",
+    "StartupNotify=false",
+    `Icon=${escapeDesktopEntryString(input.iconPath)}`,
+    `StartupWMClass=${escapeDesktopEntryString(input.startupWmClass)}`,
+    `MimeType=x-scheme-handler/${input.scheme};`,
+    "",
+  ].join("\n");
+}
+
+export function renderAppLauncherDesktopEntry(input: {
+  readonly displayName: string;
+  readonly execTarget: string;
 }): string {
   return [
     "[Desktop Entry]",
@@ -80,7 +121,6 @@ export function renderUrlHandlerDesktopEntry(input: {
     "Terminal=false",
     "NoDisplay=true",
     "StartupNotify=false",
-    `MimeType=x-scheme-handler/${input.scheme};`,
     "",
   ].join("\n");
 }
@@ -100,31 +140,91 @@ export const make = Effect.gen(function* () {
   const scheme = ElectronProtocol.getDesktopScheme(environment.isDevelopment);
   const desktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
-    URL_HANDLER_DESKTOP_ENTRY_NAME,
+    environment.linuxDesktopEntryName,
+  );
+  const launcherDesktopEntryName = resolveLinuxLauncherDesktopEntryName(
+    environment.linuxDesktopEntryName,
+  );
+  const launcherDesktopEntryPath = environment.path.join(
+    environment.linuxApplicationsDir,
+    launcherDesktopEntryName,
+  );
+  const desktopEntryId = desktopEntryApplicationId(environment.linuxDesktopEntryName);
+  const iconPath = environment.path.join(
+    environment.path.dirname(environment.linuxApplicationsDir),
+    "icons",
+    `${desktopEntryId}.png`,
   );
 
-  const writeDesktopEntry = Effect.gen(function* () {
+  const writeDesktopEntry = (path: string, content: string) =>
+    Effect.gen(function* () {
+      const existing = yield* fileSystem
+        .readFileString(path)
+        .pipe(Effect.orElseSucceed(() => null));
+      if (existing === content) return;
+      yield* fileSystem.writeFileString(path, content);
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new DesktopLinuxUrlHandlerRegistrationError({
+            step: "write-desktop-entry",
+            scheme,
+            desktopEntryPath: path,
+            cause,
+          }),
+      ),
+    );
+
+  const writeDesktopEntries = Effect.gen(function* () {
     // Inside the mounted AppImage, process.execPath points at a transient
     // /tmp/.mount_* path — the handler must launch the AppImage itself.
     const execTarget = Option.getOrElse(environment.appImagePath, () => process.execPath);
+    const handlerContent = renderUrlHandlerDesktopEntry({
+      displayName: environment.displayName,
+      iconPath,
+      launcherDesktopEntryName,
+      scheme,
+      startupWmClass: environment.linuxWmClass,
+    });
+    const launcherContent = renderAppLauncherDesktopEntry({
+      displayName: `${environment.displayName} launcher`,
+      execTarget,
+    });
     yield* fileSystem.makeDirectory(environment.linuxApplicationsDir, { recursive: true });
-    yield* fileSystem.writeFileString(
-      desktopEntryPath,
-      renderUrlHandlerDesktopEntry({
-        displayName: environment.displayName,
-        execTarget,
-        scheme,
-      }),
-    );
+    // Publish the target before the handler so an existing MIME association
+    // never observes a handler whose launcher has not been refreshed yet.
+    yield* writeDesktopEntry(launcherDesktopEntryPath, launcherContent);
+    yield* writeDesktopEntry(desktopEntryPath, handlerContent);
   }).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DesktopLinuxUrlHandlerRegistrationError({
-          step: "write-desktop-entry",
-          scheme,
-          desktopEntryPath,
-          cause,
-        }),
+    Effect.mapError((error) =>
+      isRegistrationError(error)
+        ? error
+        : new DesktopLinuxUrlHandlerRegistrationError({
+            step: "write-desktop-entry",
+            scheme,
+            desktopEntryPath,
+            cause: error,
+          }),
+    ),
+  );
+
+  const installDesktopIcon = Effect.gen(function* () {
+    let sourceIconPath: string | undefined;
+    for (const candidate of environment.resolveResourcePathCandidates("icon.png")) {
+      if (yield* fileSystem.exists(candidate)) {
+        sourceIconPath = candidate;
+        break;
+      }
+    }
+    if (sourceIconPath === undefined) return;
+    yield* fileSystem.makeDirectory(environment.path.dirname(iconPath), { recursive: true });
+    yield* fileSystem.copyFile(sourceIconPath, iconPath);
+  }).pipe(
+    Effect.catch((cause) =>
+      logWarning("Linux desktop icon installation failed", {
+        iconPath,
+        message: String(cause),
+      }),
     ),
   );
 
@@ -132,7 +232,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const command = ChildProcess.make(
         "xdg-mime",
-        ["default", URL_HANDLER_DESKTOP_ENTRY_NAME, `x-scheme-handler/${scheme}`],
+        ["default", environment.linuxDesktopEntryName, `x-scheme-handler/${scheme}`],
         {
           stdin: "ignore",
           stdout: "ignore",
@@ -165,7 +265,8 @@ export const make = Effect.gen(function* () {
     if (environment.platform !== "linux" || !environment.isPackaged) {
       return;
     }
-    yield* writeDesktopEntry;
+    yield* installDesktopIcon;
+    yield* writeDesktopEntries;
     yield* setDefaultHandler;
     yield* logInfo("registered URL scheme handler", { scheme });
   }).pipe(

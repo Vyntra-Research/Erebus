@@ -12,7 +12,7 @@ The rules apply when the agent ranks, narrows, discards, reopens, or promotes a 
 
 Argos is the connected memory for current research. Erebus installs its MCP and skills in the shared Codex profile. The agent updates canonical nodes and typed relations instead of copying the same fact into a second Erebus state. Each project's durable graph stays under `.argos/` in that project.
 
-Proteus is legacy history in Erebus 0.6. The managed plugin exposes read-only lookup and status tools. It does not expose mutation tools, CVSS calculation, or Proteus skills.
+Proteus is legacy history in current Erebus releases. The managed plugin exposes read-only lookup and status tools. It does not expose mutation tools, CVSS calculation, or Proteus skills.
 
 ## Co-agents and subagents
 
@@ -61,9 +61,9 @@ CVSS classifies a proved finding. It does not decide whether the finding is vali
 
 ## Settings
 
-Use **Settings > Research** to choose the Judge model and reasoning effort. There is no Observer cadence or campaign setting in Erebus 0.6.
+Use **Settings > Research** to choose the Judge model and reasoning effort. Current Erebus releases have no Observer cadence or campaign setting.
 
-Existing campaign records from older Erebus releases remain in the local database for compatibility. Erebus 0.6 does not resume or mutate them.
+Existing campaign records from older Erebus releases remain in the local database for compatibility. Current Erebus releases do not resume or mutate them.
 
 ## Proteus updates
 
