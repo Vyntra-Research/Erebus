@@ -1,8 +1,9 @@
-import { isWindowsPlatform } from "./utils";
+import { isLinuxPlatform, isWindowsPlatform } from "./utils";
 
 const WCO_CLASS_NAME = "wco";
 const ELECTRON_CLASS_NAME = "electron";
 const ELECTRON_WINDOWS_CLASS_NAME = "electron-windows";
+const ELECTRON_TRANSLUCENT_CLASS_NAME = "electron-translucent";
 
 interface WindowControlsOverlayLike {
   readonly visible: boolean;
@@ -43,14 +44,14 @@ export function syncDocumentWindowControlsOverlayClass(): () => void {
   };
 }
 
-export function getElectronPlatformClassNames(
-  platform: string,
-):
-  | readonly [typeof ELECTRON_CLASS_NAME]
-  | readonly [typeof ELECTRON_CLASS_NAME, typeof ELECTRON_WINDOWS_CLASS_NAME] {
-  return isWindowsPlatform(platform)
-    ? [ELECTRON_CLASS_NAME, ELECTRON_WINDOWS_CLASS_NAME]
-    : [ELECTRON_CLASS_NAME];
+export function getElectronPlatformClassNames(platform: string): readonly string[] {
+  if (isWindowsPlatform(platform)) {
+    return [ELECTRON_CLASS_NAME, ELECTRON_WINDOWS_CLASS_NAME, ELECTRON_TRANSLUCENT_CLASS_NAME];
+  }
+  if (isLinuxPlatform(platform)) {
+    return [ELECTRON_CLASS_NAME, ELECTRON_TRANSLUCENT_CLASS_NAME];
+  }
+  return [ELECTRON_CLASS_NAME];
 }
 
 export function syncDocumentElectronPlatformClasses(platform: string): () => void {

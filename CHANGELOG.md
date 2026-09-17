@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.2 - 2026-09-16
+
+### Fixed
+
+- Make Argos skills available to the first Codex session on a new installation instead of waiting for the plugin cache to finish in the background.
+- Apply Glass opacity to one transparent desktop surface instead of stacking opaque-looking layers, and enable native transparency on Linux.
+
 ## 0.7.1 - 2026-09-16
 
 ### Fixed

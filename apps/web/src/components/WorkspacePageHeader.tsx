@@ -22,6 +22,7 @@ export function WorkspacePageHeader({
         COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         className,
       )}
+      data-slot="workspace-page-header"
       {...props}
     />
   );

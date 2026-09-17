@@ -2020,7 +2020,7 @@ body {
   --desktop-window-right-resize-inset: 6px;
 }
 
-html.electron-windows[data-theme-id]:not([data-theme-id=""]) {
+html.electron-translucent[data-theme-id]:not([data-theme-id=""]) {
   --background: color-mix(in srgb, var(--app-theme-canvas) var(--glass-opacity), transparent);
   --app-chrome-background: color-mix(
     in srgb,
@@ -2030,10 +2030,25 @@ html.electron-windows[data-theme-id]:not([data-theme-id=""]) {
   --sidebar: color-mix(in srgb, var(--app-theme-sidebar) var(--glass-opacity), transparent);
 }
 
-html.electron-windows,
-html.electron-windows body,
-html.electron-windows #root {
+html.electron-translucent[data-theme-id]:not([data-theme-id=""]) [data-app-sidebar] {
+  --background: color-mix(in srgb, var(--app-theme-canvas) var(--glass-opacity), transparent);
+  --sidebar: color-mix(in srgb, var(--app-theme-sidebar) var(--glass-opacity), transparent);
+  --sidebar-stage-fade: var(--sidebar);
+}
+
+html.electron-translucent,
+html.electron-translucent body,
+html.electron-translucent #root,
+html.electron-translucent [data-slot="sidebar-container"],
+html.electron-translucent [data-slot="sidebar-inset"] > .bg-background,
+html.electron-translucent [data-slot="workspace-page-header"] {
   background-color: transparent;
+}
+
+html.electron-translucent [data-slot="sidebar-inner"],
+html.electron-translucent [data-slot="sidebar-inset"] {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
 }
 
 /* App-chrome grain. Baked into each surface's own background (behind

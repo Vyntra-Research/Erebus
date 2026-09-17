@@ -144,6 +144,13 @@ function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
   return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
 }
 
+function getMainWindowBackgroundColor(
+  shouldUseDarkColors: boolean,
+  platform: NodeJS.Platform,
+): string {
+  return platform === "darwin" ? getInitialWindowBackgroundColor(shouldUseDarkColors) : "#00000000";
+}
+
 export function getMainWindowMaterialOptions(
   shouldUseDarkColors: boolean,
   platform: NodeJS.Platform,
@@ -153,13 +160,19 @@ export function getMainWindowMaterialOptions(
 > {
   if (platform === "win32") {
     return {
-      backgroundColor: "#00000000",
+      backgroundColor: getMainWindowBackgroundColor(shouldUseDarkColors, platform),
       backgroundMaterial: "acrylic",
       transparent: true,
     };
   }
+  if (platform === "linux") {
+    return {
+      backgroundColor: getMainWindowBackgroundColor(shouldUseDarkColors, platform),
+      transparent: true,
+    };
+  }
   return {
-    backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
+    backgroundColor: getMainWindowBackgroundColor(shouldUseDarkColors, platform),
   };
 }
 
@@ -272,9 +285,7 @@ function syncWindowAppearance(
       return;
     }
 
-    window.setBackgroundColor(
-      platform === "win32" ? "#00000000" : getInitialWindowBackgroundColor(shouldUseDarkColors),
-    );
+    window.setBackgroundColor(getMainWindowBackgroundColor(shouldUseDarkColors, platform));
     const { titleBarOverlay } = getWindowTitleBarOptions(shouldUseDarkColors, platform);
     if (typeof titleBarOverlay === "object") {
       window.setTitleBarOverlay(titleBarOverlay);
