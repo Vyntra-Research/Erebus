@@ -213,6 +213,20 @@ describe("buildTurnStartParams", () => {
     }),
   );
 
+  it.effect("sends the Daybreak choice with the selected model on the turn", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        model: "gpt-6-sol",
+        cyberAccessProgram: "daybreakBlue",
+      });
+
+      NodeAssert.equal(params.model, "gpt-6-sol");
+      NodeAssert.equal(params.cyberAccessProgram, "daybreakBlue");
+    }),
+  );
+
   it("keeps invalid turn values only in the schema cause", () => {
     const secret = "codex-turn-input-secret-sentinel";
     const error = Effect.runSync(

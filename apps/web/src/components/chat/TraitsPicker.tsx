@@ -193,7 +193,7 @@ function getTraitsSectionVisibility(input: {
     showFastMode,
     showContextWindow,
     showAgent,
-    hasAnyControls: showEffort || showThinking || showFastMode || showContextWindow || showAgent,
+    hasAnyControls: selected.descriptors.length > 0,
   };
 }
 
@@ -431,6 +431,16 @@ export function buildTraitsTriggerDisplay(input: {
           (fastModeEnabled ? "Fast" : "Normal");
         continue;
       }
+    }
+    if (
+      input.provider === "codex" &&
+      descriptor.id === "cyberAccessProgram" &&
+      descriptor.type === "select"
+    ) {
+      if (getProviderOptionCurrentValue(descriptor) === "daybreakBlue") {
+        labels.push("Daybreak Blue");
+      }
+      continue;
     }
     const label =
       input.ultrathinkPromptControlled && descriptor.id === input.primarySelectDescriptorId

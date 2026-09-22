@@ -58,6 +58,39 @@ function settingsWithProviderInstances(): UnifiedSettings {
 }
 
 describe("instance-scoped model selection", () => {
+  it("keeps Daybreak availability on the GPT-6 Sol picker option", () => {
+    const baseProvider = provider({ instanceId: "codex", models: ["gpt-6-sol"] });
+    const providers = [
+      {
+        ...baseProvider,
+        models: [
+          {
+            ...baseProvider.models[0]!,
+            capabilities: {
+              optionDescriptors: [
+                {
+                  id: "cyberAccessProgram",
+                  label: "Daybreak",
+                  type: "select" as const,
+                  options: [
+                    { id: "standard", label: "Standard" },
+                    { id: "daybreakBlue", label: "Daybreak Blue" },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+    const codex = deriveProviderInstanceEntries(providers)[0]!;
+
+    expect(
+      getAppModelOptionsForInstance(settingsWithProviderInstances(), codex)[0]
+        ?.daybreakBlueAvailable,
+    ).toBe(true);
+  });
+
   it("preserves server-provided legacy model metadata", () => {
     const baseProvider = provider({
       instanceId: "claudeAgent",

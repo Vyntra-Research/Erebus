@@ -32,6 +32,12 @@ On Linux, the default packaged command is:
 CODEX_HOME="$HOME/.erebus/userdata/providers/codex" codex login
 ```
 
+## GPT-6 Sol and Daybreak
+
+Select **GPT-6 Sol** as the model. If the signed-in account has Daybreak access for it, open the options beside the composer and choose **Daybreak Blue** under **Daybreak**. The choice applies to the next turn and stays separate from the model and speed settings. Choose **Standard** to turn it off.
+
+Older tasks that already use the Daybreak Blue model alias keep that selection. The alias stays out of the model picker when GPT-6 Sol offers the Daybreak option, unless it is the model selected in the open task.
+
 ## Proteus integration
 
 Erebus manages Proteus inside this isolated profile. It ships a tested fallback, checks official stable releases once per day when the Codex environment starts, and accepts an update only after its package digest and runtime layout pass validation. Erebus retains the active and one previous managed runtime and plugin copy. It writes only its owned Codex configuration sections and removes only version directories marked as Erebus-managed. A global Proteus install is not required and does not control the Erebus runtime.

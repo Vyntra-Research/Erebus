@@ -93,6 +93,25 @@ describe("buildTraitsTriggerDisplay", () => {
     });
   });
 
+  it("shows Daybreak only when it is selected", () => {
+    const daybreak = selectDescriptor(
+      "cyberAccessProgram",
+      [
+        { id: "standard", label: "Standard" },
+        { id: "daybreakBlue", label: "Daybreak Blue" },
+      ],
+      "daybreakBlue",
+    );
+    expect(display([EFFORT, daybreak])).toEqual({
+      label: "High · Daybreak Blue",
+      showFastModeIcon: false,
+    });
+    expect(display([EFFORT, { ...daybreak, currentValue: "standard" }])).toEqual({
+      label: "High",
+      showFastModeIcon: false,
+    });
+  });
+
   it("keeps the Codex service tier readable when it is the only trait", () => {
     expect(display([serviceTierDescriptor("default")])).toEqual({
       label: "Standard",

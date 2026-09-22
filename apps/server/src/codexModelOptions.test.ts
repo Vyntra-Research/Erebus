@@ -3,7 +3,10 @@ import { assert, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 
-import { getCodexServiceTierOptionValue } from "./codexModelOptions.ts";
+import {
+  getCodexCyberAccessProgramOptionValue,
+  getCodexServiceTierOptionValue,
+} from "./codexModelOptions.ts";
 
 it("returns the selected Codex service tier id", () => {
   const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5", [
@@ -19,4 +22,14 @@ it("keeps legacy persisted fast mode selections working", () => {
   ]);
 
   assert.equal(getCodexServiceTierOptionValue(selection), "fast");
+});
+
+it("keeps Daybreak selection separate from the model and ignores it on unsupported models", () => {
+  const sol = createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-sol", [
+    { id: "cyberAccessProgram", value: "daybreakBlue" },
+  ]);
+  const astra = { ...sol, model: "gpt-6-astra" };
+
+  assert.equal(getCodexCyberAccessProgramOptionValue(sol), "daybreakBlue");
+  assert.equal(getCodexCyberAccessProgramOptionValue(astra), undefined);
 });

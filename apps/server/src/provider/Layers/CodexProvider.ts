@@ -116,6 +116,25 @@ const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
 };
 
 const DEFAULT_SERVICE_TIER_ID = "default";
+const CodexModelWithAccessPrograms = CodexSchema.V2ModelListResponse__Model.pipe(
+  Schema.fieldsAssign({
+    availableAccessPrograms: Schema.optionalKey(
+      Schema.NullOr(
+        Schema.Struct({
+          cyber: Schema.Array(Schema.Literals(["standard", "daybreakBlue", "daybreakRed"])),
+        }),
+      ),
+    ),
+  }),
+);
+const CodexModelListWithAccessPrograms = CodexSchema.V2ModelListResponse.pipe(
+  Schema.fieldsAssign({ data: Schema.Array(CodexModelWithAccessPrograms) }),
+);
+type CodexModelWithAccessPrograms = typeof CodexModelWithAccessPrograms.Type;
+type CodexModelListWithAccessPrograms = typeof CodexModelListWithAccessPrograms.Type;
+const decodeCodexModelListWithAccessPrograms = Schema.decodeUnknownEffect(
+  CodexModelListWithAccessPrograms,
+);
 
 function reasoningEffortLabel(reasoningEffort: string): string {
   return REASONING_EFFORT_LABELS[reasoningEffort] ?? reasoningEffort;
@@ -168,6 +187,7 @@ function codexAccountEmail(account: CodexSchema.V2GetAccountResponse["account"])
 
 export function mapCodexModelCapabilities(
   model: CodexSchema.V2ModelListResponse__Model,
+  daybreakBlueAvailable = false,
 ): ModelCapabilities {
   const reasoningOptions = model.supportedReasoningEfforts.map(({ reasoningEffort }) =>
     reasoningEffort === model.defaultReasoningEffort
@@ -228,6 +248,18 @@ export function mapCodexModelCapabilities(
       currentValue: defaultServiceTier,
     });
   }
+  if (daybreakBlueAvailable) {
+    optionDescriptors.push({
+      id: "cyberAccessProgram",
+      label: "Daybreak",
+      type: "select",
+      options: [
+        { id: "standard", label: "Standard", isDefault: true },
+        { id: "daybreakBlue", label: "Daybreak Blue" },
+      ],
+      currentValue: "standard",
+    });
+  }
 
   return createModelCapabilities({
     optionDescriptors,
@@ -241,15 +273,20 @@ const toDisplayName = (model: CodexSchema.V2ModelListResponse__Model): string =>
     .replace(/-([a-z])/g, (_, c) => "-" + c.toUpperCase());
 };
 
-function parseCodexModelListResponse(
-  response: CodexSchema.V2ModelListResponse,
+export function parseCodexModelListResponse(
+  models: ReadonlyArray<CodexModelWithAccessPrograms>,
 ): ReadonlyArray<ServerProviderModel> {
-  return response.data.map((model) => ({
+  const hasDaybreakBlueAlias = models.some((model) => model.model === "gpt-daybreak-blue-latest");
+  return models.map((model) => ({
     slug: model.model,
     name: toDisplayName(model),
     isCustom: false,
     ...(model.isDefault ? { isDefault: true } : {}),
-    capabilities: mapCodexModelCapabilities(model),
+    capabilities: mapCodexModelCapabilities(
+      model,
+      model.model === "gpt-6-sol" &&
+        (model.availableAccessPrograms?.cyber.includes("daybreakBlue") ?? hasDaybreakBlueAlias),
+    ),
   }));
 }
 
@@ -498,22 +535,31 @@ export function deriveProteusHealth(input: {
   };
 }
 
-const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
+export const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   client: CodexClient.CodexAppServerClient["Service"],
 ) {
-  const models: ServerProviderModel[] = [];
+  const models: CodexModelWithAccessPrograms[] = [];
   let cursor: string | null | undefined = undefined;
 
   do {
-    const response: CodexSchema.V2ModelListResponse = yield* client.request(
-      "model/list",
-      cursor ? { cursor } : {},
-    );
-    models.push(...parseCodexModelListResponse(response));
+    const rawResponse = yield* client.raw.request("model/list", cursor ? { cursor } : {});
+    const response: CodexModelListWithAccessPrograms =
+      yield* decodeCodexModelListWithAccessPrograms(rawResponse).pipe(
+        Effect.mapError((error) =>
+          CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+            "decode-response-payload",
+            error,
+            {
+              method: "model/list",
+            },
+          ),
+        ),
+      );
+    models.push(...response.data);
     cursor = response.nextCursor;
   } while (cursor);
 
-  return models;
+  return parseCodexModelListResponse(models);
 });
 
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {

@@ -50,7 +50,7 @@ const FETCH_TIMEOUT_MS = 10_000;
  * the map have no legacy concept and their models are left unflagged.
  */
 const ModelManifestSchema = Schema.Struct({
-  version: Schema.Literal(2),
+  version: Schema.Literal(3),
   currentModels: Schema.Record(Schema.String, Schema.Array(Schema.String)),
 });
 export type ModelManifestData = typeof ModelManifestSchema.Type;
