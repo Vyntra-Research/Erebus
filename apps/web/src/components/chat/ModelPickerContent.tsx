@@ -215,7 +215,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       if (!readyInstanceSet.has(instanceId)) {
         continue;
       }
+      const hasDaybreakOnSol = models.some(
+        (model) => model.slug === "gpt-6-sol" && model.daybreakBlueAvailable,
+      );
       for (const model of models) {
+        if (
+          hasDaybreakOnSol &&
+          model.slug === "gpt-daybreak-blue-latest" &&
+          !(props.activeInstanceId === instanceId && props.model === model.slug)
+        ) {
+          continue;
+        }
         out.push({
           slug: model.slug,
           name: model.name,
@@ -233,7 +243,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }
     }
     return out;
-  }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet]);
+  }, [
+    modelOptionsByInstance,
+    entryByInstanceId,
+    readyInstanceSet,
+    props.activeInstanceId,
+    props.model,
+  ]);
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;

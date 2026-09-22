@@ -1,4 +1,6 @@
 import { assert, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import type * as CodexClient from "effect-codex-app-server/client";
 import type * as CodexSchema from "effect-codex-app-server/schema";
 
 import {
@@ -7,7 +9,20 @@ import {
   deriveArgosHealth,
   deriveProteusHealth,
   mapCodexModelCapabilities,
+  parseCodexModelListResponse,
+  requestAllCodexModels,
 } from "./CodexProvider.ts";
+
+const solModel: CodexSchema.V2ModelListResponse__Model = {
+  defaultReasoningEffort: "medium",
+  description: "GPT-6 Sol",
+  displayName: "GPT-6 Sol",
+  hidden: false,
+  id: "gpt-6-sol",
+  isDefault: false,
+  model: "gpt-6-sol",
+  supportedReasoningEfforts: [],
+};
 
 it("builds a login command for Erebus's isolated Codex profile", () => {
   assert.equal(
@@ -121,6 +136,62 @@ it("uses standard routing when the catalog has no default service tier", () => {
   ]);
 });
 
+it("offers Daybreak on Sol when the account advertises it through the older alias", () => {
+  const models = parseCodexModelListResponse([
+    solModel,
+    {
+      ...solModel,
+      id: "gpt-daybreak-blue-latest",
+      model: "gpt-daybreak-blue-latest",
+      displayName: "Daybreak Blue",
+    },
+  ]);
+
+  assert.deepStrictEqual(models[0]?.capabilities?.optionDescriptors, [
+    {
+      id: "cyberAccessProgram",
+      label: "Daybreak",
+      type: "select",
+      options: [
+        { id: "standard", label: "Standard", isDefault: true },
+        { id: "daybreakBlue", label: "Daybreak Blue" },
+      ],
+      currentValue: "standard",
+    },
+  ]);
+  assert.equal(
+    parseCodexModelListResponse([solModel])[0]?.capabilities?.optionDescriptors?.length,
+    0,
+  );
+});
+
+it("uses explicit model access programs when Codex advertises them", () => {
+  const models = parseCodexModelListResponse([
+    { ...solModel, availableAccessPrograms: { cyber: ["standard", "daybreakBlue"] } },
+  ]);
+
+  assert.equal(models[0]?.capabilities?.optionDescriptors?.at(-1)?.id, "cyberAccessProgram");
+});
+
+it.effect("preserves access programs from the raw Codex model catalog", () =>
+  Effect.gen(function* () {
+    const client = {
+      raw: {
+        request: () =>
+          Effect.succeed({
+            data: [
+              { ...solModel, availableAccessPrograms: { cyber: ["standard", "daybreakBlue"] } },
+            ],
+            nextCursor: null,
+          }),
+      },
+    } as unknown as CodexClient.CodexAppServerClient["Service"];
+    const models = yield* requestAllCodexModels(client);
+
+    assert.equal(models[0]?.capabilities?.optionDescriptors?.at(-1)?.id, "cyberAccessProgram");
+  }),
+);
+
 it("marks the most preferred available model as default", () => {
   const models = applyPreferredCodexDefaultModel([
     { slug: "gpt-5.6-terra", name: "GPT-5.6-Terra", isCustom: false, capabilities: null },
@@ -143,6 +214,15 @@ it("prefers sol over terra when both are available", () => {
   ]);
 
   assert.deepStrictEqual(models.find((model) => model.isDefault)?.slug, "gpt-5.6-sol");
+});
+
+it("prefers GPT-6 Sol over the older Sol model", () => {
+  const models = applyPreferredCodexDefaultModel([
+    { slug: "gpt-5.6-sol", name: "GPT-5.6-Sol", isCustom: false, capabilities: null },
+    { slug: "gpt-6-sol", name: "GPT-6-Sol", isCustom: false, capabilities: null },
+  ]);
+
+  assert.equal(models.find((model) => model.isDefault)?.slug, "gpt-6-sol");
 });
 
 it("keeps Codex's own default when no preferred model is available", () => {

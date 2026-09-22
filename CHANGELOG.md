@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.3 - 2026-09-22
+
+### Added
+
+- Offer Daybreak Blue as a separate Codex turn option on eligible GPT-6 Sol accounts.
+
+### Fixed
+
+- List GPT-6 Sol among current models and prefer it for new Codex tasks when available.
+- Keep the older Daybreak model alias for existing tasks without duplicating it in the picker when GPT-6 Sol supports Daybreak.
+
 ## 0.7.2 - 2026-09-16
 
 ### Fixed

@@ -78,6 +78,7 @@ export interface AppModelOption {
   isCustom: boolean;
   isDefault?: boolean;
   isLegacy?: boolean;
+  daybreakBlueAvailable?: boolean;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -90,6 +91,16 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   if (model.subProvider) option.subProvider = model.subProvider;
   if (model.isDefault) option.isDefault = true;
   if (model.isLegacy) option.isLegacy = true;
+  if (
+    model.capabilities?.optionDescriptors?.some(
+      (descriptor) =>
+        descriptor.id === "cyberAccessProgram" &&
+        descriptor.type === "select" &&
+        descriptor.options.some((choice) => choice.id === "daybreakBlue"),
+    )
+  ) {
+    option.daybreakBlueAvailable = true;
+  }
   return option;
 }
 

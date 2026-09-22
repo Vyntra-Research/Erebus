@@ -12,3 +12,13 @@ export function getCodexServiceTierOptionValue(
     (getModelSelectionBooleanOptionValue(modelSelection, "fastMode") === true ? "fast" : undefined)
   );
 }
+
+export function getCodexCyberAccessProgramOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+): "standard" | "daybreakBlue" | undefined {
+  if (modelSelection?.model !== "gpt-6-sol") {
+    return undefined;
+  }
+  const value = getModelSelectionStringOptionValue(modelSelection, "cyberAccessProgram");
+  return value === "standard" || value === "daybreakBlue" ? value : undefined;
+}
