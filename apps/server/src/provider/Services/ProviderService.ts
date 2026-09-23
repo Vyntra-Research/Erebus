@@ -99,6 +99,11 @@ export interface ProviderServiceShape {
     input: ProviderStopSessionInput,
   ) => Effect.Effect<void, ProviderServiceError>;
 
+  /** Stop and permanently remove provider history for a discarded co-agent. */
+  readonly deletePersistedThreadHistory: (
+    threadId: ThreadId,
+  ) => Effect.Effect<boolean, ProviderServiceError>;
+
   /**
    * List active provider sessions.
    *

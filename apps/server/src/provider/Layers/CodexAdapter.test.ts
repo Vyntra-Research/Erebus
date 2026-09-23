@@ -3,6 +3,7 @@ import * as NodeAssert from "node:assert/strict";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 import {
   ApprovalRequestId,
   CodexSettings,
@@ -276,6 +277,51 @@ const validationLayer = it.layer(
 );
 
 validationLayer("CodexAdapterLive validation", (it) => {
+  it.effect("deletes only the persisted id of a stopped Codex session", () => {
+    const stateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "erebus-codex-delete-"));
+    const codexHome = NodePath.join(stateDir, "userdata", "providers", "codex");
+    NodeFS.mkdirSync(codexHome, { recursive: true });
+    const stateDb = new NodeSqlite.DatabaseSync(NodePath.join(codexHome, "state_5.sqlite"));
+    stateDb.exec(
+      "CREATE TABLE threads (id TEXT PRIMARY KEY); CREATE TABLE thread_spawn_edges (parent_thread_id TEXT, child_thread_id TEXT)",
+    );
+    stateDb.prepare("INSERT INTO threads (id) VALUES (?)").run("provider-cleanup-id");
+    stateDb.close();
+    const deleteProviderThread = vi.fn((_providerThreadId: string) => Effect.void);
+    const layer = Layer.effect(
+      CodexAdapter,
+      makeCodexAdapter(decodeCodexSettings({}), {
+        makeRuntime: makeRuntimeFactory().factory,
+        deleteProviderThread,
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(stateDir, stateDir)),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("cleanup-test-thread");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const activeAttempt = yield* adapter.deletePersistedThread!(threadId, {
+        threadId: "provider-cleanup-id",
+      }).pipe(Effect.result);
+      NodeAssert.equal(activeAttempt._tag, "Failure");
+      NodeAssert.equal(deleteProviderThread.mock.calls.length, 0);
+      yield* adapter.stopSession(threadId);
+      yield* adapter.deletePersistedThread!(threadId, { threadId: "provider-cleanup-id" });
+      NodeAssert.deepStrictEqual(deleteProviderThread.mock.calls, [["provider-cleanup-id"]]);
+    }).pipe(
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(stateDir, { recursive: true, force: true }))),
+    );
+  });
+
   it.effect("returns validation error for non-codex provider on startSession", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;

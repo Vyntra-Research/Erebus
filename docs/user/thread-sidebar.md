@@ -10,6 +10,10 @@ request merges if **Auto-settle merged threads** is enabled.
 When you un-settle a thread, it returns to the top of the active list so you can find it right
 away. Its timestamps do not change. Other threads keep their positions.
 
+Deleting a co-agent thread also deletes its stored Codex conversation and the history of any
+subagents it started. The parent task and other threads stay intact. `threads.release` does the
+same after the co-agent finishes, so collect its result before releasing it. This cannot be undone.
+
 Right-click a pull request link in a thread and choose **Link to thread** to show that pull request
 in the sidebar. The thread settles when the linked pull request merges if **Auto-settle merged
 threads** is enabled. Right-click the same link and choose **Unlink from thread** to remove it.

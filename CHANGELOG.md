@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.4 - 2026-09-23
+
+### Fixed
+
+- Delete stored Codex history when a co-agent thread is removed or released, while keeping other threads intact.
+
 ## 0.7.3 - 2026-09-22
 
 ### Added

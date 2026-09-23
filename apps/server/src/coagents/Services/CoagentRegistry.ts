@@ -31,6 +31,17 @@ export interface CoagentRegistryShape {
   readonly listByParent: (
     parentThreadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<CoagentThreadLink>, ProjectionRepositoryError>;
+  readonly listDeletedPendingHistoryCleanup: () => Effect.Effect<
+    ReadonlyArray<ThreadId>,
+    ProjectionRepositoryError
+  >;
+  readonly isDeletedPendingHistoryCleanup: (
+    childThreadId: ThreadId,
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
+  readonly markProviderHistoryDeleted: (
+    childThreadId: ThreadId,
+    deletedAt: string,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 export class CoagentRegistry extends Context.Service<CoagentRegistry, CoagentRegistryShape>()(

@@ -173,6 +173,7 @@ describe("ProviderSessionReaper", () => {
       respondToRequest: () => unsupported(),
       respondToUserInput: () => unsupported(),
       stopSession,
+      deletePersistedThreadHistory: () => unsupported(),
       listSessions: () => Effect.succeed([]),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       getInstanceInfo: (instanceId) => {

@@ -176,6 +176,11 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       }),
   );
 
+  const deletePersistedThread = vi.fn(
+    (_threadId: ThreadId, _resumeCursor: unknown): Effect.Effect<void, ProviderAdapterError> =>
+      Effect.void,
+  );
+
   const listSessions = vi.fn(
     (): Effect.Effect<ReadonlyArray<ProviderSession>> =>
       Effect.sync(() => Array.from(sessions.values())),
@@ -235,6 +240,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     respondToRequest,
     respondToUserInput,
     stopSession,
+    deletePersistedThread,
     listSessions,
     hasSession,
     readThread,
@@ -272,6 +278,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     respondToRequest,
     respondToUserInput,
     stopSession,
+    deletePersistedThread,
     listSessions,
     hasSession,
     readThread,
@@ -1031,6 +1038,29 @@ it.effect(
 );
 
 routing.layer("ProviderServiceLive routing", (it) => {
+  it.effect("stops the bound session before deleting its persisted provider history", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-delete-provider-history");
+      const session = yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const deleted = yield* provider.deletePersistedThreadHistory(threadId);
+      assert.equal(deleted, true);
+      assert.deepEqual(routing.codex.deletePersistedThread.mock.calls, [
+        [threadId, session.resumeCursor],
+      ]);
+      assert.equal(
+        routing.codex.stopSession.mock.invocationCallOrder[0]! <
+          routing.codex.deletePersistedThread.mock.invocationCallOrder[0]!,
+        true,
+      );
+    }),
+  );
+
   it.effect("routes provider operations and rollback conversation", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
