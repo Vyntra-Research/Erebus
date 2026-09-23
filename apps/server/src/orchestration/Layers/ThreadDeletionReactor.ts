@@ -1,10 +1,13 @@
-import type { OrchestrationEvent } from "@t3tools/contracts";
+import type { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
+import { CoagentRegistry } from "../../coagents/Services/CoagentRegistry.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -40,6 +43,7 @@ export const logCleanupCauseUnlessInterrupted = <R, E>({
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
+  const coagents = yield* CoagentRegistry;
   const terminalManager = yield* TerminalManager.TerminalManager;
 
   const stopProviderSession = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
@@ -56,23 +60,36 @@ const make = Effect.gen(function* () {
       threadId,
     });
 
-  const processThreadDeleted = Effect.fn("processThreadDeleted")(function* (
-    event: ThreadDeletedEvent,
-  ) {
-    const { threadId } = event.payload;
-    yield* stopProviderSession(threadId);
-    yield* closeThreadTerminals(threadId);
+  const processThreadDeleted = Effect.fn("processThreadDeleted")(function* (threadId: ThreadId) {
+    const coagent = yield* coagents.getByChild(threadId);
+    const pending = Option.isSome(coagent)
+      ? yield* coagents.isDeletedPendingHistoryCleanup(threadId)
+      : false;
+    if (!pending) {
+      yield* stopProviderSession(threadId);
+      yield* closeThreadTerminals(threadId);
+      return;
+    }
+    yield* Effect.gen(function* () {
+      const deleted = yield* providerService.deletePersistedThreadHistory(threadId);
+      if (!deleted) {
+        yield* Effect.logWarning("co-agent provider does not support permanent history deletion", {
+          threadId,
+        });
+        return;
+      }
+      yield* coagents.markProviderHistoryDeleted(threadId, DateTime.formatIso(yield* DateTime.now));
+    }).pipe(Effect.ensuring(Effect.ignore(closeThreadTerminals(threadId))));
   });
 
-  const processThreadDeletedSafely = (event: ThreadDeletedEvent) =>
-    processThreadDeleted(event).pipe(
+  const processThreadDeletedSafely = (threadId: ThreadId) =>
+    processThreadDeleted(threadId).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
         }
         return Effect.logWarning("thread deletion reactor failed to process event", {
-          eventType: event.type,
-          threadId: event.payload.threadId,
+          threadId,
           cause: Cause.pretty(cause),
         });
       }),
@@ -86,9 +103,17 @@ const make = Effect.gen(function* () {
         if (event.type !== "thread.deleted") {
           return Effect.void;
         }
-        return worker.enqueue(event);
+        return worker.enqueue(event.payload.threadId);
       }),
     );
+    const pending = yield* coagents.listDeletedPendingHistoryCleanup().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("could not list deleted co-agents awaiting provider cleanup", {
+          cause: Cause.pretty(cause),
+        }).pipe(Effect.as([] as ReadonlyArray<ThreadId>)),
+      ),
+    );
+    yield* Effect.forEach(pending, worker.enqueue, { discard: true });
   });
 
   return {

@@ -1154,6 +1154,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const stopSession: ProviderServiceMethod<"stopSession"> = (input) =>
     sessionLifecycleLock.withPermits(1)(stopSessionUnlocked(input));
 
+  const deletePersistedThreadHistory: ProviderServiceMethod<"deletePersistedThreadHistory"> = (
+    threadId,
+  ) =>
+    sessionLifecycleLock.withPermits(1)(
+      Effect.gen(function* () {
+        const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        if (!binding || (!binding.resumeCursor && binding.status === "stopped")) return true;
+        const instanceId = yield* requireBindingInstanceId(
+          "ProviderService.deletePersistedThreadHistory",
+          binding,
+        );
+        const adapter = yield* registry.getByInstance(instanceId);
+        yield* stopSessionUnlocked({ threadId });
+        if (!binding.resumeCursor) return true;
+        if (!adapter.deletePersistedThread) return false;
+        yield* adapter.deletePersistedThread(threadId, binding.resumeCursor);
+        return true;
+      }),
+    );
+
   const listSessions: ProviderServiceMethod<"listSessions"> = Effect.fn("listSessions")(
     function* () {
       const currentAdapters = yield* getAdapterEntries;
@@ -1400,6 +1420,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    deletePersistedThreadHistory,
     listSessions,
     getCapabilities,
     getInstanceInfo,

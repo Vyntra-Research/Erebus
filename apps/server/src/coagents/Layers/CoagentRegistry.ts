@@ -126,6 +126,33 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  const listDeletedPendingHistoryCleanupRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({ childThreadId: ThreadId }),
+    execute: () => sql`
+      SELECT c.child_thread_id AS "childThreadId"
+      FROM coagent_threads c
+      JOIN projection_threads t ON t.thread_id = c.child_thread_id
+      WHERE t.deleted_at IS NOT NULL
+        AND c.provider_history_deleted_at IS NULL
+      ORDER BY t.deleted_at ASC, c.child_thread_id ASC
+    `,
+  });
+
+  const isDeletedPendingHistoryCleanupRow = SqlSchema.findOneOption({
+    Request: ThreadId,
+    Result: Schema.Struct({ childThreadId: ThreadId }),
+    execute: (childThreadId) => sql`
+      SELECT c.child_thread_id AS "childThreadId"
+      FROM coagent_threads c
+      JOIN projection_threads t ON t.thread_id = c.child_thread_id
+      WHERE c.child_thread_id = ${childThreadId}
+        AND t.deleted_at IS NOT NULL
+        AND c.provider_history_deleted_at IS NULL
+      LIMIT 1
+    `,
+  });
+
   return CoagentRegistry.of({
     reserve: (link, maxActiveChildren) =>
       reserveRow({ link, maxActiveChildren }).pipe(
@@ -141,6 +168,30 @@ const make = Effect.gen(function* () {
     listByParent: (parentThreadId) =>
       listByParentRows(parentThreadId).pipe(
         Effect.mapError(toPersistenceSqlError("CoagentRegistry.listByParent")),
+      ),
+    listDeletedPendingHistoryCleanup: () =>
+      listDeletedPendingHistoryCleanupRows().pipe(
+        Effect.map((rows) => rows.map((row) => row.childThreadId)),
+        Effect.mapError(toPersistenceSqlError("CoagentRegistry.listDeletedPendingHistoryCleanup")),
+      ),
+    isDeletedPendingHistoryCleanup: (childThreadId) =>
+      isDeletedPendingHistoryCleanupRow(childThreadId).pipe(
+        Effect.map(Option.isSome),
+        Effect.mapError(toPersistenceSqlError("CoagentRegistry.isDeletedPendingHistoryCleanup")),
+      ),
+    markProviderHistoryDeleted: (childThreadId, deletedAt) =>
+      sql`
+        UPDATE coagent_threads
+        SET provider_history_deleted_at = ${deletedAt}
+        WHERE child_thread_id = ${childThreadId}
+          AND provider_history_deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM projection_threads
+            WHERE thread_id = ${childThreadId} AND deleted_at IS NOT NULL
+          )
+      `.pipe(
+        Effect.asVoid,
+        Effect.mapError(toPersistenceSqlError("CoagentRegistry.markProviderHistoryDeleted")),
       ),
   });
 });

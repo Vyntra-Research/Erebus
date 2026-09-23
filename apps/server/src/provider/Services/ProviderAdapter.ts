@@ -107,6 +107,12 @@ export interface ProviderAdapterShape<TError> {
    */
   readonly stopSession: (threadId: ThreadId) => Effect.Effect<void, TError>;
 
+  /** Permanently remove a stopped provider thread's persisted history, when supported. */
+  readonly deletePersistedThread?: (
+    threadId: ThreadId,
+    resumeCursor: unknown,
+  ) => Effect.Effect<void, TError>;
+
   /**
    * List currently active provider sessions for this adapter.
    */

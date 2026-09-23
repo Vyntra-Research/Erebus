@@ -79,6 +79,8 @@ import {
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { makeInitializedCodexClient } from "./CodexProvider.ts";
+import { inspectManagedCodexThreadDeletion } from "../Drivers/CodexThreadDeletionGuard.ts";
 import { ensureCodexThreadRolloutIndexed } from "../Drivers/CodexRolloutPathRepair.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
@@ -99,6 +101,9 @@ export interface CodexAdapterLiveOptions {
     CodexSessionRuntimeError,
     ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
   >;
+  readonly deleteProviderThread?: (
+    providerThreadId: string,
+  ) => Effect.Effect<void, CodexErrors.CodexAppServerError>;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly researchToolController?: ResearchToolControllerShape;
@@ -2258,6 +2263,88 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       yield* stopSessionInternal(session);
     });
 
+  const deletePersistedThread: NonNullable<CodexAdapterShape["deletePersistedThread"]> = (
+    threadId,
+    resumeCursor,
+  ) =>
+    Effect.gen(function* () {
+      if (!isCodexResumeCursorSchema(resumeCursor)) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "deletePersistedThread",
+          issue: "The persisted Codex thread id is missing.",
+        });
+      }
+      if (sessions.has(threadId)) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "deletePersistedThread",
+          issue: "The provider session must be stopped before its history is deleted.",
+        });
+      }
+      const historyIndex = yield* Effect.try({
+        try: () =>
+          inspectManagedCodexThreadDeletion({
+            sharedHomePath: `${serverConfig.stateDir}/providers/codex`,
+            effectiveHomePath: codexConfig.homePath || `${serverConfig.stateDir}/providers/codex`,
+            providerThreadId: resumeCursor.threadId,
+          }),
+        catch: (cause) =>
+          new ProviderAdapterProcessError({
+            provider: PROVIDER,
+            threadId,
+            detail: "Could not verify whether another Codex account owns this thread.",
+            cause,
+          }),
+      });
+      if (historyIndex.indexedElsewhere) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "deletePersistedThread",
+          issue: "The same Codex thread is indexed by another account; history was preserved.",
+        });
+      }
+      if (!historyIndex.indexedHere) return;
+      const deleteProviderThread =
+        options?.deleteProviderThread ??
+        ((providerThreadId: string) =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const { client } = yield* makeInitializedCodexClient({
+                binaryPath: codexConfig.binaryPath,
+                ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+                launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
+                cwd: serverConfig.stateDir,
+                ...(options?.environment ? { environment: options.environment } : {}),
+              });
+              yield* client
+                .request("thread/delete", { threadId: providerThreadId })
+                .pipe(
+                  Effect.catchTag("CodexAppServerRequestError", (error) =>
+                    error.code === -32600 &&
+                    error.errorMessage.toLowerCase() ===
+                      `thread not found: ${providerThreadId}`.toLowerCase()
+                      ? Effect.void
+                      : Effect.fail(error),
+                  ),
+                );
+            }).pipe(
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+            ),
+          ));
+      yield* deleteProviderThread(resumeCursor.threadId).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId,
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
+    });
+
   const listSessions: CodexAdapterShape["listSessions"] = () =>
     Effect.forEach(
       Array.from(sessions.values()).filter((session) => !session.stopped),
@@ -2300,6 +2387,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    deletePersistedThread,
     listSessions,
     hasSession,
     stopAll,

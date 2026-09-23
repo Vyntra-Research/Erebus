@@ -302,6 +302,10 @@ layer("CoagentToolController", (it) => {
         Option.getOrThrow(yield* registry.getByChild(child.id)).status,
         "released",
       );
+      assert.isTrue(yield* registry.isDeletedPendingHistoryCleanup(child.id));
+      assert.include(yield* registry.listDeletedPendingHistoryCleanup(), child.id);
+      yield* registry.markProviderHistoryDeleted(child.id, now);
+      assert.isFalse(yield* registry.isDeletedPendingHistoryCleanup(child.id));
 
       const replacement = yield* call(controller, context, "spawn", {
         mode: "blank",
@@ -309,6 +313,29 @@ layer("CoagentToolController", (it) => {
         task: "Use the released slot.",
       });
       assert.isTrue(replacement.success);
+    }),
+  );
+
+  it.effect("queues provider cleanup when a co-agent is deleted outside threads.release", () =>
+    Effect.gen(function* () {
+      const context = yield* seedParent("ui-delete");
+      const controller = yield* CoagentToolController;
+      assert(controller);
+      const created = yield* call(controller, context, "spawn", {
+        mode: "blank",
+        title: "Disposable child",
+        task: "Return a bounded result.",
+      });
+      const childId = ThreadId.make(String(parseResponse(created).threadId));
+      yield* awaitThread(childId);
+      const engine = yield* OrchestrationEngineService;
+      yield* engine.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("delete-ui-coagent-test"),
+        threadId: childId,
+      });
+      const registry = yield* CoagentRegistry;
+      assert.isTrue(yield* registry.isDeletedPendingHistoryCleanup(childId));
     }),
   );
 });
