@@ -284,8 +284,10 @@ export function parseCodexModelListResponse(
     ...(model.isDefault ? { isDefault: true } : {}),
     capabilities: mapCodexModelCapabilities(
       model,
-      model.model === "gpt-6-sol" &&
-        (model.availableAccessPrograms?.cyber.includes("daybreakBlue") ?? hasDaybreakBlueAlias),
+      model.availableAccessPrograms
+        ? model.availableAccessPrograms.cyber.includes("standard") &&
+            model.availableAccessPrograms.cyber.includes("daybreakBlue")
+        : model.model === "gpt-6-sol" && hasDaybreakBlueAlias,
     ),
   }));
 }

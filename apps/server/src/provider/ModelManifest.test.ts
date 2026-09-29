@@ -24,6 +24,7 @@ describe("isLegacyModel (bundled manifest)", () => {
     assert.deepStrictEqual(
       [
         "gpt-6-astra",
+        "gpt-6.1-sol",
         "gpt-6-sol",
         "gpt-6-luna",
         "gpt-5.6-luna",
@@ -35,6 +36,7 @@ describe("isLegacyModel (bundled manifest)", () => {
       ].map((model) => [model, isLegacyModel(BUNDLED_MODEL_MANIFEST, CODEX, model)]),
       [
         ["gpt-6-astra", false],
+        ["gpt-6.1-sol", false],
         ["gpt-6-sol", false],
         ["gpt-6-luna", false],
         ["gpt-5.6-luna", false],
