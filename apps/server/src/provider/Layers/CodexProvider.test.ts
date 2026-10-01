@@ -173,6 +173,23 @@ it("uses explicit model access programs when Codex advertises them", () => {
   assert.equal(models[0]?.capabilities?.optionDescriptors?.at(-1)?.id, "cyberAccessProgram");
 });
 
+it("offers Daybreak on the GPT-5.6 models that advertise it", () => {
+  const models = parseCodexModelListResponse(
+    ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].map((model) => ({
+      ...solModel,
+      id: model,
+      model,
+      availableAccessPrograms: { cyber: ["standard", "daybreakBlue"] },
+    })),
+  );
+
+  assert.isTrue(
+    models.every((model) =>
+      model.capabilities?.optionDescriptors?.some((option) => option.id === "cyberAccessProgram"),
+    ),
+  );
+});
+
 it("keeps Daybreak off GPT-6.1 Sol when only standard access is advertised", () => {
   const models = parseCodexModelListResponse([
     {

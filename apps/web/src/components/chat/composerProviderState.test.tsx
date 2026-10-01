@@ -145,6 +145,23 @@ describe("getComposerProviderState", () => {
     });
   });
 
+  it("drops a saved Daybreak choice when the selected model does not advertise it", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([
+        selectDescriptor("reasoningEffort", [
+          { id: "medium", label: "Medium", isDefault: true },
+          { id: "high", label: "High" },
+        ]),
+      ]),
+      modelOptions: selections(["cyberAccessProgram", "daybreakBlue"]),
+      planModeEnabled: false,
+    });
+
+    expect(state.modelOptionsForDispatch).toEqual(selections(["reasoningEffort", "medium"]));
+  });
+
   it("derives promptEffort from the first select descriptor and preserves all others for dispatch", () => {
     const state = getComposerProviderState({
       provider: PROVIDER,

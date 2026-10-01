@@ -24,12 +24,15 @@ it("keeps legacy persisted fast mode selections working", () => {
   assert.equal(getCodexServiceTierOptionValue(selection), "fast");
 });
 
-it("keeps Daybreak selection separate from the model and ignores it on unsupported models", () => {
-  const sol = createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-sol", [
-    { id: "cyberAccessProgram", value: "daybreakBlue" },
+it("reads Daybreak selection independently of the model slug", () => {
+  for (const model of ["gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+    const selection = createModelSelection(ProviderInstanceId.make("codex"), model, [
+      { id: "cyberAccessProgram", value: "daybreakBlue" },
+    ]);
+    assert.equal(getCodexCyberAccessProgramOptionValue(selection), "daybreakBlue");
+  }
+  const invalid = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.6-sol", [
+    { id: "cyberAccessProgram", value: "invalid" },
   ]);
-  const astra = { ...sol, model: "gpt-6-astra" };
-
-  assert.equal(getCodexCyberAccessProgramOptionValue(sol), "daybreakBlue");
-  assert.equal(getCodexCyberAccessProgramOptionValue(astra), undefined);
+  assert.equal(getCodexCyberAccessProgramOptionValue(invalid), undefined);
 });
