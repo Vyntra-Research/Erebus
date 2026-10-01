@@ -58,37 +58,37 @@ function settingsWithProviderInstances(): UnifiedSettings {
 }
 
 describe("instance-scoped model selection", () => {
-  it("keeps Daybreak availability on the GPT-6 Sol picker option", () => {
-    const baseProvider = provider({ instanceId: "codex", models: ["gpt-6-sol"] });
+  it("keeps Daybreak availability on supported Codex picker options", () => {
+    const slugs = ["gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+    const baseProvider = provider({ instanceId: "codex", models: slugs });
     const providers = [
       {
         ...baseProvider,
-        models: [
-          {
-            ...baseProvider.models[0]!,
-            capabilities: {
-              optionDescriptors: [
-                {
-                  id: "cyberAccessProgram",
-                  label: "Daybreak",
-                  type: "select" as const,
-                  options: [
-                    { id: "standard", label: "Standard" },
-                    { id: "daybreakBlue", label: "Daybreak Blue" },
-                  ],
-                },
-              ],
-            },
+        models: baseProvider.models.map((model) => ({
+          ...model,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "cyberAccessProgram",
+                label: "Daybreak",
+                type: "select" as const,
+                options: [
+                  { id: "standard", label: "Standard" },
+                  { id: "daybreakBlue", label: "Daybreak Blue" },
+                ],
+              },
+            ],
           },
-        ],
+        })),
       },
     ];
     const codex = deriveProviderInstanceEntries(providers)[0]!;
 
     expect(
-      getAppModelOptionsForInstance(settingsWithProviderInstances(), codex)[0]
-        ?.daybreakBlueAvailable,
-    ).toBe(true);
+      getAppModelOptionsForInstance(settingsWithProviderInstances(), codex).map(
+        (model) => model.daybreakBlueAvailable,
+      ),
+    ).toEqual(slugs.map(() => true));
   });
 
   it("preserves server-provided legacy model metadata", () => {

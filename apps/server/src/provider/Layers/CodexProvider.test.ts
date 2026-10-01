@@ -173,6 +173,66 @@ it("uses explicit model access programs when Codex advertises them", () => {
   assert.equal(models[0]?.capabilities?.optionDescriptors?.at(-1)?.id, "cyberAccessProgram");
 });
 
+it("offers Daybreak on the GPT-5.6 models that advertise it", () => {
+  const models = parseCodexModelListResponse(
+    ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].map((model) => ({
+      ...solModel,
+      id: model,
+      model,
+      availableAccessPrograms: { cyber: ["standard", "daybreakBlue"] },
+    })),
+  );
+
+  assert.isTrue(
+    models.every((model) =>
+      model.capabilities?.optionDescriptors?.some((option) => option.id === "cyberAccessProgram"),
+    ),
+  );
+});
+
+it("keeps Daybreak off GPT-6.1 Sol when only standard access is advertised", () => {
+  const models = parseCodexModelListResponse([
+    {
+      ...solModel,
+      id: "gpt-6.1-sol",
+      model: "gpt-6.1-sol",
+      displayName: "GPT-6.1 Sol",
+      availableAccessPrograms: { cyber: ["standard"] },
+    },
+    {
+      ...solModel,
+      id: "gpt-daybreak-blue-latest",
+      model: "gpt-daybreak-blue-latest",
+      displayName: "Daybreak Blue",
+      availableAccessPrograms: { cyber: ["daybreakBlue"] },
+    },
+  ]);
+
+  assert.isFalse(
+    models[0]?.capabilities?.optionDescriptors?.some(
+      (option) => option.id === "cyberAccessProgram",
+    ),
+  );
+  assert.isFalse(
+    models[1]?.capabilities?.optionDescriptors?.some(
+      (option) => option.id === "cyberAccessProgram",
+    ),
+  );
+});
+
+it("offers Daybreak on a future model when Codex explicitly advertises both modes", () => {
+  const models = parseCodexModelListResponse([
+    {
+      ...solModel,
+      id: "gpt-6.1-sol",
+      model: "gpt-6.1-sol",
+      availableAccessPrograms: { cyber: ["standard", "daybreakBlue"] },
+    },
+  ]);
+
+  assert.equal(models[0]?.capabilities?.optionDescriptors?.at(-1)?.id, "cyberAccessProgram");
+});
+
 it.effect("preserves access programs from the raw Codex model catalog", () =>
   Effect.gen(function* () {
     const client = {

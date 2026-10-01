@@ -510,6 +510,37 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }),
   );
 
+  it.effect("passes Daybreak on GPT-5.6 Sol without changing the model slug", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("daybreak-5.6-turn"),
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      yield* Effect.ignore(
+        adapter.sendTurn({
+          threadId: asThreadId("daybreak-5.6-turn"),
+          input: "Review the target",
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.6-sol", [
+            { id: "cyberAccessProgram", value: "daybreakBlue" },
+          ]),
+          attachments: [],
+        }),
+      );
+
+      NodeAssert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+        input: "Review the target",
+        model: "gpt-5.6-sol",
+        cyberAccessProgram: "daybreakBlue",
+      });
+    }),
+  );
+
   it.effect("forwards live user steer identity to the Codex runtime", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
