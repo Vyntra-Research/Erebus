@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.5 - 2026-09-30
+
+### Fixed
+
+- List GPT-6.1 Sol among current Codex models.
+- Show and apply Daybreak Blue on models that advertise support, including eligible GPT-5.6 models.
+
 ## 0.7.4 - 2026-09-23
 
 ### Fixed
