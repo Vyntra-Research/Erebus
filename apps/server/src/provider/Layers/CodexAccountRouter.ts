@@ -40,8 +40,7 @@ function remainingPercent(provider: ServerProvider | undefined): number | undefi
 }
 
 function hasRemainingQuota(provider: ServerProvider): boolean {
-  const remaining = remainingPercent(provider);
-  return provider.accountUsage?.reached !== true && (remaining === undefined || remaining > 0);
+  return provider.accountUsage?.reached !== true;
 }
 
 export function selectCodexAccount(input: {
@@ -62,6 +61,10 @@ export function selectCodexAccount(input: {
     accounts.find((provider) => provider.instanceId === DEFAULT_CODEX_INSTANCE) ??
     accounts[0]!;
   if (!input.policy.enabled || accounts.length === 1) return primary.instanceId;
+
+  if (accounts.every((provider) => remainingPercent(provider) === 0)) {
+    return primary.instanceId;
+  }
 
   const active =
     accounts.find((provider) => provider.instanceId === input.activeInstanceId) ?? primary;
