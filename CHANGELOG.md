@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.6 - 2026-10-02
+
+### Fixed
+
+- Refresh each Codex account's quota while the app is connected, even when a full provider check stalls.
+- Keep the last known quota when a provider check misses a rate-limit response.
+
 ## 0.7.5 - 2026-09-30
 
 ### Fixed

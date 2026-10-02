@@ -573,6 +573,19 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           ...readyProvider,
           checkedAt: timedOutProvider.checkedAt,
         });
+        const refreshedUsage = {
+          remainingPercent: 12,
+          primary: null,
+          secondary: null,
+          reached: false,
+        };
+        assert.deepStrictEqual(
+          mergeProviderSnapshot(readyProvider, {
+            ...timedOutProvider,
+            accountUsage: refreshedUsage,
+          }).accountUsage,
+          refreshedUsage,
+        );
       });
     });
 

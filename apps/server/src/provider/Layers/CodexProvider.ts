@@ -104,6 +104,18 @@ export function normalizeCodexAccountUsage(
   };
 }
 
+export const readCodexAccountUsage = Effect.fn("readCodexAccountUsage")(function* (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly launchArgs?: string;
+  readonly cwd: string;
+  readonly environment?: NodeJS.ProcessEnv;
+}) {
+  const { client } = yield* makeInitializedCodexClient(input);
+  const response = yield* client.request("account/rateLimits/read", undefined);
+  return normalizeCodexAccountUsage(response);
+});
+
 const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
   none: "None",
   minimal: "Minimal",

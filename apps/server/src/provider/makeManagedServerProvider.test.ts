@@ -151,6 +151,94 @@ const enrichedSnapshotSecond: ServerProvider = {
 
 describe("makeManagedServerProvider", () => {
   it.effect(
+    "updates account usage independently and keeps the last value after a missed read",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const initialCheckDone = yield* Deferred.make<void>();
+          const usageReads = yield* Ref.make(0);
+          const firstUsage = {
+            remainingPercent: 24,
+            primary: null,
+            secondary: null,
+            reached: false,
+          };
+          const latestUsage = { ...firstUsage, remainingPercent: 19 };
+          const provider = yield* makeManagedServerProvider<TestSettings>({
+            maintenanceCapabilities,
+            getSettings: Effect.succeed({ enabled: true }),
+            streamSettings: Stream.empty,
+            haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+            initialSnapshot: () => Effect.succeed(initialSnapshot),
+            checkProvider: Deferred.succeed(initialCheckDone, undefined).pipe(
+              Effect.as(refreshedSnapshot),
+            ),
+            refreshAccountUsage: Ref.updateAndGet(usageReads, (count) => count + 1).pipe(
+              Effect.map((count) =>
+                count === 1 ? firstUsage : count === 2 ? undefined : latestUsage,
+              ),
+            ),
+            accountUsageRefreshInterval: "1 second",
+            refreshInterval: "1 hour",
+          });
+
+          yield* Deferred.await(initialCheckDone);
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust("1 second");
+          assert.deepStrictEqual((yield* provider.getSnapshot).accountUsage, firstUsage);
+
+          yield* TestClock.adjust("1 second");
+          assert.deepStrictEqual((yield* provider.getSnapshot).accountUsage, firstUsage);
+          yield* provider.refresh;
+          assert.deepStrictEqual((yield* provider.getSnapshot).accountUsage, firstUsage);
+
+          yield* TestClock.adjust("1 second");
+          assert.deepStrictEqual((yield* provider.getSnapshot).accountUsage, latestUsage);
+          assert.strictEqual(yield* Ref.get(usageReads), 3);
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(AlwaysRunTestLayer, TestClock.layer()))),
+  );
+
+  it.effect("does not let a delayed version update replace fresher account usage", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const releaseEnrichment = yield* Deferred.make<void>();
+        const enrichmentDone = yield* Deferred.make<void>();
+        const usage = {
+          remainingPercent: 11,
+          primary: null,
+          secondary: null,
+          reached: false,
+        };
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Effect.succeed(refreshedSnapshot),
+          refreshAccountUsage: Effect.succeed(usage),
+          accountUsageRefreshInterval: "1 second",
+          refreshInterval: "1 hour",
+          enrichSnapshot: ({ publishSnapshot }) =>
+            Deferred.await(releaseEnrichment).pipe(
+              Effect.andThen(publishSnapshot(enrichedSnapshot)),
+              Effect.andThen(Deferred.succeed(enrichmentDone, undefined)),
+              Effect.asVoid,
+            ),
+        });
+
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("1 second");
+        assert.deepStrictEqual((yield* provider.getSnapshot).accountUsage, usage);
+        yield* Deferred.succeed(releaseEnrichment, undefined);
+        yield* Deferred.await(enrichmentDone);
+        assert.deepStrictEqual((yield* provider.getSnapshot).accountUsage, usage);
+      }),
+    ).pipe(Effect.provide(Layer.mergeAll(AlwaysRunTestLayer, TestClock.layer()))),
+  );
+
+  it.effect(
     "runs the initial provider check in the background and streams the refreshed snapshot",
     () =>
       Effect.scoped(

@@ -140,6 +140,9 @@ export const mergeProviderSnapshot = (
       ? {
           ...previousProvider,
           checkedAt: nextProvider.checkedAt,
+          ...(nextProvider.accountUsage !== undefined
+            ? { accountUsage: nextProvider.accountUsage }
+            : {}),
           ...(nextProvider.updateState !== undefined
             ? { updateState: nextProvider.updateState }
             : {}),
