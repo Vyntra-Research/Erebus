@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.7 - 2026-10-02
+
+### Fixed
+
+- Keep Codex accounts available when their included quota ends but usage credits remain.
+- Prefer the primary credit-backed account when every account has used its included quota.
+
 ## 0.7.6 - 2026-10-02
 
 ### Fixed
