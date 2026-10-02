@@ -1,9 +1,11 @@
 import {
   DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL,
+  type ServerProviderAccountUsage,
   type ServerProvider,
   ServerSettingsError,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -40,6 +42,8 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   }) => Effect.Effect<void>;
   readonly refreshInterval?: Duration.Input;
+  readonly refreshAccountUsage?: Effect.Effect<ServerProviderAccountUsage | undefined>;
+  readonly accountUsageRefreshInterval?: Duration.Input;
 }): Effect.fn.Return<
   ServerProviderShape,
   ServerSettingsError,
@@ -67,14 +71,25 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     nextSnapshot: ServerProvider,
   ) {
     const snapshotToPublish = yield* Ref.modify(snapshotStateRef, (state) => {
-      if (state.enrichmentGeneration !== generation || Equal.equals(state.snapshot, nextSnapshot)) {
+      const enrichedSnapshot =
+        input.refreshAccountUsage && state.snapshot.accountUsage
+          ? {
+              ...nextSnapshot,
+              accountUsage: state.snapshot.accountUsage,
+              checkedAt: state.snapshot.checkedAt,
+            }
+          : nextSnapshot;
+      if (
+        state.enrichmentGeneration !== generation ||
+        Equal.equals(state.snapshot, enrichedSnapshot)
+      ) {
         return [null, state] as const;
       }
       return [
-        nextSnapshot,
+        enrichedSnapshot,
         {
           ...state,
-          snapshot: nextSnapshot,
+          snapshot: enrichedSnapshot,
         },
       ] as const;
     });
@@ -121,7 +136,17 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
     }
 
-    const nextSnapshot = yield* input.checkProvider;
+    const checkedSnapshot = yield* input.checkProvider;
+    const previousSnapshot = (yield* Ref.get(snapshotStateRef)).snapshot;
+    const nextSnapshot =
+      input.refreshAccountUsage &&
+      checkedSnapshot.enabled &&
+      checkedSnapshot.installed &&
+      checkedSnapshot.auth.status !== "unauthenticated" &&
+      checkedSnapshot.accountUsage === undefined &&
+      previousSnapshot.accountUsage
+        ? { ...checkedSnapshot, accountUsage: previousSnapshot.accountUsage }
+        : checkedSnapshot;
     const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) => {
       const generation = input.enrichSnapshot
         ? state.enrichmentGeneration + 1
@@ -212,6 +237,46 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       Effect.ignoreCause({ log: true }),
     ),
   ).pipe(Effect.forkScoped);
+
+  if (input.refreshAccountUsage) {
+    const refreshAccountUsage = input.refreshAccountUsage;
+    yield* Effect.forever(
+      Effect.sleep(input.accountUsageRefreshInterval ?? "1 minute").pipe(
+        Effect.andThen(
+          Effect.gen(function* () {
+            const current = (yield* Ref.get(snapshotStateRef)).snapshot;
+            if (!current.enabled || current.auth.status === "unauthenticated") return;
+            const [genericDemand, instanceDemand] = yield* Effect.all([
+              backgroundPolicy.hasDemand({ type: "provider-status" }),
+              backgroundPolicy.hasDemand({
+                type: "provider-status",
+                instanceId: current.instanceId,
+              }),
+            ]);
+            if (!genericDemand && !instanceDemand) return;
+            const usage = yield* refreshAccountUsage;
+            if (!usage) return;
+            yield* refreshSemaphore.withPermits(1)(
+              Effect.gen(function* () {
+                const state = yield* Ref.get(snapshotStateRef);
+                if (!state.snapshot.enabled || state.snapshot.auth.status === "unauthenticated") {
+                  return;
+                }
+                const nextSnapshot = {
+                  ...state.snapshot,
+                  accountUsage: usage,
+                  checkedAt: DateTime.formatIso(yield* DateTime.now),
+                };
+                yield* Ref.set(snapshotStateRef, { ...state, snapshot: nextSnapshot });
+                yield* PubSub.publish(changesPubSub, nextSnapshot);
+              }),
+            );
+          }),
+        ),
+        Effect.ignoreCause({ log: true }),
+      ),
+    ).pipe(Effect.forkScoped);
+  }
 
   yield* applySnapshot(initialSettings, { forceRefresh: true }).pipe(
     Effect.ignoreCause({ log: true }),
