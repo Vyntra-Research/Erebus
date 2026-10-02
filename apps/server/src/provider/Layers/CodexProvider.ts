@@ -93,14 +93,21 @@ export function normalizeCodexAccountUsage(
   }
   if (remainingWindows.length === 0) return undefined;
   const remainingPercent = Math.min(...remainingWindows);
+  const creditsAvailable =
+    response.rateLimits.credits?.hasCredits === true ||
+    response.rateLimits.credits?.unlimited === true;
+  const reachedType = response.rateLimits.rateLimitReachedType;
+  const blockedByAccountControl =
+    response.rateLimits.spendControlReached === true ||
+    (individualRemaining !== undefined && individualRemaining <= 0) ||
+    (reachedType != null && reachedType !== "rate_limit_reached");
   return {
     remainingPercent,
     primary,
     secondary,
     reached:
-      remainingPercent <= 0 ||
-      response.rateLimits.rateLimitReachedType != null ||
-      response.rateLimits.spendControlReached === true,
+      blockedByAccountControl ||
+      (!creditsAvailable && (remainingPercent <= 0 || reachedType === "rate_limit_reached")),
   };
 }
 

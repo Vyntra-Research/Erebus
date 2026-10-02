@@ -11,7 +11,11 @@ import { selectCodexAccount, selectCodexFailoverAccount } from "./CodexAccountRo
 
 const decodeProvider = Schema.decodeUnknownSync(ServerProvider);
 
-function account(instanceId: string, remainingPercent: number): ServerProviderType {
+function account(
+  instanceId: string,
+  remainingPercent: number,
+  creditBacked = false,
+): ServerProviderType {
   return decodeProvider({
     instanceId,
     driver: "codex",
@@ -31,7 +35,7 @@ function account(instanceId: string, remainingPercent: number): ServerProviderTy
         windowDurationMins: 300,
       },
       secondary: null,
-      reached: remainingPercent === 0,
+      reached: remainingPercent === 0 && !creditBacked,
     },
   });
 }
@@ -107,6 +111,53 @@ describe("selectCodexAccount", () => {
         providers: [account(primary, 0), account(fallback, 42)],
         policy,
         exhaustedInstanceIds: new Set([primary]),
+      }),
+    ).toBe(fallback);
+  });
+
+  it("keeps a credit-backed account available after included quota is exhausted", () => {
+    expect(
+      selectCodexAccount({
+        providers: [account(primary, 0, true)],
+        policy,
+        activeInstanceId: primary,
+      }),
+    ).toBe(primary);
+    expect(
+      selectCodexFailoverAccount({
+        providers: [account(primary, 0), account(fallback, 0, true)],
+        policy,
+        exhaustedInstanceIds: new Set([primary]),
+      }),
+    ).toBe(fallback);
+  });
+
+  it("prefers the primary credit-backed account when all included quotas are empty", () => {
+    expect(
+      selectCodexAccount({
+        providers: [account(primary, 0, true), account(fallback, 0, true)],
+        policy,
+        activeInstanceId: fallback,
+      }),
+    ).toBe(primary);
+  });
+
+  it("uses the next credit-backed account when the primary has no credits", () => {
+    expect(
+      selectCodexAccount({
+        providers: [account(primary, 0), account(fallback, 0, true)],
+        policy,
+        activeInstanceId: primary,
+      }),
+    ).toBe(fallback);
+  });
+
+  it("uses remaining included quota before primary account credits", () => {
+    expect(
+      selectCodexAccount({
+        providers: [account(primary, 0, true), account(fallback, 10)],
+        policy,
+        activeInstanceId: primary,
       }),
     ).toBe(fallback);
   });

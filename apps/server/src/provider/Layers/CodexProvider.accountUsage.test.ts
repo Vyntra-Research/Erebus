@@ -40,4 +40,38 @@ describe("normalizeCodexAccountUsage", () => {
 
     expect(normalizeCodexAccountUsage(response)?.reached).toBe(true);
   });
+
+  it("keeps an account usable when included quota ends but usage credits remain", () => {
+    const response = {
+      rateLimits: {
+        primary: { usedPercent: 100 },
+        credits: { hasCredits: true, unlimited: false, balance: "12" },
+        rateLimitReachedType: "rate_limit_reached",
+      },
+    } satisfies CodexSchema.V2GetAccountRateLimitsResponse;
+
+    expect(normalizeCodexAccountUsage(response)).toMatchObject({
+      remainingPercent: 0,
+      reached: false,
+    });
+  });
+
+  it("keeps spend controls and workspace blocks enforced despite credits", () => {
+    for (const blockedLimit of [
+      { spendControlReached: true },
+      { individualLimit: { limit: "100", used: "100", remainingPercent: 0, resetsAt: 1 } },
+      { rateLimitReachedType: "workspace_owner_usage_limit_reached" as const },
+      { rateLimitReachedType: "workspace_owner_credits_depleted" as const },
+    ]) {
+      const response = {
+        rateLimits: {
+          primary: { usedPercent: 100 },
+          credits: { hasCredits: true, unlimited: false },
+          ...blockedLimit,
+        },
+      } satisfies CodexSchema.V2GetAccountRateLimitsResponse;
+
+      expect(normalizeCodexAccountUsage(response)?.reached).toBe(true);
+    }
+  });
 });
