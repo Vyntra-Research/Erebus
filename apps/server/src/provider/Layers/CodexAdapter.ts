@@ -79,6 +79,10 @@ import {
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import {
+  codexRequestGatewayAppServerArgs,
+  CODEX_REQUEST_GATEWAY_TOKEN_ENV,
+} from "./CodexRequestGateway.ts";
 import { makeInitializedCodexClient } from "./CodexProvider.ts";
 import { inspectManagedCodexThreadDeletion } from "../Drivers/CodexThreadDeletionGuard.ts";
 import { ensureCodexThreadRolloutIndexed } from "../Drivers/CodexRolloutPathRepair.ts";
@@ -108,6 +112,10 @@ export interface CodexAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly researchToolController?: ResearchToolControllerShape;
   readonly coagentToolController?: CoagentToolControllerShape;
+  readonly requestGateway?: {
+    readonly endpoint: string;
+    readonly authorizationToken: string;
+  };
 }
 
 interface CodexAdapterSessionContext {
@@ -1784,9 +1792,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
-        const mcpAppServerArgs: string[] = [];
+        const appServerArgs: string[] = options?.requestGateway
+          ? [...codexRequestGatewayAppServerArgs(options.requestGateway.endpoint)]
+          : [];
         if (mcpSession?.previewEnabled) {
-          mcpAppServerArgs.push(
+          appServerArgs.push(
             "-c",
             `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
             "-c",
@@ -1794,7 +1804,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           );
         }
         if (mcpSession?.researchFallbackEndpoint) {
-          mcpAppServerArgs.push(
+          appServerArgs.push(
             "-c",
             `mcp_servers.erebus-research.url=${mcpSession.researchFallbackEndpoint}`,
             "-c",
@@ -1889,13 +1899,26 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   ]).pipe(Effect.map((parts) => parts.filter(Boolean).join("\n\n"))),
               }
             : {}),
-          ...(mcpSession && mcpAppServerArgs.length > 0
+          ...(appServerArgs.length > 0
             ? {
                 environment: {
                   ...(options?.environment ?? process.env),
-                  T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
+                  ...(mcpSession
+                    ? {
+                        T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(
+                          /^Bearer\s+/,
+                          "",
+                        ),
+                      }
+                    : {}),
+                  ...(options?.requestGateway
+                    ? {
+                        [CODEX_REQUEST_GATEWAY_TOKEN_ENV]:
+                          options.requestGateway.authorizationToken,
+                      }
+                    : {}),
                 },
-                appServerArgs: mcpAppServerArgs,
+                appServerArgs,
               }
             : {}),
         };

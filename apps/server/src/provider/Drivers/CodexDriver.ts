@@ -46,6 +46,7 @@ import { CoagentToolController } from "../../coagents/Services/CoagentToolContro
 import { ResearchToolController } from "../../research/Services/ResearchToolController.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
+import { CodexRequestGateway } from "../Layers/CodexRequestGateway.ts";
 import { resolveCodexLaunchArgs } from "../Layers/codexLaunchArgs.ts";
 import {
   checkCodexProviderStatus,
@@ -142,6 +143,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const serverConfig = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
+      const requestGateway = yield* CodexRequestGateway;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const researchToolController = yield* ResearchToolController;
       const coagentToolController = yield* CoagentToolController;
@@ -239,6 +241,12 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
+      if (enabled) {
+        yield* requestGateway.registerAccount({
+          instanceId,
+          homePath: homeLayout.effectiveHomePath ?? homeLayout.sharedHomePath,
+        });
+      }
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
@@ -253,6 +261,14 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
+        ...(requestGateway.enabled
+          ? {
+              requestGateway: {
+                endpoint: requestGateway.endpoint,
+                authorizationToken: requestGateway.authorizationToken,
+              },
+            }
+          : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         ...(researchToolController ? { researchToolController } : {}),
         ...(coagentToolController ? { coagentToolController } : {}),
