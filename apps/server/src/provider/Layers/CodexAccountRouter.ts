@@ -211,42 +211,50 @@ const make = Effect.fn("makeCodexAccountRouter")(function* () {
         : ({ ...selection, instanceId: activeInstanceId } satisfies ModelSelection);
     });
 
+  const failoverInstanceAfterUsageLimit: CodexAccountRouterShape["failoverInstanceAfterUsageLimit"] =
+    (exhaustedInstanceId) =>
+      switchLock.withPermits(1)(
+        Effect.gen(function* () {
+          const [providers, policy, recordedExhausted] = yield* Effect.all([
+            providerRegistry.getProviders,
+            settingsService.getSettings.pipe(
+              Effect.map((settings) => settings.codexAccountRouting),
+              Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS.codexAccountRouting),
+            ),
+            Ref.get(exhaustedInstancesRef),
+          ]);
+          const exhaustedProvider = providers.find(
+            (provider) => provider.instanceId === exhaustedInstanceId,
+          );
+          if (exhaustedProvider?.driver !== CODEX_DRIVER) return null;
+
+          const exhausted = new Map(recordedExhausted);
+          exhausted.set(exhaustedInstanceId, exhaustedProvider.checkedAt);
+          yield* Ref.set(exhaustedInstancesRef, exhausted);
+
+          const next = selectCodexFailoverAccount({
+            providers,
+            policy,
+            exhaustedInstanceIds: new Set(exhausted.keys()),
+          });
+          if (next === null || next === exhaustedInstanceId) return null;
+          yield* Ref.set(activeInstanceRef, next);
+          yield* Effect.logWarning("Codex account router failed over after a usage limit", {
+            exhaustedInstanceId,
+            activeInstanceId: next,
+          });
+          return next;
+        }),
+      );
+
   const failoverAfterUsageLimit: CodexAccountRouterShape["failoverAfterUsageLimit"] = (
     selection,
     exhaustedInstanceId,
   ) =>
-    switchLock.withPermits(1)(
-      Effect.gen(function* () {
-        const [providers, policy, recordedExhausted] = yield* Effect.all([
-          providerRegistry.getProviders,
-          settingsService.getSettings.pipe(
-            Effect.map((settings) => settings.codexAccountRouting),
-            Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS.codexAccountRouting),
-          ),
-          Ref.get(exhaustedInstancesRef),
-        ]);
-        const exhaustedProvider = providers.find(
-          (provider) => provider.instanceId === exhaustedInstanceId,
-        );
-        if (exhaustedProvider?.driver !== CODEX_DRIVER) return null;
-
-        const exhausted = new Map(recordedExhausted);
-        exhausted.set(exhaustedInstanceId, exhaustedProvider.checkedAt);
-        yield* Ref.set(exhaustedInstancesRef, exhausted);
-
-        const next = selectCodexFailoverAccount({
-          providers,
-          policy,
-          exhaustedInstanceIds: new Set(exhausted.keys()),
-        });
-        if (next === null || next === exhaustedInstanceId) return null;
-        yield* Ref.set(activeInstanceRef, next);
-        yield* Effect.logWarning("Codex account router failed over after a usage limit", {
-          exhaustedInstanceId,
-          activeInstanceId: next,
-        });
-        return { ...selection, instanceId: next } satisfies ModelSelection;
-      }),
+    failoverInstanceAfterUsageLimit(exhaustedInstanceId).pipe(
+      Effect.map((next) =>
+        next === null ? null : ({ ...selection, instanceId: next } satisfies ModelSelection),
+      ),
     );
 
   yield* Effect.forkScoped(
@@ -260,6 +268,7 @@ const make = Effect.fn("makeCodexAccountRouter")(function* () {
   return CodexAccountRouter.of({
     resolveModelSelection,
     failoverAfterUsageLimit,
+    failoverInstanceAfterUsageLimit,
     activeInstanceId: resolveActive,
   });
 });

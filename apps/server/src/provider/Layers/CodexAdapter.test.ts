@@ -721,6 +721,57 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("routes app-server requests through the account gateway", () => {
+    const runtimeFactory = makeRuntimeFactory();
+    const layer = Layer.effect(
+      CodexAdapter,
+      makeCodexAdapter(decodeCodexSettings({}), {
+        environment: { EXISTING_VALUE: "preserved" },
+        makeRuntime: runtimeFactory.factory,
+        requestGateway: {
+          endpoint: "http://127.0.0.1:43123/internal/codex",
+          authorizationToken: "gateway-secret",
+        },
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-request-gateway"),
+        runtimeMode: "full-access",
+      });
+
+      const runtime = runtimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      NodeAssert.ok(
+        runtime.options.appServerArgs?.includes(
+          'model_providers.erebus_router.base_url="http://127.0.0.1:43123/internal/codex"',
+        ),
+      );
+      NodeAssert.ok(
+        runtime.options.appServerArgs?.includes(
+          'model_providers.erebus_router.env_key="EREBUS_CODEX_REQUEST_GATEWAY_TOKEN"',
+        ),
+      );
+      NodeAssert.ok(
+        runtime.options.appServerArgs?.includes('model_providers.erebus_router.name="OpenAI"'),
+      );
+      NodeAssert.ok(runtime.options.appServerArgs?.includes('model_provider="erebus_router"'));
+      NodeAssert.equal(runtime.options.environment?.EXISTING_VALUE, "preserved");
+      NodeAssert.equal(
+        runtime.options.environment?.EREBUS_CODEX_REQUEST_GATEWAY_TOKEN,
+        "gateway-secret",
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("maps codex model options for the adapter's bound custom instance id", () => {
     const customInstanceId = ProviderInstanceId.make("codex_personal");
     const customRuntimeFactory = makeRuntimeFactory();

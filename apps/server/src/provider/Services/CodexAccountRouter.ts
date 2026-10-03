@@ -14,6 +14,14 @@ export interface CodexAccountRouterShape {
     selection: ModelSelection,
     exhaustedInstanceId: ProviderInstanceId,
   ) => Effect.Effect<ModelSelection | null>;
+  /**
+   * Request-level form used by the local Codex gateway. Unlike the legacy
+   * turn continuation path, this changes only the account for the next HTTP
+   * request and leaves the provider session and active turn intact.
+   */
+  readonly failoverInstanceAfterUsageLimit: (
+    exhaustedInstanceId: ProviderInstanceId,
+  ) => Effect.Effect<ProviderInstanceId | null>;
   readonly activeInstanceId: Effect.Effect<ProviderInstanceId | null>;
 }
 
@@ -23,6 +31,7 @@ export class CodexAccountRouter extends Context.Reference<CodexAccountRouterShap
     defaultValue: () => ({
       resolveModelSelection: EffectRuntime.succeed,
       failoverAfterUsageLimit: () => EffectRuntime.succeed(null),
+      failoverInstanceAfterUsageLimit: () => EffectRuntime.succeed(null),
       activeInstanceId: EffectRuntime.succeed(null),
     }),
   },

@@ -35,6 +35,7 @@ import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
+import { isCodexUsageLimitDetail } from "../../provider/codexUsageLimit.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -58,6 +59,8 @@ const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const MAX_CODEX_USAGE_FAILOVERS_PER_TURN = 8;
 const CODEX_USAGE_FAILOVER_CONTINUATION = `The previous turn stopped only because the active Codex account reached its usage limit. Erebus switched to another authenticated account. Continue from the exact last durable point of the interrupted turn. Do not restart completed work, reinterpret this as a new user request, or wait for the user to repeat the request.`;
 
+export { isCodexUsageLimitDetail } from "../../provider/codexUsageLimit.ts";
+
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
   {
@@ -77,19 +80,6 @@ type ProviderIntentEvent = Extract<
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
-}
-
-export function isCodexUsageLimitDetail(detail: string): boolean {
-  const normalized = detail.toLowerCase();
-  return (
-    normalized.includes("you've hit your usage limit") ||
-    normalized.includes("you have hit your usage limit") ||
-    normalized.includes("usage_limit") ||
-    normalized.includes("usage limit reached") ||
-    normalized.includes("quota exhausted") ||
-    normalized.includes("insufficient_quota") ||
-    (normalized.includes("purchase more credits") && normalized.includes("try again"))
-  );
 }
 
 function mapProviderSessionStatusToOrchestrationStatus(
