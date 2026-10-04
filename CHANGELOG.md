@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.8 - 2026-10-03
+
+### Fixed
+
+- Apply Codex account routing to each model request so priority changes take effect during continuous turns.
+- Retry a request through the next usable account when the selected account reaches its usage limit.
+
 ## 0.7.7 - 2026-10-02
 
 ### Fixed

@@ -66,6 +66,8 @@ import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import { CodexAccountRouterLive } from "./provider/Layers/CodexAccountRouter.ts";
+import { CodexRequestGatewayLive } from "./provider/Layers/CodexRequestGateway.ts";
+import { codexRequestGatewayHttpLayer } from "./provider/codexRequestGatewayHttp.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
@@ -411,6 +413,10 @@ const ProviderAccountRoutingLayerLive = CodexAccountRouterLive.pipe(
   Layer.provideMerge(ProviderRegistryLive),
 );
 
+const CodexRequestGatewayLayerLive = CodexRequestGatewayLive.pipe(
+  Layer.provide(ServerSecretStore.layer),
+);
+
 const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
@@ -453,6 +459,7 @@ const RuntimeCoreDependenciesLive = RuntimeCoreServicesLive.pipe(
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(CodexRequestGatewayLayerLive),
   Layer.provideMerge(
     Layer.mergeAll(
       CloudCliTokenManager.layer.pipe(
@@ -506,6 +513,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
     attachmentUploadRouteLayer,
+    codexRequestGatewayHttpLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),

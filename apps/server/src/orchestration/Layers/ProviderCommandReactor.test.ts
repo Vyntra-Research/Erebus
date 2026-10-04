@@ -441,6 +441,7 @@ describe("ProviderCommandReactor", () => {
         Layer.succeed(CodexAccountRouter, {
           resolveModelSelection: Effect.succeed,
           failoverAfterUsageLimit,
+          failoverInstanceAfterUsageLimit: () => Effect.succeed(null),
           activeInstanceId: Effect.succeed(null),
         }),
       ),
