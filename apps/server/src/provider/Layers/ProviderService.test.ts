@@ -714,6 +714,56 @@ it.effect("moves a resumable Codex thread between accounts without overlapping w
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("resumes a Codex thread after its account instance was removed", () =>
+  Effect.gen(function* () {
+    const removedInstanceId = ProviderInstanceId.make("codex_codex_2");
+    const resumeCursor = { threadId: "provider-thread-removed-account" };
+    const codex = makeFakeCodexAdapter();
+    const registry = makeAdapterRegistryMock({ [CODEX_DRIVER]: codex.adapter });
+    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+      Layer.provide(directoryLayer),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(serverConfigTestLayer),
+      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(
+        Layer.succeed(
+          ProviderEventLoggers.ProviderEventLoggers,
+          ProviderEventLoggers.NoOpProviderEventLoggers,
+        ),
+      ),
+    );
+    const testLayer = Layer.merge(providerLayer, directoryLayer);
+    const threadId = asThreadId("thread-removed-codex-account");
+
+    yield* Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const provider = yield* ProviderService.ProviderService;
+      yield* directory.upsert({
+        provider: CODEX_DRIVER,
+        providerInstanceId: removedInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+        status: "stopped",
+        resumeCursor,
+      });
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+    }).pipe(Effect.provide(testLayer));
+
+    assert.equal(codex.startSession.mock.calls.length, 1);
+    assert.deepEqual(codex.startSession.mock.calls[0]?.[0].resumeCursor, resumeCursor);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 const routing = makeProviderServiceLayer();
 
 it.effect(

@@ -34,7 +34,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "@t3tools/contracts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import { ProviderAdapterRequestError, ProviderUnsupportedError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -161,6 +161,8 @@ describe("ProviderCommandReactor", () => {
       callIndex: number,
     ) => ReturnType<ProviderServiceShape["sendTurn"]>;
     readonly codexFailoverSelection?: ModelSelection | null;
+    readonly initialRuntimeSessions?: ReadonlyArray<ProviderSession>;
+    readonly unknownProviderInstanceIds?: ReadonlyArray<ProviderInstanceId>;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir =
@@ -170,7 +172,7 @@ describe("ProviderCommandReactor", () => {
     createdStateDirs.add(stateDir);
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     let nextSessionIndex = 1;
-    const runtimeSessions: Array<ProviderSession> = [];
+    const runtimeSessions: Array<ProviderSession> = [...(input?.initialRuntimeSessions ?? [])];
     const modelSelection = input?.threadModelSelection ?? {
       instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5-codex",
@@ -365,6 +367,9 @@ describe("ProviderCommandReactor", () => {
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
         }),
       getInstanceInfo: (instanceId) => {
+        if (input?.unknownProviderInstanceIds?.includes(instanceId)) {
+          return Effect.fail(new ProviderUnsupportedError({ provider: instanceId }));
+        }
         const raw = String(instanceId);
         const driverKind = ProviderDriverKind.make(
           raw.startsWith("claude") ? "claudeAgent" : raw.startsWith("codex") ? "codex" : raw,
@@ -2615,6 +2620,83 @@ describe("ProviderCommandReactor", () => {
         detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
       },
     });
+  });
+
+  it("recovers a Codex thread bound to a removed account instance", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const removedInstanceId = ProviderInstanceId.make("codex_codex_2");
+    const desiredInstanceId = ProviderInstanceId.make("codex");
+    const resumeCursor = { threadId: "provider-thread-removed-account" };
+    const harness = await createHarness({
+      initialRuntimeSessions: [
+        {
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: removedInstanceId,
+          status: "closed",
+          runtimeMode: "full-access",
+          model: "gpt-5.6-sol",
+          threadId: ThreadId.make("thread-1"),
+          resumeCursor,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      threadModelSelection: {
+        instanceId: desiredInstanceId,
+        model: "gpt-5.6-sol",
+      },
+      unknownProviderInstanceIds: [removedInstanceId],
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-removed-codex-account"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "error",
+          providerName: "codex",
+          providerInstanceId: removedInstanceId,
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: "unknown provider instance",
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-removed-codex-account"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-removed-codex-account"),
+          role: "user",
+          text: "continue",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      providerInstanceId: desiredInstanceId,
+      resumeCursor,
+    });
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.session?.providerInstanceId).toBe(desiredInstanceId);
+    expect(
+      thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed"),
+    ).toBe(false);
   });
 
   it("rejects cross-driver provider changes after the existing thread session has stopped", async () => {
