@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.9 - 2026-10-07
+
+### Fixed
+
+- Recover Codex threads after their previous account profile is removed without losing persisted conversation state.
+
 ## 0.7.8 - 2026-10-03
 
 ### Fixed

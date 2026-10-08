@@ -56,6 +56,7 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
+const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const MAX_CODEX_USAGE_FAILOVERS_PER_TURN = 8;
 const CODEX_USAGE_FAILOVER_CONTINUATION = `The previous turn stopped only because the active Codex account reached its usage limit. Erebus switched to another authenticated account. Continue from the exact last durable point of the interrupted turn. Do not restart completed work, reinterpret this as a new user request, or wait for the user to repeat the request.`;
 
@@ -611,20 +612,6 @@ const make = Effect.gen(function* () {
       requestedModelSelection ?? thread.modelSelection,
     );
     const desiredInstanceId = desiredModelSelection.instanceId;
-    const currentInfo = yield* providerService.getInstanceInfo(currentInstanceId).pipe(
-      Effect.mapError(
-        () =>
-          new ProviderAdapterRequestError({
-            provider: providerErrorLabelFromInstanceHint({
-              instanceId: String(currentInstanceId),
-              modelSelectionInstanceId: String(thread.modelSelection.instanceId),
-              sessionProvider: thread.session?.providerName ?? undefined,
-            }),
-            method: "thread.turn.start",
-            detail: `Thread '${threadId}' references unknown provider instance '${currentInstanceId}'. The instance is not configured in this build.`,
-          }),
-      ),
-    );
     const desiredInfo = yield* providerService.getInstanceInfo(desiredInstanceId).pipe(
       Effect.mapError(
         () =>
@@ -643,6 +630,33 @@ const make = Effect.gen(function* () {
         provider: providerErrorLabel(String(desiredDriverKind)),
         method: "thread.turn.start",
         detail: `Requested provider instance '${desiredInstanceId}' uses unknown provider driver '${desiredDriverKind}'. The driver is not installed in this build.`,
+      });
+    }
+    const currentInfoOption = yield* providerService
+      .getInstanceInfo(currentInstanceId)
+      .pipe(Effect.option);
+    const recoveredRemovedCodexAccount =
+      Option.isNone(currentInfoOption) &&
+      currentInstanceId !== desiredInstanceId &&
+      desiredDriverKind === CODEX_DRIVER &&
+      thread.session?.providerName === CODEX_DRIVER;
+    if (Option.isNone(currentInfoOption) && !recoveredRemovedCodexAccount) {
+      return yield* new ProviderAdapterRequestError({
+        provider: providerErrorLabelFromInstanceHint({
+          instanceId: String(currentInstanceId),
+          modelSelectionInstanceId: String(thread.modelSelection.instanceId),
+          sessionProvider: thread.session?.providerName ?? undefined,
+        }),
+        method: "thread.turn.start",
+        detail: `Thread '${threadId}' references unknown provider instance '${currentInstanceId}'. The instance is not configured in this build.`,
+      });
+    }
+    const currentInfo = Option.getOrElse(currentInfoOption, () => desiredInfo);
+    if (recoveredRemovedCodexAccount) {
+      yield* Effect.logWarning("Recovering a Codex thread from a removed account instance", {
+        threadId,
+        removedInstanceId: currentInstanceId,
+        activeInstanceId: desiredInstanceId,
       });
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;

@@ -675,12 +675,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             : Option.getOrUndefined(
                 yield* registry.getInstanceInfo(persistedInstanceId).pipe(Effect.option),
               );
+        const canRecoverRemovedCodexInstance =
+          persistedBinding !== undefined &&
+          persistedInstanceId !== undefined &&
+          persistedInstanceInfo === undefined &&
+          persistedBinding.provider === "codex" &&
+          instanceInfo.driverKind === "codex";
         const canContinuePersistedSession =
           persistedBinding !== undefined &&
-          persistedInstanceInfo !== undefined &&
-          persistedInstanceInfo.driverKind === instanceInfo.driverKind &&
-          persistedInstanceInfo.continuationIdentity.continuationKey ===
-            instanceInfo.continuationIdentity.continuationKey;
+          ((persistedInstanceInfo !== undefined &&
+            persistedInstanceInfo.driverKind === instanceInfo.driverKind &&
+            persistedInstanceInfo.continuationIdentity.continuationKey ===
+              instanceInfo.continuationIdentity.continuationKey) ||
+            canRecoverRemovedCodexInstance);
+        if (canRecoverRemovedCodexInstance) {
+          yield* Effect.logWarning(
+            "Recovering persisted Codex state from a removed account instance",
+            {
+              threadId,
+              removedInstanceId: persistedInstanceId,
+              activeInstanceId: resolvedInstanceId,
+            },
+          );
+        }
         const effectiveResumeCursor =
           input.resumeCursor ??
           (canContinuePersistedSession ? persistedBinding.resumeCursor : undefined);
