@@ -158,6 +158,7 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
+import * as ThreadSync from "./threadSync/ThreadSyncService.ts";
 import * as Data from "effect/Data";
 
 import { makeOrchestrationIntegrationHarness } from "../integration/OrchestrationEngineHarness.integration.ts";
@@ -429,6 +430,7 @@ const buildAppUnderTest = (options?: {
     desktopTelemetryReceiver?: Partial<
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
+    threadSync?: Partial<ThreadSync.ThreadSyncService["Service"]>;
   };
 }) =>
   Effect.gen(function* () {
@@ -617,6 +619,19 @@ const buildAppUnderTest = (options?: {
     const serviceLauncherClientLayer = ServiceLauncherClient.layer.pipe(
       Layer.provide(Layer.succeed(HostProcessEnvironment, {})),
     );
+    const disconnectedThreadSyncStatus = {
+      state: "disconnected" as const,
+      configuration: null,
+      baseRevision: null,
+      localRevision: null,
+      remoteRevision: null,
+      lastFetchedAt: null,
+      pendingPullCount: 0,
+      pendingPushCount: 0,
+      conflicts: [],
+      unlinkedProjects: [],
+      lastError: null,
+    };
 
     const servedRoutesLayer = HttpRouter.serve(
       makeRoutesLayer.pipe(Layer.provide(serviceLauncherClientLayer)),
@@ -652,6 +667,35 @@ const buildAppUnderTest = (options?: {
           Layer.mock(ProviderService.ProviderService)({
             uploadFeedback: () => Effect.die("Provider feedback is not stubbed in this test"),
             ...options?.layers?.providerService,
+          }),
+          Layer.mock(ThreadSync.ThreadSyncService)({
+            start: Effect.void,
+            getStatus: Effect.succeed(disconnectedThreadSyncStatus),
+            subscribe: Effect.succeed({
+              latest: disconnectedThreadSyncStatus,
+              changes: Stream.empty,
+            }),
+            configure: () => Effect.succeed({ status: disconnectedThreadSyncStatus }),
+            fetch: () =>
+              Effect.succeed({
+                remoteChanged: false,
+                discoveredThreadCount: 0,
+                status: disconnectedThreadSyncStatus,
+              }),
+            linkProject: (input) =>
+              Effect.succeed({
+                binding: {
+                  syncProjectId: input.syncProjectId,
+                  projectId: input.projectId,
+                  linkedAt: "1970-01-01T00:00:00.000Z",
+                },
+                status: disconnectedThreadSyncStatus,
+              }),
+            disconnect: () =>
+              Effect.succeed({ disconnected: true, status: disconnectedThreadSyncStatus }),
+            pull: () => Effect.die("Thread sync pull is not stubbed in this test"),
+            push: () => Effect.die("Thread sync push is not stubbed in this test"),
+            ...options?.layers?.threadSync,
           }),
         ),
       ),

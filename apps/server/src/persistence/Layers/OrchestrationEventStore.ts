@@ -64,6 +64,14 @@ const ReadFromSequenceRequestSchema = Schema.Struct({
   sequenceExclusive: NonNegativeInt,
   limit: Schema.Number,
 });
+const ReadLatestAggregateEventTypeRequestSchema = Schema.Struct({
+  aggregateKind: OrchestrationAggregateKind,
+  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  eventTypes: Schema.Array(OrchestrationEventType),
+});
+const AggregateEventTypeRowSchema = Schema.Struct({
+  type: OrchestrationEventType,
+});
 const DEFAULT_READ_FROM_SEQUENCE_LIMIT = 1_000;
 const READ_PAGE_SIZE = 500;
 
@@ -181,6 +189,21 @@ const makeEventStore = Effect.gen(function* () {
       `,
   });
 
+  const readLatestAggregateEventTypeRow = SqlSchema.findAll({
+    Request: ReadLatestAggregateEventTypeRequestSchema,
+    Result: AggregateEventTypeRowSchema,
+    execute: (request) =>
+      sql`
+        SELECT event_type AS "type"
+        FROM orchestration_events
+        WHERE aggregate_kind = ${request.aggregateKind}
+          AND stream_id = ${request.aggregateId}
+          AND ${sql.in("event_type", request.eventTypes)}
+        ORDER BY stream_version DESC
+        LIMIT 1
+      `,
+  });
+
   const append: OrchestrationEventStoreShape["append"] = (event) =>
     appendEventRow({
       eventId: event.eventId,
@@ -260,10 +283,31 @@ const makeEventStore = Effect.gen(function* () {
     return readPage(sequenceExclusive, normalizedLimit);
   };
 
+  const readLatestAggregateEventType: OrchestrationEventStoreShape["readLatestAggregateEventType"] =
+    (input) => {
+      if (input.eventTypes.length === 0) {
+        return Effect.succeed(null);
+      }
+      return readLatestAggregateEventTypeRow({
+        aggregateKind: input.aggregateKind,
+        aggregateId: input.aggregateId,
+        eventTypes: input.eventTypes,
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "OrchestrationEventStore.readLatestAggregateEventType:query",
+            "OrchestrationEventStore.readLatestAggregateEventType:decodeRow",
+          ),
+        ),
+        Effect.map((rows) => rows[0]?.type ?? null),
+      );
+    };
+
   return {
     append,
     readFromSequence,
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
+    readLatestAggregateEventType,
   } satisfies OrchestrationEventStoreShape;
 });
 

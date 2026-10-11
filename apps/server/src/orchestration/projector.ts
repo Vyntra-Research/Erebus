@@ -32,6 +32,7 @@ import {
   ThreadUnsnoozedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
+  ThreadSyncImportedPayload,
   ThreadTurnDiffCompletedPayload,
 } from "./Schemas.ts";
 
@@ -321,6 +322,47 @@ export function projectEvent(
           threads: existing
             ? nextBase.threads.map((entry) => (entry.id === thread.id ? thread : entry))
             : [...nextBase.threads, thread],
+        };
+      });
+
+    case "thread.sync-imported":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadSyncImportedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const importedThread = yield* decodeForEvent(
+          OrchestrationThread,
+          {
+            ...payload.thread,
+            id: payload.threadId,
+            titleRegeneration: null,
+            messages: payload.thread.messages.slice(-MAX_THREAD_MESSAGES),
+            proposedPlans: [...payload.thread.proposedPlans]
+              .toSorted(
+                (left, right) =>
+                  left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+              )
+              .slice(-200),
+            activities: [...payload.thread.activities]
+              .toSorted(compareThreadActivities)
+              .slice(-500),
+            checkpoints: [],
+            session: null,
+          },
+          event.type,
+          "thread",
+        );
+        const existing = nextBase.threads.some((entry) => entry.id === payload.threadId);
+        return {
+          ...nextBase,
+          threads: existing
+            ? nextBase.threads.map((entry) =>
+                entry.id === payload.threadId ? importedThread : entry,
+              )
+            : [...nextBase.threads, importedThread],
         };
       });
 

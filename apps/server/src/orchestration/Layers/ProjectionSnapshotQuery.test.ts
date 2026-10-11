@@ -298,6 +298,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: ThreadId.make("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread 1",
+          coagent: null,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",

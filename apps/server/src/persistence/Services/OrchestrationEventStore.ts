@@ -52,6 +52,18 @@ export interface OrchestrationEventStoreShape {
    * @returns Stream containing all stored events.
    */
   readonly readAll: () => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
+
+  /**
+   * Read the newest matching event type from one aggregate stream.
+   *
+   * Unlike global replay, this lookup is bounded by the aggregate stream and
+   * can use the `(aggregate_kind, stream_id, stream_version)` index.
+   */
+  readonly readLatestAggregateEventType: (input: {
+    readonly aggregateKind: OrchestrationEvent["aggregateKind"];
+    readonly aggregateId: OrchestrationEvent["aggregateId"];
+    readonly eventTypes: ReadonlyArray<OrchestrationEvent["type"]>;
+  }) => Effect.Effect<OrchestrationEvent["type"] | null, OrchestrationEventStoreError>;
 }
 
 /**

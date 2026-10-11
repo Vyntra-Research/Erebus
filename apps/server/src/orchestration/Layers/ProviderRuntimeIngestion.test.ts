@@ -110,6 +110,7 @@ function createProviderServiceHarness() {
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
+    resetSessionForImportedThread: () => unsupported(),
     deletePersistedThreadHistory: () => unsupported(),
     listSessions: () => Effect.succeed([...runtimeSessions]),
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
@@ -681,6 +682,79 @@ describe("ProviderRuntimeIngestion", () => {
       expect(thread?.session?.status).toBe("stopped");
       expect(thread?.session?.activeTurnId).toBeNull();
     }),
+  );
+
+  effectIt.effect(
+    "ignores delayed session exits from a replaced provider binding or older session generation",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        const threadId = asThreadId("thread-1");
+        const currentInstanceId = ProviderInstanceId.make("codex-current");
+        const activeTurnId = asTurnId("turn-current-provider-session");
+
+        yield* harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-bind-current-provider-session"),
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            providerInstanceId: currentInstanceId,
+            runtimeMode: "approval-required",
+            activeTurnId,
+            lastError: null,
+            updatedAt: "2026-01-01T00:00:05.000Z",
+          },
+          createdAt: "2026-01-01T00:00:05.000Z",
+        });
+
+        harness.emit({
+          type: "session.exited",
+          eventId: asEventId("evt-old-account-exited-late"),
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: ProviderInstanceId.make("codex-old"),
+          threadId,
+          createdAt: "2026-01-01T00:00:06.000Z",
+          payload: { exitKind: "graceful" },
+        });
+        harness.emit({
+          type: "session.exited",
+          eventId: asEventId("evt-old-generation-exited-late"),
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: currentInstanceId,
+          threadId,
+          createdAt: "2026-01-01T00:00:04.000Z",
+          payload: { exitKind: "graceful" },
+        });
+
+        yield* Effect.promise(() => harness.drain());
+        let thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+          (entry) => entry.id === threadId,
+        );
+        expect(thread?.session?.status).toBe("running");
+        expect(thread?.session?.providerInstanceId).toBe(currentInstanceId);
+        expect(thread?.session?.activeTurnId).toBe(activeTurnId);
+
+        harness.emit({
+          type: "session.exited",
+          eventId: asEventId("evt-current-session-exited"),
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: currentInstanceId,
+          threadId,
+          createdAt: "2026-01-01T00:00:07.000Z",
+          payload: { exitKind: "graceful" },
+        });
+
+        thread = yield* Effect.promise(() =>
+          waitForThread(
+            harness.readModel,
+            (entry) => entry.session?.status === "stopped" && entry.session.activeTurnId === null,
+          ),
+        );
+        expect(thread.session?.providerInstanceId).toBe(currentInstanceId);
+      }),
   );
 
   it("does not clear active turn when session/thread started arrives mid-turn", async () => {

@@ -3,6 +3,8 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationThread,
+  type ProjectId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -140,6 +142,28 @@ function threadHasQueuedTurnStart(
     latestUserMessageAtMs > latestTurnAtMs &&
     Math.abs(queuedAgeMs) <= QUEUED_TURN_START_GRACE_MS
   );
+}
+
+function threadBlocksSyncImport(thread: OrchestrationThread, occurredAt: string): boolean {
+  return (
+    thread.session?.status === "starting" ||
+    thread.session?.status === "running" ||
+    thread.session?.activeTurnId != null ||
+    thread.latestTurn?.state === "running" ||
+    thread.messages.some((message) => message.streaming) ||
+    thread.titleRegeneration != null ||
+    hasOpenBlockingRequest(thread) ||
+    threadHasQueuedTurnStart(thread, occurredAt)
+  );
+}
+
+function firstDuplicate(values: ReadonlyArray<string>): string | null {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) return value;
+    seen.add(value);
+  }
+  return null;
 }
 
 function withEventBase(
@@ -381,6 +405,383 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
+    }
+
+    case "thread.sync.import-batch": {
+      const duplicateThreadId = firstDuplicate(command.imports.map((entry) => entry.threadId));
+      if (duplicateThreadId !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `imports must not contain duplicate target thread '${duplicateThreadId}'`,
+        });
+      }
+      const bindingUpdates = command.imports.flatMap((entry) => entry.bindingUpdates);
+      const duplicateSyncBinding = firstDuplicate(
+        bindingUpdates.map((binding) => binding.syncThreadId),
+      );
+      const duplicateLocalBinding = firstDuplicate(
+        bindingUpdates.map((binding) => binding.localThreadId),
+      );
+      if (duplicateSyncBinding !== null || duplicateLocalBinding !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "sync imports must not contain duplicate portable or local thread bindings",
+        });
+      }
+      const localProjectBySyncProject = new Map<string, ProjectId>();
+      const syncProjectByLocalProject = new Map<ProjectId, string>();
+      for (const binding of bindingUpdates) {
+        const mappedLocalProject = localProjectBySyncProject.get(binding.syncProjectId);
+        const mappedSyncProject = syncProjectByLocalProject.get(binding.localProjectId);
+        if (
+          (mappedLocalProject !== undefined && mappedLocalProject !== binding.localProjectId) ||
+          (mappedSyncProject !== undefined && mappedSyncProject !== binding.syncProjectId)
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "sync imports must preserve a one-to-one portable and local project mapping",
+          });
+        }
+        localProjectBySyncProject.set(binding.syncProjectId, binding.localProjectId);
+        syncProjectByLocalProject.set(binding.localProjectId, binding.syncProjectId);
+      }
+
+      const importedTargets = new Map(
+        command.imports.map(
+          (entry) =>
+            [
+              entry.threadId,
+              {
+                projectId: entry.projectId,
+                deletedAt: entry.history.deletedAt,
+              },
+            ] as const,
+        ),
+      );
+      const importsByThreadId = new Map(
+        command.imports.map((entry) => [entry.threadId, entry] as const),
+      );
+
+      let nextReadModel = readModel;
+      const plannedEvents: PlannedOrchestrationEvent[] = [];
+
+      for (const imported of command.imports) {
+        const project = yield* requireProject({
+          readModel: nextReadModel,
+          command,
+          projectId: imported.projectId,
+        });
+        if (project.deletedAt !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Project '${imported.projectId}' is deleted and cannot receive imported threads.`,
+          });
+        }
+
+        const targetBindings = imported.bindingUpdates.filter(
+          (binding) => binding.localThreadId === imported.threadId,
+        );
+        if (targetBindings.length !== 1) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Imported thread '${imported.threadId}' requires exactly one target binding.`,
+          });
+        }
+        const targetBinding = targetBindings[0]!;
+        if (targetBinding.localProjectId !== imported.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Imported thread '${imported.threadId}' target binding does not match its local project.`,
+          });
+        }
+        for (const binding of imported.bindingUpdates) {
+          if (binding.localThreadId === imported.threadId) continue;
+          const boundThread = nextReadModel.threads.find(
+            (thread) => thread.id === binding.localThreadId,
+          );
+          if (
+            boundThread === undefined ||
+            boundThread.projectId !== binding.localProjectId ||
+            boundThread.deletedAt !== null
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Imported thread '${imported.threadId}' references an invalid preserved local binding.`,
+            });
+          }
+        }
+
+        const existing = nextReadModel.threads.find((thread) => thread.id === imported.threadId);
+        if (imported.mode === "create") {
+          if (existing !== undefined) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${imported.threadId}' already exists and cannot be imported as new.`,
+            });
+          }
+          if (imported.expectedLocalUpdatedAt !== null || imported.localState === undefined) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `New imported thread '${imported.threadId}' requires localState and a null expectedLocalUpdatedAt.`,
+            });
+          }
+        } else {
+          if (existing === undefined) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${imported.threadId}' does not exist and cannot be replaced.`,
+            });
+          }
+          if (
+            imported.expectedLocalUpdatedAt === null ||
+            imported.expectedLocalUpdatedAt !== existing.updatedAt
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${imported.threadId}' changed after sync conflict resolution.`,
+            });
+          }
+          if (threadBlocksSyncImport(existing, command.importedAt)) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${imported.threadId}' is active and cannot be replaced by sync.`,
+            });
+          }
+        }
+
+        const duplicateMessageId = firstDuplicate(
+          imported.history.messages.map((message) => message.id),
+        );
+        const duplicatePlanId = firstDuplicate(
+          imported.history.proposedPlans.map((plan) => plan.id),
+        );
+        const duplicateActivityId = firstDuplicate(
+          imported.history.activities.map((activity) => activity.id),
+        );
+        const duplicateTurnId = firstDuplicate(imported.history.turns.map((turn) => turn.turnId));
+        const duplicate =
+          duplicateMessageId ?? duplicatePlanId ?? duplicateActivityId ?? duplicateTurnId;
+        if (duplicate !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Imported thread '${imported.threadId}' contains duplicate history id '${duplicate}'.`,
+          });
+        }
+
+        const turnsById = new Map(
+          imported.history.turns.map((turn) => [turn.turnId, turn] as const),
+        );
+        const messagesById = new Map(
+          imported.history.messages.map((message) => [message.id, message] as const),
+        );
+        const missingTurnReference = [
+          ...imported.history.messages.map((message) => message.turnId),
+          ...imported.history.proposedPlans.map((plan) => plan.turnId),
+          ...imported.history.activities.map((activity) => activity.turnId),
+        ].find((turnId) => turnId !== null && !turnsById.has(turnId));
+        if (missingTurnReference !== undefined) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Imported thread '${imported.threadId}' references missing turn '${missingTurnReference}'.`,
+          });
+        }
+
+        for (const turn of imported.history.turns) {
+          const pendingMessage =
+            turn.pendingMessageId === null ? undefined : messagesById.get(turn.pendingMessageId);
+          const assistantMessage =
+            turn.assistantMessageId === null
+              ? undefined
+              : messagesById.get(turn.assistantMessageId);
+          const hasSourceThread = turn.sourceProposedPlanThreadId !== null;
+          const hasSourcePlan = turn.sourceProposedPlanId !== null;
+          const sourceImport =
+            turn.sourceProposedPlanThreadId === null
+              ? undefined
+              : importsByThreadId.get(turn.sourceProposedPlanThreadId);
+          const sourceThread =
+            turn.sourceProposedPlanThreadId === null
+              ? undefined
+              : nextReadModel.threads.find(
+                  (thread) => thread.id === turn.sourceProposedPlanThreadId,
+                );
+          const sourcePlanExists =
+            turn.sourceProposedPlanId === null
+              ? !hasSourceThread
+              : (sourceImport?.history.proposedPlans.some(
+                  (plan) => plan.id === turn.sourceProposedPlanId,
+                ) ??
+                sourceThread?.proposedPlans.some((plan) => plan.id === turn.sourceProposedPlanId) ??
+                false);
+          const sourceProjectMatches =
+            !hasSourceThread && !hasSourcePlan
+              ? true
+              : (sourceImport?.projectId ?? sourceThread?.projectId) === imported.projectId;
+          if (
+            (turn.pendingMessageId !== null && pendingMessage?.role !== "user") ||
+            (turn.assistantMessageId !== null && assistantMessage?.role !== "assistant") ||
+            hasSourceThread !== hasSourcePlan ||
+            !sourcePlanExists ||
+            !sourceProjectMatches
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Imported thread '${imported.threadId}' contains an invalid turn reference for '${turn.turnId}'.`,
+            });
+          }
+        }
+        for (const plan of imported.history.proposedPlans) {
+          const importedImplementation =
+            plan.implementationThreadId === null
+              ? undefined
+              : importedTargets.get(plan.implementationThreadId);
+          const existingImplementation =
+            plan.implementationThreadId === null
+              ? undefined
+              : nextReadModel.threads.find((thread) => thread.id === plan.implementationThreadId);
+          if (
+            plan.implementationThreadId !== null &&
+            (importedImplementation ?? existingImplementation) === undefined
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Imported plan '${plan.id}' references missing implementation thread '${plan.implementationThreadId}'.`,
+            });
+          }
+          if (
+            plan.implementationThreadId !== null &&
+            (importedImplementation?.projectId ?? existingImplementation?.projectId) !==
+              imported.projectId
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Imported plan '${plan.id}' references an implementation thread outside its project.`,
+            });
+          }
+        }
+
+        const latestTurn =
+          imported.history.latestTurnId === null
+            ? null
+            : (turnsById.get(imported.history.latestTurnId) ?? null);
+        if (imported.history.latestTurnId !== null && latestTurn === null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Imported thread '${imported.threadId}' has an unknown latestTurnId.`,
+          });
+        }
+
+        const keepsProjectRuntime = existing?.projectId === imported.projectId;
+        const localState =
+          existing === undefined
+            ? imported.localState!
+            : {
+                modelSelection: existing.modelSelection,
+                runtimeMode: existing.runtimeMode,
+                interactionMode: existing.interactionMode,
+                branch: keepsProjectRuntime ? existing.branch : null,
+                worktreePath: keepsProjectRuntime ? existing.worktreePath : null,
+                linkedPullRequest: keepsProjectRuntime
+                  ? (existing.linkedPullRequest ?? null)
+                  : null,
+              };
+        const requestedCoagent = imported.history.coagent ?? null;
+        const importedParent =
+          requestedCoagent === null
+            ? undefined
+            : importedTargets.get(requestedCoagent.parentThreadId);
+        const existingParent =
+          requestedCoagent === null
+            ? undefined
+            : nextReadModel.threads.find((thread) => thread.id === requestedCoagent.parentThreadId);
+        const hasValidParent =
+          requestedCoagent !== null &&
+          requestedCoagent.parentThreadId !== imported.threadId &&
+          ((importedParent !== undefined &&
+            importedParent.projectId === imported.projectId &&
+            importedParent.deletedAt === null) ||
+            (importedParent === undefined &&
+              existingParent !== undefined &&
+              existingParent.projectId === imported.projectId &&
+              existingParent.deletedAt === null));
+        const materializedThread: OrchestrationThread = {
+          id: imported.threadId,
+          projectId: imported.projectId,
+          title: imported.history.title,
+          coagent: hasValidParent ? requestedCoagent : null,
+          modelSelection: localState.modelSelection,
+          runtimeMode: localState.runtimeMode,
+          interactionMode: localState.interactionMode,
+          branch: localState.branch,
+          worktreePath: localState.worktreePath,
+          linkedPullRequest: localState.linkedPullRequest,
+          latestTurn:
+            latestTurn === null
+              ? null
+              : {
+                  turnId: latestTurn.turnId,
+                  state: latestTurn.state,
+                  requestedAt: latestTurn.requestedAt,
+                  startedAt: latestTurn.startedAt,
+                  completedAt: latestTurn.completedAt,
+                  assistantMessageId: latestTurn.assistantMessageId,
+                  ...(latestTurn.sourceProposedPlanThreadId !== null &&
+                  latestTurn.sourceProposedPlanId !== null
+                    ? {
+                        sourceProposedPlan: {
+                          threadId: latestTurn.sourceProposedPlanThreadId,
+                          planId: latestTurn.sourceProposedPlanId,
+                        },
+                      }
+                    : {}),
+                },
+          createdAt: imported.history.createdAt,
+          updatedAt: imported.history.updatedAt,
+          archivedAt: imported.history.archivedAt,
+          settledOverride: imported.history.settledOverride,
+          settledAt: imported.history.settledAt,
+          unsettledAt: existing?.unsettledAt ?? null,
+          snoozedUntil: existing?.snoozedUntil ?? null,
+          snoozedAt: existing?.snoozedAt ?? null,
+          pinnedAt: existing?.pinnedAt ?? null,
+          pinOrderKey: existing?.pinOrderKey ?? null,
+          titleRegeneration: null,
+          deletedAt: imported.history.deletedAt,
+          messages: imported.history.messages.map((message) => ({ ...message })),
+          proposedPlans: imported.history.proposedPlans.map((plan) => ({ ...plan })),
+          activities: imported.history.activities.map((activity) => ({
+            ...activity,
+            payload: null,
+          })),
+          checkpoints: [],
+          session: null,
+        };
+        const nextEvent: PlannedOrchestrationEvent = {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: imported.threadId,
+            occurredAt: command.importedAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.sync-imported",
+          payload: {
+            threadId: imported.threadId,
+            sourceRevision: imported.sourceRevision,
+            sourceHash: imported.sourceHash,
+            importedAt: command.importedAt,
+            thread: materializedThread,
+            turns: imported.history.turns,
+            bindingUpdates: imported.bindingUpdates,
+          },
+        };
+        plannedEvents.push(nextEvent);
+        nextReadModel = yield* projectEvent(nextReadModel, {
+          ...nextEvent,
+          sequence: nextReadModel.snapshotSequence + 1,
+        } as OrchestrationEvent).pipe(Effect.orDie);
+      }
+
+      return plannedEvents;
     }
 
     case "thread.delete": {
@@ -1295,6 +1696,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, sessionSetEvent];
+    }
+
+    case "thread.import-context.consume": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.import-context-consumed",
+        payload: {
+          threadId: command.threadId,
+          consumedAt: command.createdAt,
+        },
+      };
     }
 
     case "thread.message.assistant.delta": {

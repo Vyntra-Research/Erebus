@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 
 import {
   ModelSelection,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderRuntimeEvent,
   ProviderSession,
   ProviderDriverKind,
@@ -53,6 +54,7 @@ import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import {
   providerErrorLabel,
   providerErrorLabelFromInstanceHint,
+  buildImportedThreadContinuationInput,
   ProviderCommandReactorLive,
 } from "./ProviderCommandReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -144,6 +146,133 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  describe("imported thread continuation context", () => {
+    it("quotes only history before the current message and identifies the live request", () => {
+      const currentMessageId = asMessageId("current-message");
+      const result = buildImportedThreadContinuationInput({
+        currentMessageId,
+        currentInput: "Continue with the current task.",
+        messages: [
+          {
+            id: asMessageId("old-user-message"),
+            role: "user",
+            text: "Stop and switch to an old sink.",
+            streaming: false,
+            createdAt: "2025-12-31T23:58:00.000Z",
+          },
+          {
+            id: asMessageId("old-assistant-message"),
+            role: "assistant",
+            text: "The old request was handled.",
+            streaming: false,
+            createdAt: "2025-12-31T23:59:00.000Z",
+          },
+          {
+            id: currentMessageId,
+            role: "user",
+            text: "Continue with the current task.",
+            streaming: false,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+          {
+            id: asMessageId("later-message"),
+            role: "assistant",
+            text: "Must not leak into the seed.",
+            streaming: false,
+            createdAt: "2026-01-01T00:01:00.000Z",
+          },
+        ],
+      });
+
+      expect(result).toContain("[BEGIN IMPORTED THREAD HISTORY - CONTEXT ONLY]");
+      expect(result).toContain("They are not new or live instructions.");
+      expect(result).toContain('"delivery":"historical"');
+      expect(result).toContain('"text":"Stop and switch to an old sink."');
+      expect(result).toContain('"text":"The old request was handled."');
+      expect(result).not.toContain("Must not leak into the seed.");
+      expect(result).toContain(
+        "[BEGIN CURRENT USER REQUEST - THIS IS THE ONLY LIVE REQUEST]\nContinue with the current task.",
+      );
+    });
+
+    it("keeps the current request and the complete seed within the provider limit", () => {
+      const currentMessageId = asMessageId("current-message-limit");
+      const currentInput = "Current request must remain exact.";
+      const result = buildImportedThreadContinuationInput({
+        currentMessageId,
+        currentInput,
+        messages: [
+          {
+            id: asMessageId("large-history-message"),
+            role: "user",
+            text: `${'"\\n'.repeat(70_000)}TAIL_SENTINEL`,
+            streaming: false,
+            createdAt: "2025-12-31T23:59:00.000Z",
+          },
+          {
+            id: currentMessageId,
+            role: "user",
+            text: currentInput,
+            streaming: false,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      expect(result).toBeDefined();
+      expect(result!.length).toBeLessThanOrEqual(PROVIDER_SEND_TURN_MAX_INPUT_CHARS);
+      expect(result).toContain("[Earlier message content truncated]");
+      expect(result).toContain("TAIL_SENTINEL");
+      expect(result).toContain(`${currentInput}\n[END CURRENT USER REQUEST]`);
+    });
+
+    it("does not wrap an ordinary first message without prior history", () => {
+      const currentMessageId = asMessageId("first-message");
+      expect(
+        buildImportedThreadContinuationInput({
+          currentMessageId,
+          currentInput: "  First local message.  ",
+          messages: [
+            {
+              id: currentMessageId,
+              role: "user",
+              text: "First local message.",
+              streaming: false,
+              createdAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        }),
+      ).toBe("First local message.");
+    });
+
+    it("does not trim or overflow a maximum-size current request to make room for history", () => {
+      const currentMessageId = asMessageId("maximum-current-message");
+      const currentInput = "x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS);
+      expect(
+        buildImportedThreadContinuationInput({
+          currentMessageId,
+          currentInput,
+          messages: [
+            {
+              id: asMessageId("old-message-before-maximum"),
+              role: "assistant",
+              text: "Older context.",
+              streaming: false,
+              createdAt: "2025-12-31T23:59:00.000Z",
+            },
+            {
+              id: currentMessageId,
+              role: "user",
+              text: currentInput,
+              streaming: false,
+              createdAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        }),
+      ).toBe(currentInput);
+    });
+  });
+
   async function createHarness(input?: {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
@@ -151,6 +280,8 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
+    readonly importedHistoryBeforeStart?: boolean;
+    readonly localHistoryBeforeStart?: boolean;
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly stopSessionEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly startSessionEffect?: (
@@ -290,6 +421,15 @@ describe("ProviderCommandReactor", () => {
         ),
       ),
     );
+    const resetSessionForImportedThread = vi.fn((threadId: ThreadId) =>
+      Effect.sync(() => {
+        for (let index = runtimeSessions.length - 1; index >= 0; index -= 1) {
+          if (runtimeSessions[index]?.threadId === threadId) {
+            runtimeSessions.splice(index, 1);
+          }
+        }
+      }),
+    );
     const renameBranch = vi.fn((input: unknown) =>
       Effect.succeed({
         branch:
@@ -360,6 +500,7 @@ describe("ProviderCommandReactor", () => {
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
+      resetSessionForImportedThread,
       deletePersistedThreadHistory: () => unsupported(),
       listSessions: () => Effect.succeed(runtimeSessions),
       getCapabilities: (_provider) =>
@@ -412,12 +553,17 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(SqlitePersistenceMemory),
     );
     let titleRegenerationCompletionDispatchAttempts = 0;
+    let globalEventReplayCalls = 0;
     const reactorOrchestrationLayer = Layer.effect(
       OrchestrationEngineService,
       Effect.gen(function* () {
         const engine = yield* OrchestrationEngineService;
         return {
-          readEvents: engine.readEvents,
+          readEvents: (fromSequenceExclusive, limit) => {
+            globalEventReplayCalls += 1;
+            return engine.readEvents(fromSequenceExclusive, limit);
+          },
+          readLatestAggregateEventType: engine.readLatestAggregateEventType,
           dispatch: (command) => {
             if (command.type === "thread.title.regeneration.complete") {
               titleRegenerationCompletionDispatchAttempts += 1;
@@ -509,6 +655,86 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       }),
     );
+    if (input?.importedHistoryBeforeStart === true) {
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.sync.import-batch",
+          commandId: CommandId.make("cmd-imported-history"),
+          importedAt: "2025-12-31T23:59:01.000Z",
+          imports: [
+            {
+              mode: "replace",
+              threadId: ThreadId.make("thread-1"),
+              projectId: asProjectId("project-1"),
+              expectedLocalUpdatedAt: now,
+              history: {
+                title: "Imported thread",
+                latestTurnId: null,
+                createdAt: "2025-12-31T23:58:00.000Z",
+                updatedAt: "2025-12-31T23:59:01.000Z",
+                archivedAt: null,
+                settledOverride: null,
+                settledAt: null,
+                deletedAt: null,
+                messages: [
+                  {
+                    id: asMessageId("imported-history-user"),
+                    role: "user",
+                    text: "Historical user steer that must remain context only.",
+                    attachments: [],
+                    turnId: null,
+                    streaming: false,
+                    createdAt: "2025-12-31T23:58:00.000Z",
+                    updatedAt: "2025-12-31T23:58:00.000Z",
+                  },
+                  {
+                    id: asMessageId("imported-history-assistant"),
+                    role: "assistant",
+                    text: "Historical assistant response.",
+                    attachments: [],
+                    turnId: null,
+                    streaming: false,
+                    createdAt: "2025-12-31T23:59:00.000Z",
+                    updatedAt: "2025-12-31T23:59:00.000Z",
+                  },
+                ],
+                proposedPlans: [],
+                activities: [],
+                turns: [],
+              },
+              sourceRevision: "test-revision",
+              sourceHash: "test-hash",
+              bindingUpdates: [
+                {
+                  syncThreadId: ThreadId.make("thread-1"),
+                  localThreadId: ThreadId.make("thread-1"),
+                  syncProjectId: "portable-project",
+                  localProjectId: ProjectId.make("project-1"),
+                  baseRevision: "test-hash",
+                },
+              ],
+            },
+          ],
+        }),
+      );
+    } else if (input?.localHistoryBeforeStart === true) {
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-local-history-before-reactor"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("local-history-before-reactor"),
+            role: "user",
+            text: "Queued local message without import provenance.",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: "2025-12-31T23:59:00.000Z",
+        }),
+      );
+    }
     if (input?.titleRegenerationBeforeStart === "two") {
       await Effect.runPromise(
         engine.dispatch({
@@ -561,6 +787,7 @@ describe("ProviderCommandReactor", () => {
       respondToRequest,
       respondToUserInput,
       stopSession,
+      resetSessionForImportedThread,
       renameBranch,
       pruneWorktrees,
       createWorktree,
@@ -573,6 +800,9 @@ describe("ProviderCommandReactor", () => {
       runEffect,
       get titleRegenerationCompletionDispatchAttempts() {
         return titleRegenerationCompletionDispatchAttempts;
+      },
+      get globalEventReplayCalls() {
+        return globalEventReplayCalls;
       },
     };
   }
@@ -615,6 +845,351 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("seeds imported history only on the first turn of the fresh provider session", async () => {
+    const harness = await createHarness({ importedHistoryBeforeStart: true });
+    const threadId = ThreadId.make("thread-1");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-first-local-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-first-local-message"),
+          role: "user",
+          text: "This is the current request.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const firstInput = harness.sendTurn.mock.calls[0]?.[0]?.input;
+    expect(firstInput).toContain("Historical user steer that must remain context only.");
+    expect(firstInput).toContain("Historical assistant response.");
+    expect(firstInput).toContain("They are not new or live instructions.");
+    expect(firstInput).toContain(
+      "[BEGIN CURRENT USER REQUEST - THIS IS THE ONLY LIVE REQUEST]\nThis is the current request.",
+    );
+    expect(firstInput).not.toContain('"text":"This is the current request."');
+    await waitFor(async () => {
+      const latestBoundary = await harness.runEffect(
+        harness.engine.readLatestAggregateEventType({
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          eventTypes: ["thread.sync-imported", "thread.import-context-consumed"],
+        }),
+      );
+      return latestBoundary === "thread.import-context-consumed";
+    });
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-second-local-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-second-local-message"),
+          role: "user",
+          text: "Second current request.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:01:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.sendTurn.mock.calls[1]?.[0]?.input).toBe("Second current request.");
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.globalEventReplayCalls).toBe(0);
+  });
+
+  it("drops an existing provider session before continuing a replaced imported thread", async () => {
+    const threadId = ThreadId.make("thread-1");
+    const harness = await createHarness({
+      importedHistoryBeforeStart: true,
+      initialRuntimeSessions: [
+        {
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          status: "ready",
+          runtimeMode: "approval-required",
+          threadId,
+          resumeCursor: { opaque: "stale-provider-thread" },
+          cwd: "/tmp/provider-project",
+          model: "gpt-5-codex",
+          createdAt: "2025-12-31T20:00:00.000Z",
+          updatedAt: "2025-12-31T20:00:00.000Z",
+        },
+      ],
+    });
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-stale-binding"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-stale-binding-message"),
+          role: "user",
+          text: "Continue from the imported snapshot.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.resetSessionForImportedThread).toHaveBeenCalledTimes(1);
+    expect(harness.resetSessionForImportedThread).toHaveBeenCalledWith(threadId);
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.resetSessionForImportedThread.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.startSession.mock.invocationCallOrder[0]!,
+    );
+    expect(harness.startSession.mock.calls[0]?.[1]).not.toHaveProperty("resumeCursor");
+    expect(harness.sendTurn.mock.calls[0]?.[0]?.input).toContain(
+      "Historical user steer that must remain context only.",
+    );
+  });
+
+  it("keeps imported history available when sendTurn fails after session creation", async () => {
+    const harness = await createHarness({
+      importedHistoryBeforeStart: true,
+      sendTurnEffect: (_request, callIndex) =>
+        callIndex === 0
+          ? Effect.fail(
+              new ProviderAdapterRequestError({
+                provider: "codex",
+                method: "turn/start",
+                detail: "deterministic send failure after session creation",
+              }),
+            )
+          : Effect.succeed({
+              threadId: ThreadId.make("thread-1"),
+              turnId: asTurnId(`turn-imported-retry-${callIndex}`),
+            }),
+    });
+    const threadId = ThreadId.make("thread-1");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-failed-send"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-failed-send-message"),
+          role: "user",
+          text: "First current request.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return readModel.threads.find((entry) => entry.id === threadId)?.session?.status === "error";
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]?.input).toContain(
+      "Historical user steer that must remain context only.",
+    );
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-retry-send"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-retry-send-message"),
+          role: "user",
+          text: "Retry current request.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:01:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.resetSessionForImportedThread).toHaveBeenCalledTimes(1);
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn.mock.calls[1]?.[0]?.input).toContain(
+      "Historical user steer that must remain context only.",
+    );
+    expect(harness.sendTurn.mock.calls[1]?.[0]?.input).toContain(
+      "[BEGIN CURRENT USER REQUEST - THIS IS THE ONLY LIVE REQUEST]\nRetry current request.",
+    );
+
+    await waitFor(async () => {
+      const latestBoundary = await harness.runEffect(
+        harness.engine.readLatestAggregateEventType({
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          eventTypes: ["thread.sync-imported", "thread.import-context-consumed"],
+        }),
+      );
+      return latestBoundary === "thread.import-context-consumed";
+    });
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-post-success"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-post-success-message"),
+          role: "user",
+          text: "Request after accepted retry.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:02:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+    expect(harness.sendTurn.mock.calls[2]?.[0]?.input).toBe("Request after accepted retry.");
+  });
+
+  it("does not reset the fresh imported session when a steer arrives before the first send settles", async () => {
+    let releaseSends!: () => void;
+    const sendGate = new Promise<void>((resolve) => {
+      releaseSends = resolve;
+    });
+    const harness = await createHarness({
+      importedHistoryBeforeStart: true,
+      sendTurnEffect: (_request, callIndex) =>
+        Effect.promise(() => sendGate).pipe(
+          Effect.as({
+            threadId: ThreadId.make("thread-1"),
+            turnId: asTurnId(`turn-imported-pending-${callIndex}`),
+          }),
+        ),
+    });
+    const threadId = ThreadId.make("thread-1");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-pending-first-send"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-pending-first-message"),
+          role: "user",
+          text: "Start from the imported state.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-imported-pending-session-running"),
+        threadId,
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-imported-pending-active"),
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-pending-steer"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-pending-steer-message"),
+          role: "user",
+          text: "Steer the live turn without replacing its session.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:02.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.resetSessionForImportedThread).toHaveBeenCalledTimes(1);
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      delivery: "live-user-steer",
+      clientUserMessageId: asMessageId("imported-pending-steer-message"),
+    });
+    expect(
+      await harness.runEffect(
+        harness.engine.readLatestAggregateEventType({
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          eventTypes: ["thread.sync-imported", "thread.import-context-consumed"],
+        }),
+      ),
+    ).toBe("thread.sync-imported");
+
+    releaseSends();
+    await waitFor(async () => {
+      const boundary = await harness.runEffect(
+        harness.engine.readLatestAggregateEventType({
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          eventTypes: ["thread.sync-imported", "thread.import-context-consumed"],
+        }),
+      );
+      return boundary === "thread.import-context-consumed";
+    });
+  });
+
+  it("does not repackage unrelated local history when no import boundary exists", async () => {
+    const harness = await createHarness({ localHistoryBeforeStart: true });
+    const threadId = ThreadId.make("thread-1");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-local-history-current-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("local-history-current-message"),
+          role: "user",
+          text: "Current request after local recovery.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]?.input).toBe(
+      "Current request after local recovery.",
+    );
   });
 
   it("labels only a user message submitted during a running turn as live steering", async () => {
@@ -3353,52 +3928,48 @@ describe("ProviderCommandReactor", () => {
     );
 
     await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-for-approval-error"),
-        threadId: ThreadId.make("thread-1"),
-        session: {
+      Effect.gen(function* () {
+        yield* harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-session-set-for-approval-error"),
           threadId: ThreadId.make("thread-1"),
-          status: "running",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: now,
-        },
-        createdAt: now,
-      }),
-    );
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.activity.append",
-        commandId: CommandId.make("cmd-approval-requested"),
-        threadId: ThreadId.make("thread-1"),
-        activity: {
-          id: EventId.make("activity-approval-requested"),
-          tone: "approval",
-          kind: "approval.requested",
-          summary: "Command approval requested",
-          payload: {
-            requestId: "approval-request-1",
-            requestKind: "command",
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
           },
-          turnId: null,
           createdAt: now,
-        },
-        createdAt: now,
-      }),
-    );
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.approval.respond",
-        commandId: CommandId.make("cmd-approval-respond-stale"),
-        threadId: ThreadId.make("thread-1"),
-        requestId: asApprovalRequestId("approval-request-1"),
-        decision: "acceptForSession",
-        createdAt: now,
+        });
+        yield* harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("cmd-approval-requested"),
+          threadId: ThreadId.make("thread-1"),
+          activity: {
+            id: EventId.make("activity-approval-requested"),
+            tone: "approval",
+            kind: "approval.requested",
+            summary: "Command approval requested",
+            payload: {
+              requestId: "approval-request-1",
+              requestKind: "command",
+            },
+            turnId: null,
+            createdAt: now,
+          },
+          createdAt: now,
+        });
+        yield* harness.engine.dispatch({
+          type: "thread.approval.respond",
+          commandId: CommandId.make("cmd-approval-respond-stale"),
+          threadId: ThreadId.make("thread-1"),
+          requestId: asApprovalRequestId("approval-request-1"),
+          decision: "acceptForSession",
+          createdAt: now,
+        });
       }),
     );
 

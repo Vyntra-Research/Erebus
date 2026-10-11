@@ -21,6 +21,7 @@ import type * as Stream from "effect/Stream";
 
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
+import type { OrchestrationEventStoreShape } from "../../persistence/Services/OrchestrationEventStore.ts";
 
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
@@ -40,6 +41,9 @@ export interface OrchestrationEngineShape {
     fromSequenceExclusive: number,
     limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
+
+  /** Read the newest matching event type from one aggregate stream. */
+  readonly readLatestAggregateEventType: OrchestrationEventStoreShape["readLatestAggregateEventType"];
 
   /**
    * Dispatch a validated orchestration command.

@@ -1171,6 +1171,31 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const stopSession: ProviderServiceMethod<"stopSession"> = (input) =>
     sessionLifecycleLock.withPermits(1)(stopSessionUnlocked(input));
 
+  const resetSessionForImportedThread: ProviderServiceMethod<"resetSessionForImportedThread"> = (
+    threadId,
+  ) =>
+    sessionLifecycleLock.withPermits(1)(
+      Effect.gen(function* () {
+        const currentAdapters = yield* getAdapterEntries;
+        yield* Effect.forEach(
+          currentAdapters,
+          ([, adapter]) =>
+            Effect.gen(function* () {
+              if (!(yield* adapter.hasSession(threadId))) {
+                return;
+              }
+              yield* adapter.stopSession(threadId);
+              yield* analytics.record("provider.session.stopped", {
+                provider: adapter.provider,
+              });
+            }),
+          { concurrency: 1, discard: true },
+        );
+        yield* clearMcpSession(threadId);
+        yield* directory.deleteBinding(threadId);
+      }),
+    );
+
   const deletePersistedThreadHistory: ProviderServiceMethod<"deletePersistedThreadHistory"> = (
     threadId,
   ) =>
@@ -1437,6 +1462,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    resetSessionForImportedThread,
     deletePersistedThreadHistory,
     listSessions,
     getCapabilities,

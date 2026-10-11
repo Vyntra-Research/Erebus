@@ -77,6 +77,11 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateKind: "thread",
         aggregateId: command.threadIds.at(-1)!,
       };
+    case "thread.sync.import-batch":
+      return {
+        aggregateKind: "thread",
+        aggregateId: command.imports.at(-1)!.threadId,
+      };
     default:
       return {
         aggregateKind: "thread",
@@ -344,6 +349,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive, limit) =>
     eventStore.readFromSequence(fromSequenceExclusive, limit);
+  const readLatestAggregateEventType: OrchestrationEngineShape["readLatestAggregateEventType"] = (
+    input,
+  ) => eventStore.readLatestAggregateEventType(input);
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command, options) =>
     Effect.gen(function* () {
@@ -359,6 +367,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   return {
     readEvents,
+    readLatestAggregateEventType,
     dispatch,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)

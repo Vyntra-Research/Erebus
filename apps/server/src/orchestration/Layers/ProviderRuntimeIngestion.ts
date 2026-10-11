@@ -132,6 +132,24 @@ function sameId(left: string | null | undefined, right: string | null | undefine
   return left === right;
 }
 
+function sessionExitMatchesCurrentBinding(
+  event: Extract<ProviderRuntimeEvent, { type: "session.exited" }>,
+  session: OrchestrationThread["session"],
+): boolean {
+  if (
+    session === null ||
+    !sameId(session.threadId, event.threadId) ||
+    session.providerName !== event.provider ||
+    session.providerInstanceId !== event.providerInstanceId
+  ) {
+    return false;
+  }
+
+  const eventTime = Date.parse(event.createdAt);
+  const bindingTime = Date.parse(session.updatedAt);
+  return !Number.isFinite(eventTime) || !Number.isFinite(bindingTime) || eventTime >= bindingTime;
+}
+
 function hasAssistantMessageForTurn(
   messages: ReadonlyArray<OrchestrationMessage>,
   turnId: TurnId,
@@ -1607,8 +1625,15 @@ const make = Effect.gen(function* () {
           ? sameId(yield* getExpectedProviderTurnIdForThread(thread.id), eventTurnId) &&
             Option.isSome(pendingTurnStart)
           : false;
+      const currentSessionOwnsExit =
+        event.type === "session.exited"
+          ? sessionExitMatchesCurrentBinding(event, thread.session)
+          : true;
 
       const shouldApplyThreadLifecycle = (() => {
+        if (event.type === "session.exited" && !currentSessionOwnsExit) {
+          return false;
+        }
         if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
           return true;
         }
@@ -1954,7 +1979,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      if (event.type === "session.exited") {
+      if (event.type === "session.exited" && shouldApplyThreadLifecycle) {
         yield* clearTurnStateForSession(thread.id);
       }
 
@@ -2045,8 +2070,10 @@ const make = Effect.gen(function* () {
       // cleared on settle so a finished plan never lingers as stale UI.
       // Events carrying a turn id that conflicts with the active turn are
       // stale (superseded turn) and must neither overwrite nor clear the
-      // active turn's progress; session.exited always clears.
-      if (event.type === "session.exited") {
+      // active turn's progress. Only an exit from the currently-bound
+      // provider session may clear it; a delayed exit from a replaced account
+      // or an older session generation is stale.
+      if (event.type === "session.exited" && shouldApplyThreadLifecycle) {
         threadPlanProgress.clearThreadPlanProgress(thread.id);
       } else if (!conflictsWithActiveTurn) {
         if (event.type === "turn.plan.updated") {
@@ -2087,7 +2114,9 @@ const make = Effect.gen(function* () {
           break;
         }
         case "session.exited":
-          threadBackgroundLiveness.clearThreadLiveness(thread.id);
+          if (shouldApplyThreadLifecycle) {
+            threadBackgroundLiveness.clearThreadLiveness(thread.id);
+          }
           break;
         default:
           break;

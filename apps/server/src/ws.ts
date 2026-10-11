@@ -125,6 +125,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import * as ThreadSync from "./threadSync/ThreadSyncService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -526,6 +527,7 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
+      const threadSync = yield* ThreadSync.ThreadSyncService;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -2538,6 +2540,44 @@ const makeWsRpcLayer = (
               ),
             ),
             { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.threadSyncGetStatus]: (_input) =>
+          observeRpcEffect(WS_METHODS.threadSyncGetStatus, threadSync.getStatus, {
+            "rpc.aggregate": "thread-sync",
+          }),
+        [WS_METHODS.threadSyncConfigure]: (input) =>
+          observeRpcEffect(WS_METHODS.threadSyncConfigure, threadSync.configure(input), {
+            "rpc.aggregate": "thread-sync",
+          }),
+        [WS_METHODS.threadSyncFetch]: (input) =>
+          observeRpcEffect(WS_METHODS.threadSyncFetch, threadSync.fetch(input), {
+            "rpc.aggregate": "thread-sync",
+          }),
+        [WS_METHODS.threadSyncLinkProject]: (input) =>
+          observeRpcEffect(WS_METHODS.threadSyncLinkProject, threadSync.linkProject(input), {
+            "rpc.aggregate": "thread-sync",
+          }),
+        [WS_METHODS.threadSyncDisconnect]: (input) =>
+          observeRpcEffect(WS_METHODS.threadSyncDisconnect, threadSync.disconnect(input), {
+            "rpc.aggregate": "thread-sync",
+          }),
+        [WS_METHODS.threadSyncPull]: (input) =>
+          observeRpcEffect(WS_METHODS.threadSyncPull, threadSync.pull(input), {
+            "rpc.aggregate": "thread-sync",
+          }),
+        [WS_METHODS.threadSyncPush]: (input) =>
+          observeRpcEffect(WS_METHODS.threadSyncPush, threadSync.push(input), {
+            "rpc.aggregate": "thread-sync",
+          }),
+        [WS_METHODS.subscribeThreadSyncStatus]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeThreadSyncStatus,
+            Stream.unwrap(
+              Effect.map(threadSync.subscribe, ({ latest, changes }) =>
+                Stream.concat(Stream.make(latest), changes),
+              ),
+            ),
+            { "rpc.aggregate": "thread-sync" },
           ),
       });
     }),
