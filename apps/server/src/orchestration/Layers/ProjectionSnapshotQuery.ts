@@ -521,6 +521,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     `,
   });
 
+  const getCoagentRowByChild = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: CoagentShellRowSchema,
+    execute: ({ threadId }) => sql`
+      SELECT
+        child_thread_id AS "childThreadId",
+        parent_thread_id AS "parentThreadId",
+        creation_mode AS "creationMode",
+        status
+      FROM coagent_threads
+      WHERE child_thread_id = ${threadId}
+      LIMIT 1
+    `,
+  });
+
   const getActiveCoagentRowByChild = SqlSchema.findOneOption({
     Request: ThreadIdLookupInput,
     Result: CoagentShellRowSchema,
@@ -2638,6 +2653,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         checkpointRows,
         latestTurnRow,
         sessionRow,
+        coagentRow,
       ] = yield* Effect.all([
         getActiveThreadRowById({ threadId }).pipe(
           Effect.mapError(
@@ -2709,6 +2725,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
         ),
+        getCoagentRowByChild({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getThreadDetailById:getCoagent:query",
+              "ProjectionSnapshotQuery.getThreadDetailById:getCoagent:decodeRow",
+            ),
+          ),
+        ),
       ]);
 
       if (Option.isNone(threadRow)) {
@@ -2730,6 +2754,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         id: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
         title: threadRow.value.title,
+        coagent: Option.isSome(coagentRow)
+          ? {
+              parentThreadId: coagentRow.value.parentThreadId,
+              creationMode: coagentRow.value.creationMode,
+              status: coagentRow.value.status,
+            }
+          : null,
         modelSelection: threadRow.value.modelSelection,
         runtimeMode: threadRow.value.runtimeMode,
         interactionMode: threadRow.value.interactionMode,
