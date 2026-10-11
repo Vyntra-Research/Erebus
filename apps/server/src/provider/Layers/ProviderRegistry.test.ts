@@ -1061,6 +1061,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               attempt += 1
             ) {
               yield* TestClock.adjust("10 millis");
+              yield* Effect.promise(() => NodeTimersPromises.setTimeout(25));
               yield* Effect.yieldNow;
               cachedProvider = yield* readProviderStatusCache(filePath);
             }
@@ -1186,6 +1187,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 attempt += 1
               ) {
                 yield* TestClock.adjust("10 millis");
+                yield* Effect.promise(() => NodeTimersPromises.setTimeout(25));
                 yield* Effect.yieldNow;
                 cachedProvider = yield* readProviderStatusCache(filePath);
               }
@@ -1199,6 +1201,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 attempt += 1
               ) {
                 yield* TestClock.adjust("10 millis");
+                yield* Effect.promise(() => NodeTimersPromises.setTimeout(25));
                 yield* Effect.yieldNow;
                 cachedProvider = yield* readProviderStatusCache(filePath);
               }
