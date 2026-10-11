@@ -99,6 +99,15 @@ export interface ProviderServiceShape {
     input: ProviderStopSessionInput,
   ) => Effect.Effect<void, ProviderServiceError>;
 
+  /**
+   * Release every live adapter session and remove the local resume binding for
+   * a thread whose transcript was replaced by an imported snapshot. Provider
+   * history itself is not deleted.
+   */
+  readonly resetSessionForImportedThread: (
+    threadId: ThreadId,
+  ) => Effect.Effect<void, ProviderServiceError>;
+
   /** Stop and permanently remove provider history for a discarded co-agent. */
   readonly deletePersistedThreadHistory: (
     threadId: ThreadId,

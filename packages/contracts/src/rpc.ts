@@ -204,6 +204,22 @@ import {
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
 import { UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
+import {
+  ThreadSyncConfigureInput,
+  ThreadSyncConfigureResult,
+  ThreadSyncDisconnectInput,
+  ThreadSyncDisconnectResult,
+  ThreadSyncError,
+  ThreadSyncFetchInput,
+  ThreadSyncFetchResult,
+  ThreadSyncLinkProjectInput,
+  ThreadSyncLinkProjectResult,
+  ThreadSyncPullInput,
+  ThreadSyncPullResult,
+  ThreadSyncPushInput,
+  ThreadSyncPushResult,
+  ThreadSyncStatus,
+} from "./threadSync.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   SourceControlCloneRepositoryInput,
@@ -311,6 +327,15 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
 
+  // Thread-only Git sync methods
+  threadSyncGetStatus: "threadSync.getStatus",
+  threadSyncConfigure: "threadSync.configure",
+  threadSyncFetch: "threadSync.fetch",
+  threadSyncLinkProject: "threadSync.linkProject",
+  threadSyncDisconnect: "threadSync.disconnect",
+  threadSyncPull: "threadSync.pull",
+  threadSyncPush: "threadSync.push",
+
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -350,6 +375,7 @@ export const WS_METHODS = {
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
+  subscribeThreadSyncStatus: "subscribeThreadSyncStatus",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -802,6 +828,55 @@ export const WsProviderUploadFeedbackRpc = Rpc.make(WS_METHODS.providerUploadFee
   error: Schema.Union([ProviderUploadFeedbackError, EnvironmentAuthorizationError]),
 });
 
+export const WsThreadSyncGetStatusRpc = Rpc.make(WS_METHODS.threadSyncGetStatus, {
+  payload: Schema.Struct({}),
+  success: ThreadSyncStatus,
+  error: Schema.Union([ThreadSyncError, EnvironmentAuthorizationError]),
+});
+
+export const WsThreadSyncConfigureRpc = Rpc.make(WS_METHODS.threadSyncConfigure, {
+  payload: ThreadSyncConfigureInput,
+  success: ThreadSyncConfigureResult,
+  error: Schema.Union([ThreadSyncError, EnvironmentAuthorizationError]),
+});
+
+export const WsThreadSyncFetchRpc = Rpc.make(WS_METHODS.threadSyncFetch, {
+  payload: ThreadSyncFetchInput,
+  success: ThreadSyncFetchResult,
+  error: Schema.Union([ThreadSyncError, EnvironmentAuthorizationError]),
+});
+
+export const WsThreadSyncLinkProjectRpc = Rpc.make(WS_METHODS.threadSyncLinkProject, {
+  payload: ThreadSyncLinkProjectInput,
+  success: ThreadSyncLinkProjectResult,
+  error: Schema.Union([ThreadSyncError, EnvironmentAuthorizationError]),
+});
+
+export const WsThreadSyncDisconnectRpc = Rpc.make(WS_METHODS.threadSyncDisconnect, {
+  payload: ThreadSyncDisconnectInput,
+  success: ThreadSyncDisconnectResult,
+  error: Schema.Union([ThreadSyncError, EnvironmentAuthorizationError]),
+});
+
+export const WsThreadSyncPullRpc = Rpc.make(WS_METHODS.threadSyncPull, {
+  payload: ThreadSyncPullInput,
+  success: ThreadSyncPullResult,
+  error: Schema.Union([ThreadSyncError, EnvironmentAuthorizationError]),
+});
+
+export const WsThreadSyncPushRpc = Rpc.make(WS_METHODS.threadSyncPush, {
+  payload: ThreadSyncPushInput,
+  success: ThreadSyncPushResult,
+  error: Schema.Union([ThreadSyncError, EnvironmentAuthorizationError]),
+});
+
+export const WsSubscribeThreadSyncStatusRpc = Rpc.make(WS_METHODS.subscribeThreadSyncStatus, {
+  payload: Schema.Struct({}),
+  success: ThreadSyncStatus,
+  error: Schema.Union([ThreadSyncError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   payload: VcsStatusInput,
   success: VcsStatusStreamEvent,
@@ -1182,6 +1257,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,
   WsProviderUploadFeedbackRpc,
+  WsThreadSyncGetStatusRpc,
+  WsThreadSyncConfigureRpc,
+  WsThreadSyncFetchRpc,
+  WsThreadSyncLinkProjectRpc,
+  WsThreadSyncDisconnectRpc,
+  WsThreadSyncPullRpc,
+  WsThreadSyncPushRpc,
+  WsSubscribeThreadSyncStatusRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,

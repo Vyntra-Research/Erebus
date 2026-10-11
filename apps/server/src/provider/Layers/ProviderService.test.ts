@@ -1111,6 +1111,47 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("clears a replaced imported thread binding without deleting provider history", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const runtimeRepository = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository;
+      const threadId = asThreadId("thread-import-replace-reset");
+      routing.codex.stopSession.mockClear();
+      routing.codex.deletePersistedThread.mockClear();
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/original-project",
+        runtimeMode: "full-access",
+      });
+
+      yield* provider.resetSessionForImportedThread(threadId);
+
+      assert.deepEqual(routing.codex.stopSession.mock.calls, [[threadId]]);
+      assert.equal(routing.codex.deletePersistedThread.mock.calls.length, 0);
+      assert.equal(Option.isNone(yield* runtimeRepository.getByThreadId({ threadId })), true);
+
+      routing.codex.startSession.mockClear();
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/imported-project",
+        runtimeMode: "full-access",
+      });
+      assert.equal(routing.codex.startSession.mock.calls.length, 1);
+      assert.equal(
+        Object.hasOwn(routing.codex.startSession.mock.calls[0]?.[0] ?? {}, "resumeCursor"),
+        false,
+      );
+      yield* provider.resetSessionForImportedThread(threadId);
+      routing.codex.startSession.mockClear();
+      routing.codex.stopSession.mockClear();
+      routing.codex.deletePersistedThread.mockClear();
+    }),
+  );
+
   it.effect("routes provider operations and rollback conversation", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;

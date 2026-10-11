@@ -25,6 +25,7 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
+import { SidebarThreadSyncControl } from "./SidebarThreadSyncControl";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -213,6 +214,7 @@ const SidebarFooterActions = memo(function SidebarFooterActions() {
           <TooltipPopup side="top">Settings</TooltipPopup>
         </Tooltip>
       </SidebarMenuItem>
+      <SidebarThreadSyncControl />
       <SidebarUpdatePill />
     </SidebarMenu>
   );

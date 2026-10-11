@@ -1,4 +1,4 @@
-import { CommandId, EventId, ProjectId } from "@t3tools/contracts";
+import { CommandId, EventId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -118,6 +118,107 @@ layer("OrchestrationEventStore", (it) => {
           ),
         );
       }
+    }),
+  );
+
+  it.effect("bounds latest-type lookups to one aggregate stream", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const targetThreadId = ThreadId.make("thread-target-boundary");
+      const now = "2026-01-01T00:00:00.000Z";
+
+      yield* sql`
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 0
+          UNION ALL
+          SELECT value + 1 FROM sequence WHERE value < 499
+        )
+        INSERT INTO orchestration_events (
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        )
+        SELECT
+          'evt-unrelated-' || value,
+          'thread',
+          'thread-unrelated',
+          value,
+          'thread.message-sent',
+          ${now},
+          NULL,
+          NULL,
+          NULL,
+          'server',
+          '{}',
+          '{}'
+        FROM sequence
+      `;
+
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        )
+        VALUES
+          (
+            'evt-target-import', 'thread', ${targetThreadId}, 0, 'thread.sync-imported',
+            ${now}, NULL, NULL, NULL, 'server', '{}', '{}'
+          ),
+          (
+            'evt-target-message', 'thread', ${targetThreadId}, 1, 'thread.message-sent',
+            ${now}, NULL, NULL, NULL, 'server', '{}', '{}'
+          ),
+          (
+            'evt-target-consumed', 'thread', ${targetThreadId}, 2, 'thread.import-context-consumed',
+            ${now}, NULL, NULL, NULL, 'server', '{}', '{}'
+          )
+      `;
+
+      const latestType = yield* eventStore.readLatestAggregateEventType({
+        aggregateKind: "thread",
+        aggregateId: targetThreadId,
+        eventTypes: ["thread.sync-imported", "thread.import-context-consumed"],
+      });
+      assert.equal(latestType, "thread.import-context-consumed");
+
+      const plan = yield* sql<{ readonly detail: string }>`
+        EXPLAIN QUERY PLAN
+        SELECT event_type
+        FROM orchestration_events
+        WHERE aggregate_kind = 'thread'
+          AND stream_id = ${targetThreadId}
+          AND event_type IN ('thread.sync-imported', 'thread.import-context-consumed')
+        ORDER BY stream_version DESC
+        LIMIT 1
+      `;
+      assert.ok(
+        plan.some(
+          ({ detail }) =>
+            detail.includes("idx_orch_events_stream_version") &&
+            detail.includes("aggregate_kind") &&
+            detail.includes("stream_id"),
+        ),
+      );
     }),
   );
 });

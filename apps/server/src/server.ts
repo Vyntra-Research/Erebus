@@ -1,5 +1,6 @@
 import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -114,6 +115,8 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as ThreadSync from "./threadSync/ThreadSyncService.ts";
+import * as ThreadSyncGit from "./threadSync/ThreadSyncGit.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -417,6 +420,11 @@ const CodexRequestGatewayLayerLive = CodexRequestGatewayLive.pipe(
   Layer.provide(ServerSecretStore.layer),
 );
 
+const ThreadSyncLayerLive = ThreadSync.layer.pipe(
+  Layer.provide(ThreadSyncGit.layer),
+  Layer.tap((context) => Context.get(context, ThreadSync.ThreadSyncService).start),
+);
+
 const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
@@ -429,6 +437,7 @@ const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(Keybindings.layer),
   Layer.provideMerge(ProviderAccountRoutingLayerLive),
+  Layer.provideMerge(ThreadSyncLayerLive),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;

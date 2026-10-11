@@ -113,6 +113,7 @@ describe("OrchestrationEngine", () => {
             detail: "historical replay should not be used during bootstrap",
           }),
         ),
+      readLatestAggregateEventType: () => Effect.succeed(null),
     };
 
     const projectionSnapshot = {
@@ -812,6 +813,9 @@ describe("OrchestrationEngine", () => {
       readAll() {
         return Stream.fromIterable(events);
       },
+      readLatestAggregateEventType() {
+        return Effect.succeed(null);
+      },
     };
 
     const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -1047,6 +1051,9 @@ describe("OrchestrationEngine", () => {
       },
       readAll() {
         return Stream.fromIterable(events);
+      },
+      readLatestAggregateEventType() {
+        return Effect.succeed(null);
       },
     };
 

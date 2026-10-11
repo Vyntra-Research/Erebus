@@ -395,10 +395,18 @@ export const ThreadLinkedPullRequest = Schema.Struct({
 });
 export type ThreadLinkedPullRequest = typeof ThreadLinkedPullRequest.Type;
 
+export const OrchestrationCoagentShell = Schema.Struct({
+  parentThreadId: ThreadId,
+  creationMode: Schema.Literals(["blank", "fork"]),
+  status: Schema.Literals(["preparing", "ready", "failed", "released"]),
+});
+export type OrchestrationCoagentShell = typeof OrchestrationCoagentShell.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  coagent: Schema.optionalKey(Schema.NullOr(OrchestrationCoagentShell)),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
@@ -456,6 +464,99 @@ export const OrchestrationReadModel = Schema.Struct({
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
 
+/**
+ * Provider-independent history accepted by the internal thread-sync import
+ * command. Local runtime fields are supplied separately for a new thread and
+ * are preserved by the decider when an existing thread is replaced.
+ */
+export const ThreadSyncImportedMessage = Schema.Struct({
+  id: MessageId,
+  role: OrchestrationMessageRole,
+  text: Schema.String,
+  attachments: Schema.Array(ChatAttachment),
+  turnId: Schema.NullOr(TurnId),
+  streaming: Schema.Literal(false),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ThreadSyncImportedMessage = typeof ThreadSyncImportedMessage.Type;
+
+export const ThreadSyncImportedActivity = Schema.Struct({
+  id: EventId,
+  tone: OrchestrationThreadActivityTone,
+  kind: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  turnId: Schema.NullOr(TurnId),
+  sequence: Schema.optional(NonNegativeInt),
+  createdAt: IsoDateTime,
+});
+export type ThreadSyncImportedActivity = typeof ThreadSyncImportedActivity.Type;
+
+export const ThreadSyncImportedTurn = Schema.Struct({
+  turnId: TurnId,
+  pendingMessageId: Schema.NullOr(MessageId),
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  assistantMessageId: Schema.NullOr(MessageId),
+  state: Schema.Literals(["interrupted", "completed", "error"]),
+  requestedAt: IsoDateTime,
+  startedAt: Schema.NullOr(IsoDateTime),
+  completedAt: IsoDateTime,
+});
+export type ThreadSyncImportedTurn = typeof ThreadSyncImportedTurn.Type;
+
+export const ThreadSyncImportedHistory = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  coagent: Schema.optionalKey(Schema.NullOr(OrchestrationCoagentShell)),
+  latestTurnId: Schema.NullOr(TurnId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])),
+  settledAt: Schema.NullOr(IsoDateTime),
+  deletedAt: Schema.NullOr(IsoDateTime),
+  messages: Schema.Array(ThreadSyncImportedMessage),
+  proposedPlans: Schema.Array(OrchestrationProposedPlan),
+  activities: Schema.Array(ThreadSyncImportedActivity),
+  turns: Schema.Array(ThreadSyncImportedTurn),
+});
+export type ThreadSyncImportedHistory = typeof ThreadSyncImportedHistory.Type;
+
+export const ThreadSyncImportLocalState = Schema.Struct({
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
+});
+export type ThreadSyncImportLocalState = typeof ThreadSyncImportLocalState.Type;
+
+export const ThreadSyncBindingUpdate = Schema.Struct({
+  syncThreadId: ThreadId,
+  localThreadId: ThreadId,
+  syncProjectId: TrimmedNonEmptyString,
+  localProjectId: ProjectId,
+  baseRevision: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ThreadSyncBindingUpdate = typeof ThreadSyncBindingUpdate.Type;
+
+export const ThreadSyncImportItem = Schema.Struct({
+  mode: Schema.Literals(["create", "replace"]),
+  threadId: ThreadId,
+  projectId: ProjectId,
+  expectedLocalUpdatedAt: Schema.NullOr(IsoDateTime),
+  localState: Schema.optional(ThreadSyncImportLocalState),
+  history: ThreadSyncImportedHistory,
+  sourceRevision: TrimmedNonEmptyString,
+  sourceHash: TrimmedNonEmptyString,
+  bindingUpdates: Schema.Array(ThreadSyncBindingUpdate).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(2),
+  ),
+});
+export type ThreadSyncImportItem = typeof ThreadSyncImportItem.Type;
+
 export const OrchestrationProjectShell = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -470,13 +571,6 @@ export const OrchestrationProjectShell = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
-
-export const OrchestrationCoagentShell = Schema.Struct({
-  parentThreadId: ThreadId,
-  creationMode: Schema.Literals(["blank", "fork"]),
-  status: Schema.Literals(["preparing", "ready", "failed", "released"]),
-});
-export type OrchestrationCoagentShell = typeof OrchestrationCoagentShell.Type;
 
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
@@ -1037,6 +1131,13 @@ const ThreadSessionSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadImportContextConsumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.import-context.consume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const ThreadMessageAssistantDeltaCommand = Schema.Struct({
   type: Schema.Literal("thread.message.assistant.delta"),
   commandId: CommandId,
@@ -1102,8 +1203,20 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+export const ThreadSyncImportBatchCommand = Schema.Struct({
+  type: Schema.Literal("thread.sync.import-batch"),
+  commandId: CommandId,
+  importedAt: IsoDateTime,
+  imports: Schema.Array(ThreadSyncImportItem).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(10_000),
+  ),
+});
+export type ThreadSyncImportBatchCommand = typeof ThreadSyncImportBatchCommand.Type;
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
+  ThreadImportContextConsumeCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
@@ -1111,6 +1224,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadTitleRegenerationCompleteCommand,
+  ThreadSyncImportBatchCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1149,9 +1263,11 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.reverted",
   "thread.session-stop-requested",
   "thread.session-set",
+  "thread.import-context-consumed",
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.sync-imported",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1203,6 +1319,19 @@ export const ThreadCreatedPayload = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
+
+export const ThreadSyncImportedPayload = Schema.Struct({
+  threadId: ThreadId,
+  sourceRevision: TrimmedNonEmptyString,
+  sourceHash: TrimmedNonEmptyString,
+  importedAt: IsoDateTime,
+  thread: OrchestrationThread,
+  turns: Schema.Array(ThreadSyncImportedTurn),
+  bindingUpdates: Schema.Array(ThreadSyncBindingUpdate).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+});
+export type ThreadSyncImportedPayload = typeof ThreadSyncImportedPayload.Type;
 
 export const ThreadDeletedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -1377,6 +1506,11 @@ export const ThreadSessionSetPayload = Schema.Struct({
   session: OrchestrationSession,
 });
 
+export const ThreadImportContextConsumedPayload = Schema.Struct({
+  threadId: ThreadId,
+  consumedAt: IsoDateTime,
+});
+
 export const ThreadProposedPlanUpsertedPayload = Schema.Struct({
   threadId: ThreadId,
   proposedPlan: OrchestrationProposedPlan,
@@ -1452,6 +1586,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.created"),
     payload: ThreadCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.sync-imported"),
+    payload: ThreadSyncImportedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -1572,6 +1711,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.session-set"),
     payload: ThreadSessionSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.import-context-consumed"),
+    payload: ThreadImportContextConsumedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

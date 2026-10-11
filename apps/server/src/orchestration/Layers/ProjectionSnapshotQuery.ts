@@ -508,6 +508,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     `,
   });
 
+  const listCoagentRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: CoagentShellRowSchema,
+    execute: () => sql`
+      SELECT
+        child_thread_id AS "childThreadId",
+        parent_thread_id AS "parentThreadId",
+        creation_mode AS "creationMode",
+        status
+      FROM coagent_threads
+    `,
+  });
+
   const getActiveCoagentRowByChild = SqlSchema.findOneOption({
     Request: ThreadIdLookupInput,
     Result: CoagentShellRowSchema,
@@ -1507,6 +1520,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listCoagentRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listCoagents:query",
+                "ProjectionSnapshotQuery.getSnapshot:listCoagents:decodeRows",
+              ),
+            ),
+          ),
           listThreadMessageRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1570,6 +1591,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           ([
             projectRows,
             threadRows,
+            coagentRows,
             messageRows,
             proposedPlanRows,
             activityRows,
@@ -1585,6 +1607,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>();
               const sessionsByThread = new Map<string, OrchestrationSession>();
               const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
+              const coagentByThread = new Map(
+                coagentRows.map((row) => [row.childThreadId, row] as const),
+              );
 
               let updatedAt: string | null = null;
 
@@ -1735,6 +1760,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 id: row.threadId,
                 projectId: row.projectId,
                 title: row.title,
+                coagent: coagentByThread.has(row.threadId)
+                  ? {
+                      parentThreadId: coagentByThread.get(row.threadId)!.parentThreadId,
+                      creationMode: coagentByThread.get(row.threadId)!.creationMode,
+                      status: coagentByThread.get(row.threadId)!.status,
+                    }
+                  : null,
                 modelSelection: row.modelSelection,
                 runtimeMode: row.runtimeMode,
                 interactionMode: row.interactionMode,
