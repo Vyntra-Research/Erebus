@@ -1,4 +1,6 @@
 import type { ThreadSyncConflict, ThreadSyncStatus } from "@t3tools/contracts";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -7,6 +9,7 @@ import {
   canPullThreadSync,
   canPushThreadSync,
   getThreadSyncPresentation,
+  ThreadSyncPrivacyNotice,
   updateThreadSyncSelection,
 } from "./SidebarThreadSyncControl";
 
@@ -114,5 +117,13 @@ describe("thread sync sidebar presentation", () => {
       "thread-b": "keep-both",
     });
     expect(previous).toEqual({ "thread-a": "use-remote" });
+  });
+
+  it("warns that thread data leaves the device and requires a private repository", () => {
+    const markup = renderToStaticMarkup(createElement(ThreadSyncPrivacyNotice));
+
+    expect(markup).toContain('role="note"');
+    expect(markup).toContain("Use a dedicated private repository.");
+    expect(markup).toContain("Thread history and attachments are sent to this Git remote.");
   });
 });

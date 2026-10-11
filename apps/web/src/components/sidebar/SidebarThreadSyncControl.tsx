@@ -193,6 +193,21 @@ function StatusSummary({ status }: { readonly status: ThreadSyncStatus }) {
   );
 }
 
+export function ThreadSyncPrivacyNotice() {
+  return (
+    <p
+      className="flex gap-2 rounded-md border border-warning/25 bg-warning/8 px-2.5 py-2 text-[11px] leading-4 text-foreground"
+      role="note"
+    >
+      <TriangleAlertIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-warning" />
+      <span>
+        Use a dedicated private repository. Thread history and attachments are sent to this Git
+        remote.
+      </span>
+    </p>
+  );
+}
+
 function ThreadSyncConfigurationForm({
   status,
   disabled,
@@ -285,6 +300,7 @@ function ThreadSyncConfigurationForm({
         Syncs thread history only. Accounts, providers, models, and local project paths stay on this
         device.
       </p>
+      <ThreadSyncPrivacyNotice />
       {status.lastError ? (
         <p
           className="rounded-md border border-destructive/30 bg-destructive/8 px-2 py-1.5 text-xs text-destructive-foreground"

@@ -17,6 +17,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
+import { writeFileStringAtomically } from "../atomicWrite.ts";
 import {
   canonicalThreadSyncJson,
   emptyThreadSyncRepositoryDocuments,
@@ -75,6 +76,7 @@ function nodeErrorCode(cause: unknown): string | undefined {
 }
 
 const lstatPathWithoutFollowing = Effect.fn("ThreadSyncRepository.lstatNoFollow")(function* (
+  operation: "pull" | "push",
   filePath: string,
 ): Effect.fn.Return<NodeFS.Stats | null, ThreadSyncError> {
   return yield* Effect.try({
@@ -88,12 +90,64 @@ const lstatPathWithoutFollowing = Effect.fn("ThreadSyncRepository.lstatNoFollow"
     },
     catch: (cause) =>
       repositoryError(
-        "push",
+        operation,
         "io-failed",
         `Could not inspect a sync repository path without following links: ${String(cause)}`,
       ),
   });
 });
+
+const inspectManagedDocumentPath = Effect.fn("ThreadSyncRepository.inspectManagedDocumentPath")(
+  function* (
+    operation: "pull" | "push",
+    mirrorPath: string,
+    documentPath: string,
+    allowMissing: boolean,
+    documentKind: "manifest" | "project" | "thread",
+  ): Effect.fn.Return<NodeFS.Stats | null, ThreadSyncError, FileSystem.FileSystem | Path.Path> {
+    const path = yield* Path.Path;
+    const resolvedMirror = path.resolve(mirrorPath);
+    const resolvedDocument = path.resolve(documentPath);
+    if (!isInside(resolvedMirror, resolvedDocument, path)) {
+      return yield* repositoryError(
+        operation,
+        "integrity-failed",
+        `The sync ${documentKind} path escapes its managed mirror.`,
+      );
+    }
+
+    yield* assertRealPathContained(mirrorPath, path.dirname(documentPath)).pipe(
+      Effect.mapError((cause) => new ThreadSyncError({ ...cause, operation })),
+    );
+    const entry = yield* lstatPathWithoutFollowing(operation, documentPath);
+    if (entry === null) {
+      if (allowMissing) return null;
+      return yield* repositoryError(
+        operation,
+        "integrity-failed",
+        `The sync ${documentKind} document is missing.`,
+      );
+    }
+    if (entry.isSymbolicLink()) {
+      return yield* repositoryError(
+        operation,
+        "integrity-failed",
+        `The sync ${documentKind} document is a symbolic link, junction, or reparse point.`,
+      );
+    }
+    if (!entry.isFile()) {
+      return yield* repositoryError(
+        operation,
+        "integrity-failed",
+        `The sync ${documentKind} document is not a regular file.`,
+      );
+    }
+    yield* assertRealPathContained(mirrorPath, documentPath).pipe(
+      Effect.mapError((cause) => new ThreadSyncError({ ...cause, operation })),
+    );
+    return entry;
+  },
+);
 
 function isInside(root: string, candidate: string, path: Path.Path): boolean {
   const relative = path.relative(root, candidate);
@@ -356,6 +410,7 @@ export const readThreadSyncRepository = Effect.fn("ThreadSyncRepository.read")(f
 
   const documentBudget = { consumed: 0, maximum: MAX_TOTAL_DOCUMENT_BYTES };
   const manifestPath = path.join(mirrorPath, THREAD_SYNC_MANIFEST_PATH);
+  yield* inspectManagedDocumentPath("pull", mirrorPath, manifestPath, false, "manifest");
   const manifestContents = yield* readBoundedText("pull", manifestPath, documentBudget);
   yield* decodeManifest(manifestContents).pipe(
     Effect.mapError((cause) =>
@@ -399,7 +454,13 @@ export const readThreadSyncRepository = Effect.fn("ThreadSyncRepository.read")(f
           );
         }
         const filePath = path.join(directoryPath, fileName);
-        yield* assertRealPathContained(mirrorPath, filePath);
+        yield* inspectManagedDocumentPath(
+          "pull",
+          mirrorPath,
+          filePath,
+          false,
+          input.directory === THREAD_SYNC_PROJECTS_DIRECTORY ? "project" : "thread",
+        );
         const contents = yield* readBoundedText("pull", filePath, documentBudget);
         const document = yield* input
           .decode(contents)
@@ -649,37 +710,54 @@ export const writeThreadSyncRepository = Effect.fn("ThreadSyncRepository.write")
       ),
     { discard: true },
   );
+  const manifestPath = path.join(input.mirrorPath, THREAD_SYNC_MANIFEST_PATH);
+  yield* inspectManagedDocumentPath("push", input.mirrorPath, manifestPath, true, "manifest");
 
   let totalDocumentBytes = 0;
-  const writeText = (filePath: string, value: unknown) => {
+  const writeText = Effect.fn("ThreadSyncRepository.writeText")(function* (
+    filePath: string,
+    value: unknown,
+    documentKind: "manifest" | "project" | "thread",
+  ) {
     const contents = canonicalThreadSyncJson(value);
     const size = Buffer.byteLength(contents, "utf8");
     if (size > MAX_DOCUMENT_BYTES || totalDocumentBytes + size > MAX_TOTAL_DOCUMENT_BYTES) {
-      return Effect.fail(
-        repositoryError("push", "integrity-failed", "The snapshot exceeds document size limits."),
+      return yield* repositoryError(
+        "push",
+        "integrity-failed",
+        "The snapshot exceeds document size limits.",
       );
     }
     totalDocumentBytes += size;
-    return fileSystem
-      .writeFileString(filePath, contents)
-      .pipe(Effect.mapError((cause) => repositoryError("push", "io-failed", String(cause))));
-  };
+
+    // The preflight rejects existing links and non-files. The helper writes a
+    // complete sibling temporary file and renames that directory entry over
+    // the destination, so a concurrent final-entry link swap is replaced
+    // rather than followed to its external target.
+    yield* inspectManagedDocumentPath("push", input.mirrorPath, filePath, true, documentKind);
+    yield* writeFileStringAtomically({ filePath, contents }).pipe(
+      Effect.mapError((cause) =>
+        repositoryError("push", "io-failed", `Could not write a sync document: ${String(cause)}`),
+      ),
+    );
+    yield* inspectManagedDocumentPath("push", input.mirrorPath, filePath, false, documentKind);
+  });
   for (const [id, project] of [...input.projects.entries()].toSorted(([left], [right]) =>
     left.localeCompare(right),
   )) {
-    yield* writeText(path.join(projectsPath, threadSyncDocumentFileName(id)), project);
+    yield* writeText(path.join(projectsPath, threadSyncDocumentFileName(id)), project, "project");
   }
   for (const [id, thread] of [...input.threads.entries()].toSorted(([left], [right]) =>
     left.localeCompare(right),
   )) {
-    yield* writeText(path.join(threadsPath, threadSyncDocumentFileName(id)), thread);
+    yield* writeText(path.join(threadsPath, threadSyncDocumentFileName(id)), thread, "thread");
   }
   for (const [hash] of [...attachments.entries()].toSorted(([left], [right]) =>
     left.localeCompare(right),
   )) {
     const bytes = input.blobs.get(hash)!;
     const blobPath = path.join(blobsPath, threadSyncBlobFileName(hash));
-    const existingEntry = yield* lstatPathWithoutFollowing(blobPath);
+    const existingEntry = yield* lstatPathWithoutFollowing("push", blobPath);
     if (existingEntry !== null) {
       if (existingEntry.isSymbolicLink()) {
         return yield* repositoryError(
@@ -809,5 +887,5 @@ export const writeThreadSyncRepository = Effect.fn("ThreadSyncRepository.write")
     kind: "erebus-thread-sync",
     updatedAt: input.updatedAt,
   };
-  yield* writeText(path.join(input.mirrorPath, THREAD_SYNC_MANIFEST_PATH), manifest);
+  yield* writeText(manifestPath, manifest, "manifest");
 });

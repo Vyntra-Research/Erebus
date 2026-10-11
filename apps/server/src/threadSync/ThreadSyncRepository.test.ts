@@ -17,6 +17,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import {
   THREAD_SYNC_BLOBS_DIRECTORY,
+  THREAD_SYNC_MANIFEST_PATH,
   THREAD_SYNC_PROJECTS_DIRECTORY,
   THREAD_SYNC_THREADS_DIRECTORY,
   canonicalThreadSyncJson,
@@ -106,6 +107,306 @@ describe("ThreadSyncRepository", () => {
         expect(restored.projects.get(project.syncProjectId)).toEqual(project);
         expect(restored.threads.get(thread.threadId)).toEqual(thread);
         expect([...restored.blobs.get(blobHash)!]).toEqual([...blob]);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects a manifest redirected outside the mirror on read and write", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const hostPlatform = yield* HostProcessPlatform;
+        const mirrorPath = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-repo-",
+        });
+        const outsidePath = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-outside-",
+        });
+        yield* writeThreadSyncRepository({
+          mirrorPath,
+          projects: new Map([[project.syncProjectId, project]]),
+          threads: new Map(),
+          blobs: new Map(),
+          updatedAt: "2026-10-11T12:00:00.000Z",
+        });
+
+        const manifestPath = path.join(mirrorPath, THREAD_SYNC_MANIFEST_PATH);
+        const externalTarget = path.join(outsidePath, "external-manifest");
+        const sentinelPath =
+          hostPlatform === "win32" ? path.join(externalTarget, "sentinel.txt") : externalTarget;
+        yield* fileSystem.remove(manifestPath);
+        if (hostPlatform === "win32") {
+          yield* fileSystem.makeDirectory(externalTarget);
+        }
+        yield* fileSystem.writeFileString(sentinelPath, "preserve\n");
+        NodeFS.symlinkSync(
+          externalTarget,
+          manifestPath,
+          hostPlatform === "win32" ? "junction" : "file",
+        );
+
+        const readError = yield* Effect.flip(readThreadSyncRepository(mirrorPath));
+        expect(readError.code).toBe("integrity-failed");
+        expect(readError.detail).toContain("symbolic link, junction, or reparse point");
+
+        const writeError = yield* Effect.flip(
+          writeThreadSyncRepository({
+            mirrorPath,
+            projects: new Map([[project.syncProjectId, project]]),
+            threads: new Map(),
+            blobs: new Map(),
+            updatedAt: "2026-10-11T12:01:00.000Z",
+          }),
+        );
+        expect(writeError.code).toBe("integrity-failed");
+        expect(writeError.detail).toContain("symbolic link, junction, or reparse point");
+        expect(yield* fileSystem.readFileString(sentinelPath)).toBe("preserve\n");
+        expect(NodeFS.lstatSync(manifestPath).isSymbolicLink()).toBe(true);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects a broken manifest link on read and write", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const hostPlatform = yield* HostProcessPlatform;
+        const mirrorPath = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-repo-",
+        });
+        const outsidePath = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-outside-",
+        });
+        yield* writeThreadSyncRepository({
+          mirrorPath,
+          projects: new Map([[project.syncProjectId, project]]),
+          threads: new Map(),
+          blobs: new Map(),
+          updatedAt: "2026-10-11T12:00:00.000Z",
+        });
+
+        const manifestPath = path.join(mirrorPath, THREAD_SYNC_MANIFEST_PATH);
+        const externalTarget = path.join(
+          outsidePath,
+          hostPlatform === "win32" ? "missing-directory" : "missing-manifest.json",
+        );
+        yield* fileSystem.remove(manifestPath);
+        if (hostPlatform === "win32") {
+          yield* fileSystem.makeDirectory(externalTarget);
+        }
+        NodeFS.symlinkSync(
+          externalTarget,
+          manifestPath,
+          hostPlatform === "win32" ? "junction" : "file",
+        );
+        if (hostPlatform === "win32") {
+          yield* fileSystem.remove(externalTarget, { recursive: true });
+        }
+
+        const readError = yield* Effect.flip(readThreadSyncRepository(mirrorPath));
+        expect(readError.code).toBe("integrity-failed");
+        expect(readError.detail).toContain("symbolic link, junction, or reparse point");
+
+        const writeError = yield* Effect.flip(
+          writeThreadSyncRepository({
+            mirrorPath,
+            projects: new Map([[project.syncProjectId, project]]),
+            threads: new Map(),
+            blobs: new Map(),
+            updatedAt: "2026-10-11T12:01:00.000Z",
+          }),
+        );
+        expect(writeError.code).toBe("integrity-failed");
+        expect(writeError.detail).toContain("symbolic link, junction, or reparse point");
+        expect(NodeFS.existsSync(externalTarget)).toBe(false);
+        expect(NodeFS.lstatSync(manifestPath).isSymbolicLink()).toBe(true);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects project and thread documents redirected outside the mirror", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const hostPlatform = yield* HostProcessPlatform;
+
+        for (const documentKind of ["project", "thread"] as const) {
+          const mirrorPath = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: `thread-sync-${documentKind}-repo-`,
+          });
+          const outsidePath = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: `thread-sync-${documentKind}-outside-`,
+          });
+          const testBlob = new Uint8Array([0]);
+          const { blobHash, thread } = makeThread(testBlob);
+          yield* writeThreadSyncRepository({
+            mirrorPath,
+            projects: new Map([[project.syncProjectId, project]]),
+            threads: new Map([[thread.threadId, thread]]),
+            blobs: new Map([[blobHash, testBlob]]),
+            updatedAt: "2026-10-11T12:00:00.000Z",
+          });
+
+          const documentPath = path.join(
+            mirrorPath,
+            documentKind === "project"
+              ? THREAD_SYNC_PROJECTS_DIRECTORY
+              : THREAD_SYNC_THREADS_DIRECTORY,
+            threadSyncDocumentFileName(
+              documentKind === "project" ? project.syncProjectId : thread.threadId,
+            ),
+          );
+          const externalTarget = path.join(outsidePath, `${documentKind}-target`);
+          const sentinelPath =
+            hostPlatform === "win32" ? path.join(externalTarget, "sentinel.txt") : externalTarget;
+          yield* fileSystem.remove(documentPath);
+          if (hostPlatform === "win32") {
+            yield* fileSystem.makeDirectory(externalTarget);
+          }
+          yield* fileSystem.writeFileString(sentinelPath, "preserve\n");
+          NodeFS.symlinkSync(
+            externalTarget,
+            documentPath,
+            hostPlatform === "win32" ? "junction" : "file",
+          );
+
+          const error = yield* Effect.flip(
+            writeThreadSyncRepository({
+              mirrorPath,
+              projects: new Map([[project.syncProjectId, project]]),
+              threads: new Map([[thread.threadId, thread]]),
+              blobs: new Map([[blobHash, testBlob]]),
+              updatedAt: "2026-10-11T12:01:00.000Z",
+            }),
+          );
+          expect(error.code).toBe("integrity-failed");
+          expect(error.detail).toContain("symbolic link, junction, or reparse point");
+          expect(yield* fileSystem.readFileString(sentinelPath)).toBe("preserve\n");
+          expect(NodeFS.lstatSync(documentPath).isSymbolicLink()).toBe(true);
+        }
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects broken project and thread document links without creating targets", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const hostPlatform = yield* HostProcessPlatform;
+
+        for (const documentKind of ["project", "thread"] as const) {
+          const mirrorPath = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: `thread-sync-${documentKind}-repo-`,
+          });
+          const outsidePath = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: `thread-sync-${documentKind}-outside-`,
+          });
+          const testBlob = new Uint8Array([0]);
+          const { blobHash, thread } = makeThread(testBlob);
+          yield* writeThreadSyncRepository({
+            mirrorPath,
+            projects: new Map([[project.syncProjectId, project]]),
+            threads: new Map([[thread.threadId, thread]]),
+            blobs: new Map([[blobHash, testBlob]]),
+            updatedAt: "2026-10-11T12:00:00.000Z",
+          });
+
+          const documentPath = path.join(
+            mirrorPath,
+            documentKind === "project"
+              ? THREAD_SYNC_PROJECTS_DIRECTORY
+              : THREAD_SYNC_THREADS_DIRECTORY,
+            threadSyncDocumentFileName(
+              documentKind === "project" ? project.syncProjectId : thread.threadId,
+            ),
+          );
+          const externalTarget = path.join(
+            outsidePath,
+            hostPlatform === "win32" ? `${documentKind}-missing-directory` : `${documentKind}.json`,
+          );
+          yield* fileSystem.remove(documentPath);
+          if (hostPlatform === "win32") {
+            yield* fileSystem.makeDirectory(externalTarget);
+          }
+          NodeFS.symlinkSync(
+            externalTarget,
+            documentPath,
+            hostPlatform === "win32" ? "junction" : "file",
+          );
+          if (hostPlatform === "win32") {
+            yield* fileSystem.remove(externalTarget, { recursive: true });
+          }
+
+          const error = yield* Effect.flip(
+            writeThreadSyncRepository({
+              mirrorPath,
+              projects: new Map([[project.syncProjectId, project]]),
+              threads: new Map([[thread.threadId, thread]]),
+              blobs: new Map([[blobHash, testBlob]]),
+              updatedAt: "2026-10-11T12:01:00.000Z",
+            }),
+          );
+          expect(error.code).toBe("integrity-failed");
+          expect(error.detail).toContain("symbolic link, junction, or reparse point");
+          expect(NodeFS.existsSync(externalTarget)).toBe(false);
+          expect(NodeFS.lstatSync(documentPath).isSymbolicLink()).toBe(true);
+        }
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects non-file project, thread, and manifest entries", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        for (const documentKind of ["project", "thread", "manifest"] as const) {
+          const mirrorPath = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: `thread-sync-${documentKind}-repo-`,
+          });
+          const testBlob = new Uint8Array([0]);
+          const { blobHash, thread } = makeThread(testBlob);
+          yield* writeThreadSyncRepository({
+            mirrorPath,
+            projects: new Map([[project.syncProjectId, project]]),
+            threads: new Map([[thread.threadId, thread]]),
+            blobs: new Map([[blobHash, testBlob]]),
+            updatedAt: "2026-10-11T12:00:00.000Z",
+          });
+
+          const documentPath =
+            documentKind === "manifest"
+              ? path.join(mirrorPath, THREAD_SYNC_MANIFEST_PATH)
+              : path.join(
+                  mirrorPath,
+                  documentKind === "project"
+                    ? THREAD_SYNC_PROJECTS_DIRECTORY
+                    : THREAD_SYNC_THREADS_DIRECTORY,
+                  threadSyncDocumentFileName(
+                    documentKind === "project" ? project.syncProjectId : thread.threadId,
+                  ),
+                );
+          yield* fileSystem.remove(documentPath);
+          yield* fileSystem.makeDirectory(documentPath);
+
+          const error = yield* Effect.flip(
+            writeThreadSyncRepository({
+              mirrorPath,
+              projects: new Map([[project.syncProjectId, project]]),
+              threads: new Map([[thread.threadId, thread]]),
+              blobs: new Map([[blobHash, testBlob]]),
+              updatedAt: "2026-10-11T12:01:00.000Z",
+            }),
+          );
+          expect(error.code).toBe("integrity-failed");
+          expect(error.detail).toContain("not a regular file");
+          expect(NodeFS.lstatSync(documentPath).isDirectory()).toBe(true);
+        }
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
