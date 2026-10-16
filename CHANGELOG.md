@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.10 - 2026-10-15
+
+### Added
+
+- Synchronize thread history between Erebus installations through a Git repository.
+- Check, pull, and push synchronized threads from the sidebar, with explicit conflict handling and local project relinking.
+
 ## 0.7.9 - 2026-10-07
 
 ### Fixed
