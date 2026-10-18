@@ -35,6 +35,7 @@ const emptySnapshot: OrchestrationReadModel = {
 
 const buildHarness = Effect.fn("ThreadSyncServiceIntegrityTest.buildHarness")(function* (input: {
   readonly failFetch?: boolean;
+  readonly initialState?: "blocking-directory" | "corrupt" | "missing";
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -46,24 +47,46 @@ const buildHarness = Effect.fn("ThreadSyncServiceIntegrityTest.buildHarness")(fu
   );
   const statePath = path.join(config.stateDir, "thread-sync", "state.json");
   yield* fileSystem.makeDirectory(path.dirname(statePath), { recursive: true });
-  yield* fileSystem.writeFileString(statePath, corruptState);
+  if (input.initialState === "blocking-directory") {
+    yield* fileSystem.makeDirectory(statePath);
+  } else if (input.initialState !== "missing") {
+    yield* fileSystem.writeFileString(statePath, corruptState);
+  }
 
   const gitFailure = new ThreadSyncError({
     operation: "fetch",
     code: "git-failed",
     detail: "Intentional fetch failure.",
   });
+  let fetchCount = 0;
+  let checkoutWithoutPrefetchCount = 0;
+  let removeMirrorCount = 0;
   const git = ThreadSyncGit.of({
     fetch: () =>
-      input.failFetch === true
-        ? Effect.fail(gitFailure)
-        : Effect.succeed({ mirrorPath: directory, remoteRevision: null }),
-    checkoutRemote: () => Effect.succeed({ mirrorPath: directory, remoteRevision: null }),
+      Effect.suspend(() => {
+        fetchCount += 1;
+        return input.failFetch === true
+          ? Effect.fail(gitFailure)
+          : Effect.succeed({ mirrorPath: directory, remoteRevision: null });
+      }),
+    checkoutRemote: (_configuration, _expectedRemoteRevision, prefetched) =>
+      Effect.sync(() => {
+        if (prefetched === undefined) checkoutWithoutPrefetchCount += 1;
+        return prefetched ?? { mirrorPath: directory, remoteRevision: null };
+      }),
     commitAndPush: () => Effect.die("commitAndPush must not run in this test"),
-    removeMirror: () => Effect.void,
+    removeMirror: () =>
+      Effect.sync(() => {
+        removeMirrorCount += 1;
+      }),
   } satisfies ThreadSyncGitShape);
+  let snapshotReadCount = 0;
   const snapshotQuery = ProjectionSnapshotQuery.ProjectionSnapshotQuery.of({
-    getSnapshot: () => Effect.succeed(emptySnapshot),
+    getSnapshot: () =>
+      Effect.sync(() => {
+        snapshotReadCount += 1;
+        return emptySnapshot;
+      }),
   } as unknown as ProjectionSnapshotQuery.ProjectionSnapshotQueryShape);
   const turnRepository = ProjectionTurnRepository.of({
     listByThreadId: () => Effect.succeed([]),
@@ -84,7 +107,15 @@ const buildHarness = Effect.fn("ThreadSyncServiceIntegrityTest.buildHarness")(fu
     Effect.provideService(OrchestrationEngine.OrchestrationEngineService, engine),
     Effect.provideService(ThreadSyncGit, git),
   );
-  return { fileSystem, statePath, service };
+  return {
+    fileSystem,
+    statePath,
+    service,
+    fetchCount: () => fetchCount,
+    checkoutWithoutPrefetchCount: () => checkoutWithoutPrefetchCount,
+    removeMirrorCount: () => removeMirrorCount,
+    snapshotReadCount: () => snapshotReadCount,
+  };
 });
 
 const expectCorruptState = Effect.fn("ThreadSyncServiceIntegrityTest.expectCorruptState")(
@@ -152,6 +183,62 @@ describe("ThreadSyncService corrupt local state", () => {
         const persisted = yield* loadThreadSyncLocalState(harness.statePath);
         expect(persisted.configuration?.remoteUrl).toBe("https://example.test/threads.git");
         expect(persisted.lastBindingEventSequence).toBe(7);
+        expect(harness.snapshotReadCount()).toBe(0);
+      }),
+    ).pipe(Effect.provide(platformLayer)),
+  );
+
+  it.effect("polls a configured remote without hydrating the local snapshot", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* buildHarness({ initialState: "missing" });
+        const configuration = {
+          remoteUrl: "https://example.test/threads.git",
+          branch: "main",
+          fetchIntervalSeconds: 60,
+        } as const;
+        yield* harness.service.configure(configuration);
+        const result = yield* harness.service.fetch({ expectedRemoteRevision: null });
+
+        expect(result.discoveredThreadCount).toBe(0);
+        expect(harness.fetchCount()).toBe(2);
+        expect(harness.checkoutWithoutPrefetchCount()).toBe(0);
+        expect(harness.snapshotReadCount()).toBe(0);
+
+        yield* harness.service.start;
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+        expect(harness.fetchCount()).toBeGreaterThanOrEqual(3);
+        expect(harness.snapshotReadCount()).toBe(0);
+      }),
+    ).pipe(Effect.provide(platformLayer)),
+  );
+
+  it.effect("retries after mirror validation succeeds but state persistence fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* buildHarness({ initialState: "blocking-directory" });
+        const configuration = {
+          remoteUrl: "https://example.test/threads.git",
+          branch: "main",
+          fetchIntervalSeconds: 60,
+        } as const;
+
+        const first = yield* Effect.result(harness.service.configure(configuration));
+        expect(first._tag).toBe("Failure");
+        if (first._tag === "Failure") expect(first.failure.code).toBe("io-failed");
+        expect(harness.fetchCount()).toBe(1);
+        expect(harness.removeMirrorCount()).toBe(0);
+        expect(harness.snapshotReadCount()).toBe(0);
+
+        yield* harness.fileSystem.remove(harness.statePath, { recursive: true });
+        yield* harness.service.configure(configuration);
+
+        const persisted = yield* loadThreadSyncLocalState(harness.statePath);
+        expect(persisted.configuration?.remoteUrl).toBe(configuration.remoteUrl);
+        expect(harness.fetchCount()).toBe(2);
+        expect(harness.removeMirrorCount()).toBe(0);
+        expect(harness.snapshotReadCount()).toBe(0);
       }),
     ).pipe(Effect.provide(platformLayer)),
   );

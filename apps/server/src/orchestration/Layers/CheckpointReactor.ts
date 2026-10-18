@@ -1,6 +1,5 @@
 import {
   CommandId,
-  type CheckpointRef,
   EventId,
   MessageId,
   type ProjectId,
@@ -161,10 +160,33 @@ const make = Effect.gen(function* () {
       : Option.none();
   });
 
-  const resolveThreadDetail = Effect.fn("resolveThreadDetail")(function* (threadId: ThreadId) {
-    return yield* projectionSnapshotQuery
-      .getThreadDetailById(threadId)
-      .pipe(Effect.map(Option.getOrUndefined));
+  const resolveThreadDetail = Effect.fn("resolveThreadDetail")(function* (
+    threadId: ThreadId,
+    turnId?: TurnId,
+  ) {
+    const [thread, checkpointContext] = yield* Effect.all([
+      projectionSnapshotQuery.getThreadShellById(threadId),
+      projectionSnapshotQuery.getThreadCheckpointHeadContext?.(threadId, turnId) ??
+        Effect.succeed(Option.none()),
+    ]);
+    if (Option.isNone(thread) || Option.isNone(checkpointContext)) {
+      return undefined;
+    }
+    const checkpoints = [
+      ...(checkpointContext.value.turnCheckpoint === null
+        ? []
+        : [checkpointContext.value.turnCheckpoint]),
+      ...(checkpointContext.value.latestCheckpoint === null ||
+      checkpointContext.value.latestCheckpoint.checkpointRef ===
+        checkpointContext.value.turnCheckpoint?.checkpointRef
+        ? []
+        : [checkpointContext.value.latestCheckpoint]),
+    ];
+    return {
+      ...thread.value,
+      checkpoints,
+      turnAssistantMessageId: checkpointContext.value.turnAssistantMessageId,
+    };
   });
 
   const resolveThreadProjects = Effect.fn("resolveThreadProjects")(function* (
@@ -220,13 +242,6 @@ const make = Effect.gen(function* () {
   const captureAndDispatchCheckpoint = Effect.fn("captureAndDispatchCheckpoint")(function* (input: {
     readonly threadId: ThreadId;
     readonly turnId: TurnId;
-    readonly thread: {
-      readonly messages: ReadonlyArray<{
-        readonly id: MessageId;
-        readonly role: string;
-        readonly turnId: TurnId | null;
-      }>;
-    };
     readonly cwd: string;
     readonly turnCount: number;
     readonly status: "ready" | "missing" | "error";
@@ -294,11 +309,7 @@ const make = Effect.gen(function* () {
       );
 
     const assistantMessageId =
-      input.assistantMessageId ??
-      input.thread.messages
-        .toReversed()
-        .find((entry) => entry.role === "assistant" && entry.turnId === input.turnId)?.id ??
-      MessageId.make(`assistant:${input.turnId}`);
+      input.assistantMessageId ?? MessageId.make(`assistant:${input.turnId}`);
 
     yield* orchestrationEngine.dispatch({
       type: "thread.turn.diff.complete",
@@ -358,7 +369,7 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      const thread = yield* resolveThreadDetail(event.threadId);
+      const thread = yield* resolveThreadDetail(event.threadId, turnId);
       if (!thread) {
         return;
       }
@@ -406,11 +417,10 @@ const make = Effect.gen(function* () {
       yield* captureAndDispatchCheckpoint({
         threadId: thread.id,
         turnId,
-        thread,
         cwd: checkpointCwd,
         turnCount: nextTurnCount,
         status: checkpointStatusFromRuntime(event.payload.state),
-        assistantMessageId: undefined,
+        assistantMessageId: thread.turnAssistantMessageId ?? undefined,
         createdAt: event.createdAt,
       });
     },
@@ -434,7 +444,7 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveThreadDetail(threadId);
+    const thread = yield* resolveThreadDetail(threadId, turnId);
     if (!thread) {
       yield* Effect.logWarning("checkpoint capture from placeholder skipped: thread not found", {
         threadId,
@@ -469,11 +479,11 @@ const make = Effect.gen(function* () {
     yield* captureAndDispatchCheckpoint({
       threadId,
       turnId,
-      thread,
       cwd: checkpointCwd,
       turnCount: checkpointTurnCount,
       status: "ready",
-      assistantMessageId: event.payload.assistantMessageId ?? undefined,
+      assistantMessageId:
+        event.payload.assistantMessageId ?? thread.turnAssistantMessageId ?? undefined,
       createdAt: event.payload.completedAt,
     });
   });
@@ -691,8 +701,10 @@ const make = Effect.gen(function* () {
   ) {
     const now = DateTime.formatIso(yield* DateTime.now);
 
-    const thread = yield* resolveThreadDetail(event.payload.threadId);
-    if (!thread) {
+    const checkpointContext = yield* projectionSnapshotQuery
+      .getFullThreadDiffContext(event.payload.threadId, event.payload.turnCount)
+      .pipe(Effect.map(Option.getOrUndefined));
+    if (!checkpointContext) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
@@ -722,10 +734,7 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const currentTurnCount = thread.checkpoints.reduce(
-      (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
-      0,
-    );
+    const currentTurnCount = checkpointContext.latestCheckpointTurnCount;
 
     if (event.payload.turnCount > currentTurnCount) {
       yield* appendRevertFailureActivity({
@@ -740,9 +749,7 @@ const make = Effect.gen(function* () {
     const targetCheckpointRef =
       event.payload.turnCount === 0
         ? checkpointRefForThreadTurn(event.payload.threadId, 0)
-        : thread.checkpoints.find(
-            (checkpoint) => checkpoint.checkpointTurnCount === event.payload.turnCount,
-          )?.checkpointRef;
+        : (checkpointContext.toCheckpointRef ?? undefined);
 
     if (!targetCheckpointRef) {
       yield* appendRevertFailureActivity({
@@ -781,18 +788,28 @@ const make = Effect.gen(function* () {
       });
     }
 
-    const staleCheckpointRefs: Array<CheckpointRef> = [];
-    for (const checkpoint of thread.checkpoints) {
-      if (checkpoint.checkpointTurnCount > event.payload.turnCount) {
-        staleCheckpointRefs.push(checkpoint.checkpointRef);
+    let checkpointCursor:
+      | { readonly checkpointTurnCount: number; readonly turnId: TurnId }
+      | undefined;
+    while (true) {
+      const page = yield* (
+        projectionSnapshotQuery.listThreadCheckpointRefsAfter?.({
+          threadId: event.payload.threadId,
+          afterCheckpointTurnCount: event.payload.turnCount,
+          ...(checkpointCursor === undefined ? {} : { cursor: checkpointCursor }),
+          limit: 128,
+        }) ?? Effect.succeed({ checkpointRefs: [], nextCursor: null })
+      );
+      if (page.checkpointRefs.length > 0) {
+        yield* checkpointStore.deleteCheckpointRefs({
+          cwd: sessionRuntime.value.cwd,
+          checkpointRefs: page.checkpointRefs,
+        });
       }
-    }
-
-    if (staleCheckpointRefs.length > 0) {
-      yield* checkpointStore.deleteCheckpointRefs({
-        cwd: sessionRuntime.value.cwd,
-        checkpointRefs: staleCheckpointRefs,
-      });
+      if (page.nextCursor === null) {
+        break;
+      }
+      checkpointCursor = page.nextCursor;
     }
 
     yield* orchestrationEngine

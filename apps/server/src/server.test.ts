@@ -17,6 +17,7 @@ import {
   MessageId,
   ExternalLauncherCommandNotFoundError,
   OrchestrationThreadDetailSnapshot,
+  type OrchestrationThreadDetailWindow,
   type OrchestrationThreadStreamItem,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
@@ -6325,14 +6326,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("marks a socket thread snapshot as synchronized when requested", () =>
+  it.effect("keeps a full socket snapshot when the client omits turnLimit", () =>
     Effect.gen(function* () {
       const thread = makeDefaultOrchestrationReadModel().threads[0]!;
+      let requestedWindow: OrchestrationThreadDetailWindow | undefined;
       yield* buildAppUnderTest({
         layers: {
           projectionSnapshotQuery: {
-            getThreadDetailSnapshot: () =>
-              Effect.succeed(Option.some({ snapshotSequence: 1, thread })),
+            getThreadDetailSnapshot: (_threadId, window) => {
+              requestedWindow = window;
+              return Effect.succeed(Option.some({ snapshotSequence: 1, thread }));
+            },
           },
         },
       });
@@ -6349,6 +6353,67 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(items[0]?.kind, "snapshot");
       assert.deepEqual(items[1], { kind: "synchronized" });
+      assert.equal(requestedWindow, undefined);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("keeps a full HTTP thread snapshot when the client omits turnLimit", () =>
+    Effect.gen(function* () {
+      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
+      let requestedWindow: OrchestrationThreadDetailWindow | undefined;
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getThreadDetailSnapshot: (_threadId, window) => {
+              requestedWindow = window;
+              return Effect.succeed(Option.some({ snapshotSequence: 1, thread }));
+            },
+          },
+        },
+      });
+
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const url = yield* getHttpServerUrl(`/api/orchestration/threads/${defaultThreadId}`);
+      const result = yield* fetchEffect(url, { headers: { cookie } });
+
+      assert.equal(result.status, 200);
+      assert.equal(requestedWindow, undefined);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("honors explicit thread snapshot windows over socket and HTTP", () =>
+    Effect.gen(function* () {
+      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
+      const requestedTurnLimits: Array<number | undefined> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getThreadDetailSnapshot: (_threadId, window) => {
+              requestedTurnLimits.push(window?.turnLimit);
+              return Effect.succeed(Option.some({ snapshotSequence: 1, thread }));
+            },
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: defaultThreadId,
+            turnLimit: 7,
+          }).pipe(Stream.take(1), Stream.runDrain),
+        ),
+      );
+
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const url = yield* getHttpServerUrl(
+        `/api/orchestration/threads/${defaultThreadId}?turnLimit=9`,
+      );
+      const result = yield* fetchEffect(url, { headers: { cookie } });
+
+      assert.equal(result.status, 200);
+      assert.deepEqual(requestedTurnLimits, [7, 9]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -6468,6 +6533,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("subscribeThread sends a fresh snapshot instead of replaying a large gap", () =>
     Effect.gen(function* () {
       let readEventsCalls = 0;
+      let requestedWindow: OrchestrationThreadDetailWindow | undefined;
       const thread = makeDefaultOrchestrationReadModel().threads[0]!;
 
       yield* buildAppUnderTest({
@@ -6482,8 +6548,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
-            getThreadDetailSnapshot: () =>
-              Effect.succeed(Option.some({ snapshotSequence: 100_000, thread })),
+            getThreadDetailSnapshot: (_threadId, window) => {
+              requestedWindow = window;
+              return Effect.succeed(Option.some({ snapshotSequence: 100_000, thread }));
+            },
           },
         },
       });
@@ -6508,12 +6576,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }
       assert.equal(second?.kind, "synchronized");
       assert.equal(readEventsCalls, 0);
+      assert.equal(requestedWindow, undefined);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("subscribeThread replaces a cursor ahead of the authoritative head", () =>
     Effect.gen(function* () {
       let readEventsCalls = 0;
+      let requestedTurnLimit: number | undefined;
       const thread = makeDefaultOrchestrationReadModel().threads[0]!;
 
       yield* buildAppUnderTest({
@@ -6527,8 +6597,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
-            getThreadDetailSnapshot: () =>
-              Effect.succeed(Option.some({ snapshotSequence: 5, thread })),
+            getThreadDetailSnapshot: (_threadId, window) => {
+              requestedTurnLimit = window?.turnLimit;
+              return Effect.succeed(Option.some({ snapshotSequence: 5, thread }));
+            },
           },
         },
       });
@@ -6539,12 +6611,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           client[ORCHESTRATION_WS_METHODS.subscribeThread]({
             threadId: defaultThreadId,
             afterSequence: 10,
+            turnLimit: 13,
           }).pipe(Stream.runHead),
         ),
       );
 
       assert.equal(Option.getOrThrow(first).kind, "snapshot");
       assert.equal(readEventsCalls, 0);
+      assert.equal(requestedTurnLimit, 13);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -8496,7 +8570,7 @@ it.live(
                     const client = yield* makeCountingWsRpcClient;
 
                     const threadSnapshot = yield* measureHttpGet({
-                      url: `${baseUrl}/api/orchestration/threads/${TRANSFER_THREAD_ID}`,
+                      url: `${baseUrl}/api/orchestration/threads/${TRANSFER_THREAD_ID}?turnLimit=${TRANSFER_HISTORY_TURN_COUNT}`,
                       headers: { cookie },
                     });
                     assert.equal(threadSnapshot.status, 200);

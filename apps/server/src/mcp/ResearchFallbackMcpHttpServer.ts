@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 
+import type { ProjectId as ProjectIdType, ThreadId as ThreadIdType } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -28,6 +29,27 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
     const researchToolController = yield* ResearchToolController;
     const coagentToolController = yield* CoagentToolController;
 
+    const resolveToolContext = Effect.fn("ResearchFallbackMcpHttpServer.resolveToolContext")(
+      function* (threadId: ThreadIdType) {
+        const thread = Option.getOrUndefined(yield* projectionQuery.getThreadShellById(threadId));
+        if (!thread) {
+          return Option.none<{
+            readonly projectId: ProjectIdType;
+            readonly cwd: string;
+          }>();
+        }
+        const project = Option.getOrUndefined(
+          yield* projectionQuery.getProjectShellById(thread.projectId),
+        );
+        return project
+          ? Option.some({
+              projectId: thread.projectId,
+              cwd: thread.worktreePath ?? project.workspaceRoot,
+            })
+          : Option.none();
+      },
+    );
+
     for (const tool of EREBUS_RESEARCH_DYNAMIC_TOOL.tools) {
       yield* server.addTool({
         tool: new McpSchema.Tool({
@@ -50,7 +72,7 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
               );
             }
 
-            return projectionQuery.getThreadCheckpointContext(invocation.threadId).pipe(
+            return resolveToolContext(invocation.threadId).pipe(
               Effect.flatMap((contextOption) => {
                 const threadContext = Option.getOrUndefined(contextOption);
                 if (!threadContext) {
@@ -65,7 +87,7 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
                     {
                       projectId: threadContext.projectId,
                       threadId: invocation.threadId,
-                      cwd: threadContext.worktreePath ?? threadContext.workspaceRoot,
+                      cwd: threadContext.cwd,
                     },
                     {
                       namespace: EREBUS_RESEARCH_DYNAMIC_TOOL.name,
@@ -128,7 +150,7 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
               );
             }
 
-            return projectionQuery.getThreadCheckpointContext(invocation.threadId).pipe(
+            return resolveToolContext(invocation.threadId).pipe(
               Effect.flatMap((contextOption) => {
                 const threadContext = Option.getOrUndefined(contextOption);
                 if (!threadContext) {
@@ -143,7 +165,7 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
                     {
                       projectId: threadContext.projectId,
                       threadId: invocation.threadId,
-                      cwd: threadContext.worktreePath ?? threadContext.workspaceRoot,
+                      cwd: threadContext.cwd,
                     },
                     {
                       namespace: EREBUS_THREADS_DYNAMIC_TOOL.name,

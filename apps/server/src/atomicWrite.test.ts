@@ -8,12 +8,14 @@ import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 
 import {
   type ExclusiveFileOwnership,
   removeFileIfOwned,
   writeFileBytesAtomically,
   writeFileBytesExclusivelyAtomically,
+  writeFileStreamExclusivelyAtomically,
 } from "./atomicWrite.ts";
 import {
   confirmThreadSyncImportDispatch,
@@ -121,6 +123,29 @@ describe("writeFileBytesAtomically", () => {
         expect([Array.from(first), Array.from(second)]).toContainEqual(
           Array.from(yield* fileSystem.readFile(target)),
         );
+      }),
+    ).pipe(Effect.provide(platformLayer)),
+  );
+
+  it.effect("does not expose a destination when a streamed producer fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const directory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "atomic-stream-failure-",
+        });
+        const target = path.join(directory, "streamed.bin");
+        const contents = Stream.make(new Uint8Array([1, 2, 3])).pipe(
+          Stream.concat(Stream.fail("incomplete source")),
+        );
+
+        const result = yield* Effect.result(
+          writeFileStreamExclusivelyAtomically({ filePath: target, contents }),
+        );
+
+        expect(result._tag).toBe("Failure");
+        expect(yield* fileSystem.exists(target)).toBe(false);
       }),
     ).pipe(Effect.provide(platformLayer)),
   );

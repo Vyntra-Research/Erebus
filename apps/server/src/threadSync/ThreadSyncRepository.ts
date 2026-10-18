@@ -61,6 +61,76 @@ export interface ThreadSyncRepositoryWriteInput {
   readonly updatedAt: string;
 }
 
+export interface ThreadSyncRepositoryIndex {
+  readonly projects: ReadonlyMap<ThreadSyncProjectId, ThreadSyncProjectSnapshot>;
+  readonly threadCount: number;
+}
+
+const RETIRED_V1_MANIFEST = `${JSON.stringify({
+  formatVersion: 2,
+  kind: "erebus-thread-sync-migrated",
+  migratedTo: "v2",
+})}\n`;
+
+/**
+ * Retires only the verified legacy namespace after an in-place v2 upgrade.
+ * The invalid-for-v1 marker makes 0.8.0 clients fail closed instead of
+ * treating the missing namespace as an empty remote and creating split state.
+ */
+export const removeThreadSyncV1Repository = Effect.fn("ThreadSyncRepository.removeV1")(function* (
+  mirrorPath: string,
+): Effect.fn.Return<void, ThreadSyncError, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const namespacePath = path.join(mirrorPath, THREAD_SYNC_NAMESPACE);
+  const entry = yield* lstatPathWithoutFollowing("push", namespacePath);
+  if (entry === null) return;
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    return yield* repositoryError(
+      "push",
+      "integrity-failed",
+      "The legacy sync namespace is not a regular managed directory.",
+    );
+  }
+  yield* assertRealPathContained(mirrorPath, namespacePath).pipe(
+    Effect.mapError((cause) => new ThreadSyncError({ ...cause, operation: "push" })),
+  );
+  yield* fileSystem
+    .remove(namespacePath, { recursive: true })
+    .pipe(
+      Effect.mapError((cause) =>
+        repositoryError(
+          "push",
+          "io-failed",
+          `Could not remove the upgraded legacy sync namespace: ${String(cause)}`,
+        ),
+      ),
+    );
+  yield* fileSystem
+    .makeDirectory(namespacePath, { recursive: true })
+    .pipe(
+      Effect.mapError((cause) =>
+        repositoryError(
+          "push",
+          "io-failed",
+          `Could not create the retired legacy sync namespace: ${String(cause)}`,
+        ),
+      ),
+    );
+  yield* writeFileStringAtomically({
+    filePath: path.join(mirrorPath, THREAD_SYNC_MANIFEST_PATH),
+    contents: RETIRED_V1_MANIFEST,
+  }).pipe(
+    Effect.mapError((cause) =>
+      repositoryError(
+        "push",
+        "io-failed",
+        `Could not write the legacy sync retirement marker: ${String(cause)}`,
+      ),
+    ),
+  );
+});
+
 function repositoryError(
   operation: "pull" | "push",
   code: "integrity-failed" | "invalid-snapshot" | "io-failed",
@@ -392,6 +462,123 @@ function validateThreadSnapshots(threads: ReadonlyMap<string, ThreadSyncThreadSn
     }
   }
 }
+
+/**
+ * Reads only repository metadata needed by connection polling and project
+ * linking. Thread bodies and attachment bytes are deliberately not hydrated.
+ */
+export const readThreadSyncRepositoryIndex = Effect.fn("ThreadSyncRepository.readIndex")(function* (
+  mirrorPath: string,
+): Effect.fn.Return<ThreadSyncRepositoryIndex, ThreadSyncError, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const namespacePath = path.join(mirrorPath, THREAD_SYNC_NAMESPACE);
+  if (!(yield* fileSystem.exists(namespacePath).pipe(Effect.orElseSucceed(() => false)))) {
+    return { projects: new Map(), threadCount: 0 };
+  }
+  yield* assertRealPathContained(mirrorPath, namespacePath);
+
+  const documentBudget = { consumed: 0, maximum: MAX_TOTAL_DOCUMENT_BYTES };
+  const manifestPath = path.join(mirrorPath, THREAD_SYNC_MANIFEST_PATH);
+  yield* inspectManagedDocumentPath("pull", mirrorPath, manifestPath, false, "manifest");
+  const manifestContents = yield* readBoundedText("pull", manifestPath, documentBudget);
+  yield* decodeManifest(manifestContents).pipe(
+    Effect.mapError((cause) =>
+      repositoryError("pull", "invalid-snapshot", `The sync manifest is invalid: ${String(cause)}`),
+    ),
+  );
+
+  const projects = new Map<ThreadSyncProjectId, ThreadSyncProjectSnapshot>();
+  const projectsPath = path.join(mirrorPath, THREAD_SYNC_PROJECTS_DIRECTORY);
+  if (yield* fileSystem.exists(projectsPath).pipe(Effect.orElseSucceed(() => false))) {
+    yield* assertRealPathContained(mirrorPath, projectsPath);
+    const projectNames = yield* fileSystem
+      .readDirectory(projectsPath)
+      .pipe(
+        Effect.mapError((cause) =>
+          repositoryError("pull", "io-failed", `Could not list sync projects: ${String(cause)}`),
+        ),
+      );
+    if (projectNames.length > MAX_DOCUMENT_COUNT) {
+      return yield* repositoryError(
+        "pull",
+        "integrity-failed",
+        "The sync repository contains too many project documents.",
+      );
+    }
+    for (const fileName of projectNames.toSorted()) {
+      if (!/^[a-f0-9]{64}\.json$/.test(fileName)) {
+        return yield* repositoryError(
+          "pull",
+          "integrity-failed",
+          `Unexpected file in the sync project directory: ${fileName}`,
+        );
+      }
+      const filePath = path.join(projectsPath, fileName);
+      yield* inspectManagedDocumentPath("pull", mirrorPath, filePath, false, "project");
+      const contents = yield* readBoundedText("pull", filePath, documentBudget);
+      const project = yield* decodeProject(contents).pipe(
+        Effect.mapError((cause) =>
+          repositoryError(
+            "pull",
+            "invalid-snapshot",
+            `A sync project document is invalid: ${String(cause)}`,
+          ),
+        ),
+      );
+      if (
+        !verifyThreadSyncDocumentFileName(project.syncProjectId, fileName) ||
+        projects.has(project.syncProjectId)
+      ) {
+        return yield* repositoryError(
+          "pull",
+          "integrity-failed",
+          "A sync project document name does not match its identifier or is duplicated.",
+        );
+      }
+      projects.set(project.syncProjectId, project);
+    }
+  }
+
+  const threadsPath = path.join(mirrorPath, THREAD_SYNC_THREADS_DIRECTORY);
+  let threadCount = 0;
+  if (yield* fileSystem.exists(threadsPath).pipe(Effect.orElseSucceed(() => false))) {
+    yield* assertRealPathContained(mirrorPath, threadsPath);
+    const threadNames = yield* fileSystem
+      .readDirectory(threadsPath)
+      .pipe(
+        Effect.mapError((cause) =>
+          repositoryError("pull", "io-failed", `Could not list sync threads: ${String(cause)}`),
+        ),
+      );
+    if (projects.size + threadNames.length > MAX_DOCUMENT_COUNT) {
+      return yield* repositoryError(
+        "pull",
+        "integrity-failed",
+        "The sync repository contains too many documents.",
+      );
+    }
+    for (const fileName of threadNames) {
+      if (!/^[a-f0-9]{64}\.json$/.test(fileName)) {
+        return yield* repositoryError(
+          "pull",
+          "integrity-failed",
+          `Unexpected file in the sync thread directory: ${fileName}`,
+        );
+      }
+      yield* inspectManagedDocumentPath(
+        "pull",
+        mirrorPath,
+        path.join(threadsPath, fileName),
+        false,
+        "thread",
+      );
+    }
+    threadCount = threadNames.length;
+  }
+
+  return { projects, threadCount };
+});
 
 export const readThreadSyncRepository = Effect.fn("ThreadSyncRepository.read")(function* (
   mirrorPath: string,

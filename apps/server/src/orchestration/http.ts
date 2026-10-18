@@ -65,18 +65,21 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.threadSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          // Pagination is opt-in at the transport boundary. Older clients do
+          // not send turnLimit and cannot request older pages, so keep serving
+          // their complete snapshot. Pagination-aware clients send their
+          // explicit initial or history-page limit.
+          const window =
+            args.payload.turnLimit === undefined
+              ? undefined
+              : {
+                  turnLimit: args.payload.turnLimit,
+                  ...(args.payload.beforeCursor !== undefined
+                    ? { beforeCursor: args.payload.beforeCursor }
+                    : {}),
+                };
           const snapshot = yield* projectionSnapshotQuery
-            .getThreadDetailSnapshot(
-              args.params.threadId,
-              args.payload.turnLimit === undefined
-                ? undefined
-                : {
-                    turnLimit: args.payload.turnLimit,
-                    ...(args.payload.beforeCursor !== undefined
-                      ? { beforeCursor: args.payload.beforeCursor }
-                      : {}),
-                  },
-            )
+            .getThreadDetailSnapshot(args.params.threadId, window)
             .pipe(
               Effect.catch((cause) =>
                 failEnvironmentInternal("orchestration_thread_snapshot_failed", cause),

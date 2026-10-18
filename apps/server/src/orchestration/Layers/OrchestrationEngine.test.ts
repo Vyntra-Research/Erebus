@@ -3,6 +3,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
+  OrchestrationProposedPlanId,
   ProjectId,
   ThreadId,
   TurnId,
@@ -173,6 +174,8 @@ describe("OrchestrationEngine", () => {
       })),
     };
     let fullSnapshotReadCount = 0;
+    let exactPlanReadCount = 0;
+    let failFirstExactPlanRead = true;
 
     const layer = OrchestrationEngineLive.pipe(
       Layer.provide(
@@ -206,6 +209,33 @@ describe("OrchestrationEngine", () => {
           getThreadCheckpointContext: () => Effect.succeed(Option.none()),
           getFullThreadDiffContext: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
+          getThreadProposedPlanById: (threadId, planId) =>
+            Effect.suspend(() => {
+              exactPlanReadCount += 1;
+              if (failFirstExactPlanRead) {
+                failFirstExactPlanRead = false;
+                return Effect.fail(
+                  new PersistenceSqlError({
+                    operation: "test.getThreadProposedPlanById",
+                    detail: "transient exact plan read failure",
+                  }),
+                );
+              }
+              return Effect.succeed(
+                threadId === ThreadId.make("thread-bootstrap") &&
+                  planId === OrchestrationProposedPlanId.make("plan-before-bootstrap-window")
+                  ? Option.some({
+                      id: planId,
+                      turnId: null,
+                      planMarkdown: "# Older selected plan",
+                      implementedAt: null,
+                      implementationThreadId: null,
+                      createdAt: "2026-03-03T00:00:01.000Z",
+                      updatedAt: "2026-03-03T00:00:01.000Z",
+                    })
+                  : Option.none(),
+              );
+            }),
           getThreadDetailById: () => Effect.succeed(Option.none()),
           getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
           searchThreads: () => Effect.succeed({ matches: [] }),
@@ -238,6 +268,33 @@ describe("OrchestrationEngine", () => {
 
     expect(result.sequence).toBe(8);
     expect(await runtime.runPromise(engine.latestSequence)).toBe(8);
+    expect(fullSnapshotReadCount).toBe(0);
+
+    const oldPlanTurnCommand = {
+      type: "thread.turn.start" as const,
+      commandId: CommandId.make("cmd-bootstrap-old-plan-turn"),
+      threadId: ThreadId.make("thread-bootstrap"),
+      message: {
+        messageId: asMessageId("msg-bootstrap-old-plan"),
+        role: "user" as const,
+        text: "implement the selected plan",
+        attachments: [],
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "full-access" as const,
+      sourceProposedPlan: {
+        threadId: ThreadId.make("thread-bootstrap"),
+        planId: OrchestrationProposedPlanId.make("plan-before-bootstrap-window"),
+      },
+      createdAt: "2026-03-03T00:00:05.000Z",
+    };
+    await expect(runtime.runPromise(engine.dispatch(oldPlanTurnCommand))).rejects.toThrow(
+      "transient exact plan read failure",
+    );
+    const turnResult = await runtime.runPromise(engine.dispatch(oldPlanTurnCommand));
+    expect(turnResult.sequence).toBe(10);
+    expect(await runtime.runPromise(engine.latestSequence)).toBe(10);
+    expect(exactPlanReadCount).toBe(2);
     expect(fullSnapshotReadCount).toBe(0);
 
     await runtime.dispose();

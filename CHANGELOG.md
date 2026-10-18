@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 - 2026-10-17
+
+### Fixed
+
+- Open and resume large Codex threads without loading their complete history into the UI or provider process.
+- Apply Codex account routing changes to each new model request without restarting an active session.
+- Validate Git access before export, migrate existing remotes in place, and sync large histories in resumable chunks. After migration, every device using that remote must run Erebus 0.8.1 or newer.
+
 ## 0.8.0 - 2026-10-15
 
 ### Added

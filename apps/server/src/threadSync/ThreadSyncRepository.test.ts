@@ -18,12 +18,18 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
   THREAD_SYNC_BLOBS_DIRECTORY,
   THREAD_SYNC_MANIFEST_PATH,
+  THREAD_SYNC_NAMESPACE,
   THREAD_SYNC_PROJECTS_DIRECTORY,
   THREAD_SYNC_THREADS_DIRECTORY,
   canonicalThreadSyncJson,
   threadSyncDocumentFileName,
 } from "./ThreadSyncDocuments.ts";
-import { readThreadSyncRepository, writeThreadSyncRepository } from "./ThreadSyncRepository.ts";
+import {
+  readThreadSyncRepository,
+  readThreadSyncRepositoryIndex,
+  removeThreadSyncV1Repository,
+  writeThreadSyncRepository,
+} from "./ThreadSyncRepository.ts";
 
 const decodeProject = Schema.decodeUnknownSync(ThreadSyncProjectSnapshot);
 const decodeThread = Schema.decodeUnknownSync(ThreadSyncThreadSnapshot);
@@ -86,6 +92,36 @@ function makeThread(blob: Uint8Array) {
 }
 
 describe("ThreadSyncRepository", () => {
+  it.effect("retires only the verified v1 namespace and makes old readers fail closed", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const mirrorPath = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-repo-upgrade-",
+        });
+        yield* writeThreadSyncRepository({
+          mirrorPath,
+          projects: new Map([[project.syncProjectId, project]]),
+          threads: new Map(),
+          blobs: new Map(),
+          updatedAt: "2026-10-11T12:00:00.000Z",
+        });
+        const v2Sentinel = path.join(mirrorPath, ".erebus-thread-sync", "v2", "sentinel");
+        yield* fileSystem.makeDirectory(path.dirname(v2Sentinel), { recursive: true });
+        yield* fileSystem.writeFileString(v2Sentinel, "preserve\n");
+
+        yield* removeThreadSyncV1Repository(mirrorPath);
+
+        expect(yield* fileSystem.exists(path.join(mirrorPath, THREAD_SYNC_NAMESPACE))).toBe(true);
+        const retired = yield* Effect.result(readThreadSyncRepository(mirrorPath));
+        expect(retired._tag).toBe("Failure");
+        if (retired._tag === "Failure") expect(retired.failure.code).toBe("invalid-snapshot");
+        expect(yield* fileSystem.readFileString(v2Sentinel)).toBe("preserve\n");
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("round-trips validated documents and content-addressed blobs", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -107,6 +143,40 @@ describe("ThreadSyncRepository", () => {
         expect(restored.projects.get(project.syncProjectId)).toEqual(project);
         expect(restored.threads.get(thread.threadId)).toEqual(thread);
         expect([...restored.blobs.get(blobHash)!]).toEqual([...blob]);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reads connection metadata without hydrating thread bodies", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const mirrorPath = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-repo-index-",
+        });
+        const blob = new Uint8Array([9]);
+        const { blobHash, thread } = makeThread(blob);
+        yield* writeThreadSyncRepository({
+          mirrorPath,
+          projects: new Map([[project.syncProjectId, project]]),
+          threads: new Map([[thread.threadId, thread]]),
+          blobs: new Map([[blobHash, blob]]),
+          updatedAt: "2026-10-11T12:00:00.000Z",
+        });
+        yield* fileSystem.writeFileString(
+          path.join(
+            mirrorPath,
+            THREAD_SYNC_THREADS_DIRECTORY,
+            threadSyncDocumentFileName(thread.threadId),
+          ),
+          "{not-thread-json\n",
+        );
+
+        const index = yield* readThreadSyncRepositoryIndex(mirrorPath);
+        expect(index.threadCount).toBe(1);
+        expect(index.projects.get(project.syncProjectId)).toEqual(project);
+        expect((yield* Effect.result(readThreadSyncRepository(mirrorPath)))._tag).toBe("Failure");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );

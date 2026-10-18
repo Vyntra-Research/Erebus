@@ -34,14 +34,17 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 const DATABASE_NAME = "t3code:connection-runtime";
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
+const THREAD_RECENT_WINDOW_CACHE_DATABASE_VERSION = 5;
 const CATALOG_STORE_NAME = "catalog";
 const SHELL_STORE_NAME = "shell";
 const THREAD_STORE_NAME = "thread";
 const SERVER_CONFIG_STORE_NAME = "server-config";
 const VCS_REFS_STORE_NAME = "vcs-refs";
 const CATALOG_KEY = "document";
+const DATABASE_OPEN_TIMEOUT_MS = 10_000;
 const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
+const THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION = 4;
 
 const StoredShellSnapshot = Schema.Struct({
   schemaVersion: Schema.Literal(SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION),
@@ -51,12 +54,12 @@ const StoredShellSnapshot = Schema.Struct({
 const StoredShellSnapshotJson = Schema.fromJsonString(StoredShellSnapshot);
 // v2 stores the snapshot sequence alongside the thread so a warm cache can
 // resume via `afterSequence` instead of re-downloading the full thread body.
-// v3 adds windowed (paginated) snapshots carrying `page` metadata. The bump
-// exists for rollback safety: a pre-pagination client would decode a windowed
-// v2 record, silently drop the unknown `page` field, and treat the partial
-// thread as complete forever. Older entries fail to decode → cold cache.
+// v3 added windowed snapshots. It could still persist every page the user had
+// opened, making a later open decode the full conversation. v4 means the
+// record is an exact recent server window; the database upgrade clears older
+// thread records before they can be read.
 const StoredThreadSnapshot = Schema.Struct({
-  schemaVersion: Schema.Literal(3),
+  schemaVersion: Schema.Literal(THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   snapshot: OrchestrationThreadDetailSnapshot,
@@ -119,8 +122,8 @@ function persistenceError(
   });
 }
 
-const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* () {
-  return yield* Effect.callback<IDBDatabase, ConnectionTransientError>((resume) => {
+export const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* () {
+  return yield* Effect.callback<IDBDatabase, ConnectionTransientError>((resume, signal) => {
     if (typeof indexedDB === "undefined") {
       resume(
         Effect.fail(catalogError("open", "IndexedDB is unavailable in this browser context.")),
@@ -128,7 +131,15 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
       return;
     }
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-    request.addEventListener("upgradeneeded", () => {
+    let settled = false;
+    signal.addEventListener(
+      "abort",
+      () => {
+        settled = true;
+      },
+      { once: true },
+    );
+    request.addEventListener("upgradeneeded", (event) => {
       if (!request.result.objectStoreNames.contains(CATALOG_STORE_NAME)) {
         request.result.createObjectStore(CATALOG_STORE_NAME);
       }
@@ -138,6 +149,15 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
       if (!request.result.objectStoreNames.contains(THREAD_STORE_NAME)) {
         request.result.createObjectStore(THREAD_STORE_NAME);
       }
+      // Thread detail is only a disposable read-through cache. Version 5
+      // changes it from an ever-widening snapshot to one recent page, so clear
+      // old records in the versionchange transaction instead of loading and
+      // decoding a potentially huge v3 value once more.
+      if (
+        (event as IDBVersionChangeEvent).oldVersion < THREAD_RECENT_WINDOW_CACHE_DATABASE_VERSION
+      ) {
+        request.transaction?.objectStore(THREAD_STORE_NAME).clear();
+      }
       if (!request.result.objectStoreNames.contains(SERVER_CONFIG_STORE_NAME)) {
         request.result.createObjectStore(SERVER_CONFIG_STORE_NAME);
       }
@@ -145,13 +165,53 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
         request.result.createObjectStore(VCS_REFS_STORE_NAME);
       }
     });
+    request.addEventListener("blocked", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resume(
+        Effect.fail(
+          catalogError(
+            "upgrade",
+            "Another Erebus window is using the older local cache. Close it and retry.",
+          ),
+        ),
+      );
+    });
     request.addEventListener("error", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       resume(Effect.fail(catalogError("open", request.error ?? "Unknown IndexedDB error")));
     });
     request.addEventListener("success", () => {
+      if (settled) {
+        // An IndexedDB open cannot be cancelled after a blocked upgrade. If
+        // the blocker closes later, release the late handle instead of leaking
+        // a connection after this Effect has already failed.
+        request.result.close();
+        return;
+      }
+      settled = true;
+      request.result.addEventListener("versionchange", () => request.result.close(), {
+        once: true,
+      });
       resume(Effect.succeed(request.result));
     });
-  });
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: DATABASE_OPEN_TIMEOUT_MS,
+      orElse: () =>
+        Effect.fail(
+          catalogError(
+            "open",
+            "Timed out while opening the local cache. Close other Erebus windows and retry.",
+          ),
+        ),
+    }),
+  );
 });
 
 function readDatabaseValue(database: IDBDatabase, storeName: string, key: IDBValidKey) {
@@ -564,7 +624,7 @@ export const connectionStorageLayer = Layer.effectContext(
       saveThread: (environmentId, snapshot) =>
         Effect.gen(function* () {
           const encoded = yield* encodeStoredThreadSnapshot({
-            schemaVersion: 3,
+            schemaVersion: THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION,
             environmentId,
             threadId: snapshot.thread.id,
             snapshot,

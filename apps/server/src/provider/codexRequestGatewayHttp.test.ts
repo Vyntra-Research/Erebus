@@ -74,6 +74,7 @@ describe("Codex request gateway HTTP route", () => {
 
       let active = primary;
       const router = CodexAccountRouter.of({
+        routesRequestsTransparently: true,
         activeInstanceId: Effect.sync(() => active),
         resolveModelSelection: Effect.succeed,
         failoverAfterUsageLimit: () => Effect.succeed(null),
@@ -151,6 +152,7 @@ describe("Codex request gateway HTTP route", () => {
       });
       let active = first;
       const router = CodexAccountRouter.of({
+        routesRequestsTransparently: true,
         activeInstanceId: Effect.sync(() => active),
         resolveModelSelection: Effect.succeed,
         failoverAfterUsageLimit: () => Effect.succeed(null),

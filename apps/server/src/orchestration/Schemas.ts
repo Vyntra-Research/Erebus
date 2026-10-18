@@ -27,6 +27,8 @@ import {
   ThreadApprovalResponseRequestedPayload as ContractsThreadApprovalResponseRequestedPayloadSchema,
   ThreadCheckpointRevertRequestedPayload as ContractsThreadCheckpointRevertRequestedPayloadSchema,
   ThreadSessionStopRequestedPayload as ContractsThreadSessionStopRequestedPayloadSchema,
+  ThreadSyncImportV2StartedPayload as ContractsThreadSyncImportV2StartedPayloadSchema,
+  ThreadSyncImportV2ChunkAppendedPayload as ContractsThreadSyncImportV2ChunkAppendedPayloadSchema,
   ThreadSyncImportedPayload as ContractsThreadSyncImportedPayloadSchema,
 } from "@t3tools/contracts";
 
@@ -65,4 +67,7 @@ export const ThreadApprovalResponseRequestedPayload =
 export const ThreadCheckpointRevertRequestedPayload =
   ContractsThreadCheckpointRevertRequestedPayloadSchema;
 export const ThreadSessionStopRequestedPayload = ContractsThreadSessionStopRequestedPayloadSchema;
+export const ThreadSyncImportV2StartedPayload = ContractsThreadSyncImportV2StartedPayloadSchema;
+export const ThreadSyncImportV2ChunkAppendedPayload =
+  ContractsThreadSyncImportV2ChunkAppendedPayloadSchema;
 export const ThreadSyncImportedPayload = ContractsThreadSyncImportedPayloadSchema;

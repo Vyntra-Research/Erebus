@@ -29,6 +29,17 @@ describe("threadDetailCursor", () => {
     expect(decodeThreadDetailPageCursor(encodeThreadDetailPageCursor(cursor))).toEqual(cursor);
   });
 
+  it("round-trips turnless plan inclusion state", () => {
+    const cursor = {
+      threadId: ThreadId.make("thread-1"),
+      beforeAnchorAt: "2026-08-01T00:00:00.000Z",
+      beforeTurnId: "p:plan-20",
+      mode: "turnless" as const,
+      includeTurnlessPinnedPlans: true,
+    };
+    expect(decodeThreadDetailPageCursor(encodeThreadDetailPageCursor(cursor))).toEqual(cursor);
+  });
+
   it("rejects malformed input", () => {
     expect(decodeThreadDetailPageCursor("not-base64-json")).toBeNull();
     expect(decodeThreadDetailPageCursor(Buffer.from("[]").toString("base64url"))).toBeNull();
@@ -38,6 +49,13 @@ describe("threadDetailCursor", () => {
     expect(
       decodeThreadDetailPageCursor(
         Buffer.from(JSON.stringify({ t: "thread-1", a: 5, i: "x" })).toString("base64url"),
+      ),
+    ).toBeNull();
+    expect(
+      decodeThreadDetailPageCursor(
+        Buffer.from(JSON.stringify({ t: "thread-1", a: "", i: "", m: "turn", p: true })).toString(
+          "base64url",
+        ),
       ),
     ).toBeNull();
   });

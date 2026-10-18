@@ -4,6 +4,11 @@ import type * as Effect from "effect/Effect";
 import * as EffectRuntime from "effect/Effect";
 
 export interface CodexAccountRouterShape {
+  /**
+   * Whether account changes are applied by the local HTTP gateway without
+   * moving the provider session to another per-account adapter.
+   */
+  readonly routesRequestsTransparently: boolean;
   readonly resolveModelSelection: (selection: ModelSelection) => Effect.Effect<ModelSelection>;
   /**
    * Marks one Codex account as quota-exhausted and selects another compatible
@@ -29,6 +34,7 @@ export class CodexAccountRouter extends Context.Reference<CodexAccountRouterShap
   "erebus/provider/Services/CodexAccountRouter",
   {
     defaultValue: () => ({
+      routesRequestsTransparently: false,
       resolveModelSelection: EffectRuntime.succeed,
       failoverAfterUsageLimit: () => EffectRuntime.succeed(null),
       failoverInstanceAfterUsageLimit: () => EffectRuntime.succeed(null),

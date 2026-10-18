@@ -14,6 +14,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { CodexRequestGateway } from "./CodexRequestGateway.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import {
   CodexAccountRouter,
@@ -144,6 +145,7 @@ export function selectCodexFailoverAccount(input: {
 const make = Effect.fn("makeCodexAccountRouter")(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const settingsService = yield* ServerSettingsService;
+  const requestGateway = yield* CodexRequestGateway;
   const activeInstanceRef = yield* Ref.make<ProviderInstanceId | null>(null);
   const exhaustedInstancesRef = yield* Ref.make(new Map<ProviderInstanceId, string | undefined>());
   const switchLock = yield* Semaphore.make(1);
@@ -266,6 +268,7 @@ const make = Effect.fn("makeCodexAccountRouter")(function* () {
   yield* resolveActive;
 
   return CodexAccountRouter.of({
+    routesRequestsTransparently: requestGateway.enabled,
     resolveModelSelection,
     failoverAfterUsageLimit,
     failoverInstanceAfterUsageLimit,

@@ -5,6 +5,7 @@ import {
   type OrchestrationReadModel,
   type OrchestrationThread,
   type ProjectId,
+  type ThreadSyncImportV2Descriptor,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -165,6 +166,109 @@ function firstDuplicate(values: ReadonlyArray<string>): string | null {
   }
   return null;
 }
+
+const validateThreadSyncImportV2Descriptor = Effect.fn("validateThreadSyncImportV2Descriptor")(
+  function* (input: {
+    readonly commandType: string;
+    readonly descriptor: ThreadSyncImportV2Descriptor;
+    readonly readModel: OrchestrationReadModel;
+    readonly occurredAt: string;
+  }) {
+    const { descriptor } = input;
+    const project = input.readModel.projects.find((entry) => entry.id === descriptor.projectId);
+    if (project === undefined || project.deletedAt !== null) {
+      return yield* new OrchestrationCommandInvariantError({
+        commandType: input.commandType,
+        detail: `Project '${descriptor.projectId}' cannot receive imported threads.`,
+      });
+    }
+
+    const targetBindings = descriptor.bindingUpdates.filter(
+      (binding) => binding.localThreadId === descriptor.threadId,
+    );
+    if (targetBindings.length !== 1 || targetBindings[0]?.localProjectId !== descriptor.projectId) {
+      return yield* new OrchestrationCommandInvariantError({
+        commandType: input.commandType,
+        detail: `Imported thread '${descriptor.threadId}' requires one matching target binding.`,
+      });
+    }
+    if (
+      firstDuplicate(descriptor.bindingUpdates.map((binding) => binding.syncThreadId)) !== null ||
+      firstDuplicate(descriptor.bindingUpdates.map((binding) => binding.localThreadId)) !== null
+    ) {
+      return yield* new OrchestrationCommandInvariantError({
+        commandType: input.commandType,
+        detail: "sync import bindings must be unique",
+      });
+    }
+    const localProjectBySyncProject = new Map<string, ProjectId>();
+    const syncProjectByLocalProject = new Map<ProjectId, string>();
+    for (const binding of descriptor.bindingUpdates) {
+      const mappedLocalProject = localProjectBySyncProject.get(binding.syncProjectId);
+      const mappedSyncProject = syncProjectByLocalProject.get(binding.localProjectId);
+      if (
+        (mappedLocalProject !== undefined && mappedLocalProject !== binding.localProjectId) ||
+        (mappedSyncProject !== undefined && mappedSyncProject !== binding.syncProjectId)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: input.commandType,
+          detail: "sync import bindings must preserve a one-to-one project mapping",
+        });
+      }
+      localProjectBySyncProject.set(binding.syncProjectId, binding.localProjectId);
+      syncProjectByLocalProject.set(binding.localProjectId, binding.syncProjectId);
+    }
+    for (const binding of descriptor.bindingUpdates) {
+      if (binding.localThreadId === descriptor.threadId) continue;
+      const preserved = input.readModel.threads.find(
+        (thread) => thread.id === binding.localThreadId,
+      );
+      if (
+        preserved === undefined ||
+        preserved.projectId !== binding.localProjectId ||
+        preserved.deletedAt !== null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: input.commandType,
+          detail: `Imported thread '${descriptor.threadId}' references an invalid preserved local binding.`,
+        });
+      }
+    }
+
+    const existing = input.readModel.threads.find((thread) => thread.id === descriptor.threadId);
+    if (descriptor.mode === "create") {
+      if (
+        existing !== undefined ||
+        descriptor.expectedLocalUpdatedAt !== null ||
+        descriptor.localState === undefined
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: input.commandType,
+          detail: `New imported thread '${descriptor.threadId}' requires an absent target, localState, and null expectedLocalUpdatedAt.`,
+        });
+      }
+    } else {
+      if (
+        existing === undefined ||
+        descriptor.expectedLocalUpdatedAt === null ||
+        descriptor.expectedLocalUpdatedAt !== existing.updatedAt
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: input.commandType,
+          detail: `Thread '${descriptor.threadId}' changed after sync conflict resolution.`,
+        });
+      }
+      if (threadBlocksSyncImport(existing, input.occurredAt)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: input.commandType,
+          detail: `Thread '${descriptor.threadId}' is active and cannot be replaced by sync.`,
+        });
+      }
+    }
+
+    return existing ?? null;
+  },
+);
 
 function withEventBase(
   input: Pick<OrchestrationCommand, "commandId"> & {
@@ -403,6 +507,225 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.sync.import-v2.start": {
+      if (command.descriptor.stagedHash !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A staged import cannot declare its final hash before all chunks arrive.",
+        });
+      }
+      yield* validateThreadSyncImportV2Descriptor({
+        commandType: command.type,
+        descriptor: command.descriptor,
+        readModel,
+        occurredAt: command.startedAt,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.descriptor.threadId,
+          occurredAt: command.startedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.sync-import-v2.started",
+        payload: {
+          descriptor: command.descriptor,
+          startedAt: command.startedAt,
+        },
+      };
+    }
+
+    case "thread.sync.import-v2.chunk": {
+      const ordinals = command.records.map((record) => record.ordinal);
+      const duplicateOrdinal = firstDuplicate(ordinals.map(String));
+      const outOfOrder = ordinals.some(
+        (ordinal, index) => index > 0 && ordinal !== ordinals[index - 1]! + 1,
+      );
+      if (duplicateOrdinal !== null || outOfOrder) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Staged import chunk for '${command.threadId}' must contain unique contiguous ordinals.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.appendedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.sync-import-v2.chunk-appended",
+        payload: {
+          stageId: command.stageId,
+          threadId: command.threadId,
+          chunkIndex: command.chunkIndex,
+          chunkHash: command.chunkHash,
+          firstOrdinal: ordinals[0]!,
+          lastOrdinal: ordinals.at(-1)!,
+          recordCount: command.records.length,
+          appendedAt: command.appendedAt,
+        },
+      };
+    }
+
+    case "thread.sync.import-v2.validate":
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.descriptor.threadId,
+          occurredAt: command.validatedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.sync-import-v2.validated",
+        payload: {
+          stageId: command.descriptor.stageId,
+          threadId: command.descriptor.threadId,
+          recordCount: command.descriptor.recordCount,
+          descriptorHash: command.descriptorHash,
+          stagedHash: command.stagedHash,
+          validatedAt: command.validatedAt,
+        },
+      };
+
+    case "thread.sync.import-v2.commit": {
+      const existing = yield* validateThreadSyncImportV2Descriptor({
+        commandType: command.type,
+        descriptor: command.descriptor,
+        readModel,
+        occurredAt: command.importedAt,
+      });
+      const { descriptor, visibleHistory } = command;
+      if (descriptor.stagedHash === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Staged import '${descriptor.stageId}' requires a final staged hash.`,
+        });
+      }
+      if (
+        (descriptor.header.latestTurnId === null) !== (visibleHistory.latestTurn === null) ||
+        (descriptor.header.latestTurnId !== null &&
+          visibleHistory.latestTurn?.turnId !== descriptor.header.latestTurnId)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Staged import '${descriptor.stageId}' does not carry its declared latest turn.`,
+        });
+      }
+      const duplicateVisibleId =
+        firstDuplicate(visibleHistory.messages.map((message) => message.id)) ??
+        firstDuplicate(visibleHistory.proposedPlans.map((plan) => plan.id)) ??
+        firstDuplicate(visibleHistory.activities.map((activity) => activity.id));
+      if (duplicateVisibleId !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Staged import '${descriptor.stageId}' has duplicate visible history id '${duplicateVisibleId}'.`,
+        });
+      }
+
+      const keepsProjectRuntime = existing?.projectId === descriptor.projectId;
+      const localState =
+        existing === null
+          ? descriptor.localState!
+          : {
+              modelSelection: existing.modelSelection,
+              runtimeMode: existing.runtimeMode,
+              interactionMode: existing.interactionMode,
+              branch: keepsProjectRuntime ? existing.branch : null,
+              worktreePath: keepsProjectRuntime ? existing.worktreePath : null,
+              linkedPullRequest: keepsProjectRuntime ? (existing.linkedPullRequest ?? null) : null,
+            };
+      const requestedCoagent = descriptor.header.coagent;
+      const parent =
+        requestedCoagent === null
+          ? undefined
+          : readModel.threads.find((thread) => thread.id === requestedCoagent.parentThreadId);
+      const coagent =
+        requestedCoagent !== null &&
+        requestedCoagent.parentThreadId !== descriptor.threadId &&
+        parent !== undefined &&
+        parent.projectId === descriptor.projectId &&
+        parent.deletedAt === null
+          ? requestedCoagent
+          : null;
+      const latestTurn = visibleHistory.latestTurn;
+      const materializedThread: OrchestrationThread = {
+        id: descriptor.threadId,
+        projectId: descriptor.projectId,
+        title: descriptor.header.title,
+        coagent,
+        modelSelection: localState.modelSelection,
+        runtimeMode: localState.runtimeMode,
+        interactionMode: localState.interactionMode,
+        branch: localState.branch,
+        worktreePath: localState.worktreePath,
+        linkedPullRequest: localState.linkedPullRequest,
+        latestTurn:
+          latestTurn === null
+            ? null
+            : {
+                turnId: latestTurn.turnId,
+                state: latestTurn.state,
+                requestedAt: latestTurn.requestedAt,
+                startedAt: latestTurn.startedAt,
+                completedAt: latestTurn.completedAt,
+                assistantMessageId: latestTurn.assistantMessageId,
+                ...(latestTurn.sourceProposedPlanThreadId !== null &&
+                latestTurn.sourceProposedPlanId !== null
+                  ? {
+                      sourceProposedPlan: {
+                        threadId: latestTurn.sourceProposedPlanThreadId,
+                        planId: latestTurn.sourceProposedPlanId,
+                      },
+                    }
+                  : {}),
+              },
+        createdAt: descriptor.header.createdAt,
+        updatedAt: descriptor.header.updatedAt,
+        archivedAt: descriptor.header.lifecycle.archivedAt,
+        settledOverride: descriptor.header.lifecycle.settledOverride,
+        settledAt: descriptor.header.lifecycle.settledAt,
+        unsettledAt: existing?.unsettledAt ?? null,
+        snoozedUntil: existing?.snoozedUntil ?? null,
+        snoozedAt: existing?.snoozedAt ?? null,
+        pinnedAt: existing?.pinnedAt ?? null,
+        pinOrderKey: existing?.pinOrderKey ?? null,
+        titleRegeneration: null,
+        deletedAt: descriptor.header.lifecycle.deletedAt,
+        messages: visibleHistory.messages.map((message) => ({ ...message })),
+        proposedPlans: visibleHistory.proposedPlans.map((plan) => ({ ...plan })),
+        activities: visibleHistory.activities.map((activity) => ({
+          ...activity,
+          payload: null,
+        })),
+        checkpoints: [],
+        session: null,
+      };
+
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: descriptor.threadId,
+          occurredAt: command.importedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.sync-imported",
+        payload: {
+          threadId: descriptor.threadId,
+          sourceRevision: descriptor.sourceRevision,
+          sourceHash: descriptor.sourceHash,
+          importedAt: command.importedAt,
+          thread: materializedThread,
+          turns: [],
+          bindingUpdates: descriptor.bindingUpdates,
+          stagedImport: {
+            stageId: descriptor.stageId,
+            recordCount: descriptor.recordCount,
+            stagedHash: descriptor.stagedHash,
+          },
         },
       };
     }

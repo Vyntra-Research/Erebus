@@ -7,6 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
@@ -98,6 +99,7 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "erebus-fallback-test-" });
+      const checkpointContextReads = yield* Ref.make(0);
       yield* fileSystem.makeDirectory(path.join(root, "findings"));
       yield* fileSystem.makeDirectory(path.join(root, "pocs", "finding-1"), { recursive: true });
       yield* fileSystem.writeFileString(path.join(root, "findings", "finding-1.md"), "Finding");
@@ -140,15 +142,13 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
           Layer.succeed(ProjectionSnapshotQuery, {
             ...projection,
             getThreadCheckpointContext: () =>
-              Effect.succeed(
-                Option.some({
-                  threadId,
-                  projectId,
-                  workspaceRoot: root,
-                  worktreePath: null,
-                  checkpoints: [],
-                }),
+              Ref.update(checkpointContextReads, (count) => count + 1).pipe(
+                Effect.as(Option.none()),
               ),
+            getThreadShellById: () =>
+              Effect.succeed(Option.some({ projectId, worktreePath: null } as never)),
+            getProjectShellById: () =>
+              Effect.succeed(Option.some({ workspaceRoot: root } as never)),
           }),
         ),
         Layer.provide(Layer.succeed(ResearchToolController, controller)),
@@ -250,6 +250,7 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
         (yield* Schema.decodeUnknownEffect(callResult)(submitted.body)).result.isError,
       ).not.toBe(true);
       expect(handled).toEqual([{ tool: "submit_finding", namespace: "research", threadId }]);
+      expect(yield* Ref.get(checkpointContextReads)).toBe(0);
       const persisted = yield* reviews.listByThread(threadId);
       expect(persisted).toHaveLength(1);
       expect(persisted[0]?.submission.findingId).toBe("finding-1");

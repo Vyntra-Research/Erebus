@@ -18,13 +18,210 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+const ACTIVITY_SUMMARY_CHARACTER_LIMIT = 512;
+const ACTIVITY_DETAIL_CHARACTER_LIMIT = 8 * 1024;
+const TOOL_VALUE_CHARACTER_BUDGET = 32 * 1024;
+const TOOL_VALUE_STRING_LIMIT = 16 * 1024;
+const TOOL_VALUE_COLLECTION_LIMIT = 128;
+const TOOL_VALUE_DEPTH_LIMIT = 8;
+const TOOL_VALUE_TRAVERSAL_LIMIT = 512;
+const TOOL_VALUE_MIN_JSON_LENGTH = 4;
+const TOOL_VALUE_TRUNCATED = "[truncated]";
+
+interface ToolValueBudget {
+  remaining: number;
+  readonly seen: WeakSet<object>;
+}
+
+interface ToolValueTraversalBudget {
+  remaining: number;
+}
+
+function truncateActivityText(value: string, limit: number): string {
+  if (value.length <= limit) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, limit - 1))}…`;
+}
+
+/**
+ * Tool inputs are useful UI context but are not canonical conversation data.
+ * Keep their JSON shape for ordinary values while putting a hard ceiling on a
+ * single activity crossing HTTP/WS. The canonical provider event remains in
+ * persistence; only the client projection is bounded.
+ */
+function consumeToolValueBudget(budget: ToolValueBudget, length: number): boolean {
+  if (length > budget.remaining) {
+    return false;
+  }
+  budget.remaining -= length;
+  return true;
+}
+
+function projectBoundedToolString(
+  value: string,
+  budget: ToolValueBudget,
+  characterLimit = TOOL_VALUE_STRING_LIMIT,
+): string | null {
+  const maxPrefixLength = Math.min(
+    value.length,
+    Math.max(0, characterLimit - (value.length > characterLimit ? 1 : 0)),
+  );
+  const makeCandidate = (prefixLength: number) =>
+    prefixLength < value.length ? `${value.slice(0, prefixLength)}…` : value;
+
+  let low = 0;
+  let high = maxPrefixLength;
+  let projected: string | null = null;
+  let projectedLength = 0;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = makeCandidate(middle);
+    const candidateLength = JSON.stringify(candidate).length;
+    if (candidateLength <= budget.remaining) {
+      projected = candidate;
+      projectedLength = candidateLength;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  if (projected === null) {
+    consumeToolValueBudget(budget, TOOL_VALUE_MIN_JSON_LENGTH);
+    return null;
+  }
+  consumeToolValueBudget(budget, projectedLength);
+  return projected;
+}
+
+function projectBoundedToolMarker(marker: string, budget: ToolValueBudget): string | null {
+  const encodedLength = JSON.stringify(marker).length;
+  if (consumeToolValueBudget(budget, encodedLength)) {
+    return marker;
+  }
+  consumeToolValueBudget(budget, TOOL_VALUE_MIN_JSON_LENGTH);
+  return null;
+}
+
+function projectBoundedToolValue(value: unknown, budget: ToolValueBudget, depth = 0): unknown {
+  if (typeof value === "string") {
+    return projectBoundedToolString(value, budget);
+  }
+  if (value === null || typeof value === "undefined") {
+    consumeToolValueBudget(budget, TOOL_VALUE_MIN_JSON_LENGTH);
+    return null;
+  }
+  if (typeof value === "number") {
+    const projected = Number.isFinite(value) ? value : null;
+    if (consumeToolValueBudget(budget, JSON.stringify(projected).length)) {
+      return projected;
+    }
+    consumeToolValueBudget(budget, TOOL_VALUE_MIN_JSON_LENGTH);
+    return null;
+  }
+  if (typeof value === "boolean") {
+    if (consumeToolValueBudget(budget, value ? 4 : 5)) {
+      return value;
+    }
+    consumeToolValueBudget(budget, TOOL_VALUE_MIN_JSON_LENGTH);
+    return null;
+  }
+  if (typeof value !== "object") {
+    return projectBoundedToolString(String(value), budget, 256);
+  }
+  if (depth >= TOOL_VALUE_DEPTH_LIMIT || budget.remaining < TOOL_VALUE_MIN_JSON_LENGTH) {
+    return projectBoundedToolMarker(TOOL_VALUE_TRUNCATED, budget);
+  }
+  if (budget.seen.has(value)) {
+    return projectBoundedToolMarker("[circular]", budget);
+  }
+
+  budget.seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (!consumeToolValueBudget(budget, 2)) {
+        return null;
+      }
+      const projected: unknown[] = [];
+      const length = Math.min(value.length, TOOL_VALUE_COLLECTION_LIMIT);
+      for (let index = 0; index < length; index += 1) {
+        const separatorLength = projected.length === 0 ? 0 : 1;
+        if (budget.remaining < separatorLength + TOOL_VALUE_MIN_JSON_LENGTH) {
+          break;
+        }
+        consumeToolValueBudget(budget, separatorLength);
+        projected.push(projectBoundedToolValue(value[index], budget, depth + 1));
+      }
+      if (value.length > projected.length) {
+        const marker = `[${value.length - projected.length} more items]`;
+        const separatorLength = projected.length === 0 ? 0 : 1;
+        const markerLength = JSON.stringify(marker).length;
+        if (consumeToolValueBudget(budget, separatorLength + markerLength)) {
+          projected.push(marker);
+        }
+      }
+      return projected;
+    }
+
+    if (!consumeToolValueBudget(budget, 2)) {
+      return null;
+    }
+    const record = value as Record<string, unknown>;
+    const projected: Record<string, unknown> = {};
+    let count = 0;
+    let truncated = false;
+    for (const key in record) {
+      if (!Object.hasOwn(record, key)) {
+        continue;
+      }
+      if (count >= TOOL_VALUE_COLLECTION_LIMIT) {
+        truncated = true;
+        break;
+      }
+      const separatorLength = count === 0 ? 0 : 1;
+      if (key.length + separatorLength + 3 + TOOL_VALUE_MIN_JSON_LENGTH > budget.remaining) {
+        truncated = true;
+        break;
+      }
+      const keyLength = JSON.stringify(key).length;
+      const propertyPrefixLength = separatorLength + keyLength + 1;
+      if (propertyPrefixLength + TOOL_VALUE_MIN_JSON_LENGTH > budget.remaining) {
+        truncated = true;
+        break;
+      }
+      consumeToolValueBudget(budget, propertyPrefixLength);
+      projected[key] = projectBoundedToolValue(record[key], budget, depth + 1);
+      count += 1;
+    }
+    if (truncated && !Object.hasOwn(projected, "_truncated")) {
+      const separatorLength = count === 0 ? 0 : 1;
+      const markerLength = separatorLength + JSON.stringify("_truncated").length + 1 + 4;
+      if (consumeToolValueBudget(budget, markerLength)) {
+        projected._truncated = true;
+      }
+    }
+    return projected;
+  } finally {
+    budget.seen.delete(value);
+  }
+}
+
+function makeToolValueBudget(): ToolValueBudget {
+  return { remaining: TOOL_VALUE_CHARACTER_BUDGET, seen: new WeakSet<object>() };
+}
+
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown): void {
   const normalized = asTrimmedString(value);
-  if (!normalized || seen.has(normalized)) {
+  if (!normalized) {
     return;
   }
-  seen.add(normalized);
-  target.push(normalized);
+  const projected = truncateActivityText(normalized, 1024);
+  if (seen.has(projected)) {
+    return;
+  }
+  seen.add(projected);
+  target.push(projected);
 }
 
 function collectChangedFiles(
@@ -32,14 +229,16 @@ function collectChangedFiles(
   target: string[],
   seen: Set<string>,
   depth: number,
+  traversal: ToolValueTraversalBudget = { remaining: TOOL_VALUE_TRAVERSAL_LIMIT },
 ): void {
-  if (depth > 4 || target.length >= 12) {
+  if (depth > 4 || target.length >= 12 || traversal.remaining <= 0) {
     return;
   }
+  traversal.remaining -= 1;
   if (Array.isArray(value)) {
     for (const entry of value) {
-      collectChangedFiles(entry, target, seen, depth + 1);
-      if (target.length >= 12) {
+      collectChangedFiles(entry, target, seen, depth + 1, traversal);
+      if (target.length >= 12 || traversal.remaining <= 0) {
         return;
       }
     }
@@ -73,14 +272,17 @@ function collectChangedFiles(
     if (!(nestedKey in record)) {
       continue;
     }
-    collectChangedFiles(record[nestedKey], target, seen, depth + 1);
-    if (target.length >= 12) {
+    collectChangedFiles(record[nestedKey], target, seen, depth + 1, traversal);
+    if (target.length >= 12 || traversal.remaining <= 0) {
       return;
     }
   }
 }
 
-function projectCommandData(data: Record<string, unknown>): Record<string, unknown> | undefined {
+function projectCommandData(
+  data: Record<string, unknown>,
+  budget: ToolValueBudget,
+): Record<string, unknown> | undefined {
   const item = asRecord(data.item);
   if (!item) {
     return undefined;
@@ -88,7 +290,7 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
 
   const projectedItem: Record<string, unknown> = {};
   if ("command" in item) {
-    projectedItem.command = item.command;
+    projectedItem.command = projectBoundedToolValue(item.command, budget);
   }
 
   const aggregatedOutput = asTrimmedString(item.aggregatedOutput);
@@ -101,14 +303,14 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
 
   const input = asRecord(item.input);
   if (input && "command" in input) {
-    projectedItem.input = { command: input.command };
+    projectedItem.input = { command: projectBoundedToolValue(input.command, budget) };
   }
 
   const result = asRecord(item.result);
   if (result) {
     const projectedResult: Record<string, unknown> = {};
     if ("command" in result) {
-      projectedResult.command = result.command;
+      projectedResult.command = projectBoundedToolValue(result.command, budget);
     }
     const content = asTrimmedString(result.content);
     if (content) {
@@ -144,22 +346,57 @@ function projectCommandValue(data: Record<string, unknown>): unknown {
 }
 
 function summarizeToolTextOutput(value: string): string | null {
-  const lines: string[] = [];
-  for (const rawLine of value.split(/\r?\n/u)) {
-    const line = rawLine.replace(/\s+/g, " ").trim();
-    if (line.length > 0) {
-      lines.push(line);
+  const limit = 84;
+  let line = "";
+  let pendingSpace = false;
+  let nonEmptyLines = 0;
+
+  const finishLine = (): string | null => {
+    pendingSpace = false;
+    if (line.length === 0) {
+      return null;
+    }
+    nonEmptyLines += 1;
+    if (line === "```") {
+      line = "";
+      return null;
+    }
+    return line;
+  };
+
+  // Build only the first renderable line instead of splitting or normalizing
+  // the complete output. Tool results can be megabytes long, while the UI
+  // renders at most 84 characters from this non-canonical preview.
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (character === "\n") {
+      const completed = finishLine();
+      if (completed !== null) {
+        return completed;
+      }
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      if (line.length > 0) {
+        pendingSpace = true;
+      }
+      continue;
+    }
+    if (pendingSpace) {
+      line += " ";
+      pendingSpace = false;
+    }
+    line += character;
+    if (line.length > limit) {
+      return `${line.slice(0, limit - 1).trimEnd()}…`;
     }
   }
 
-  const firstLine = lines.find((line) => line !== "```");
-  if (firstLine) {
-    return firstLine.length <= 84 ? firstLine : `${firstLine.slice(0, 83).trimEnd()}…`;
+  const completed = finishLine();
+  if (completed !== null) {
+    return completed;
   }
-  if (lines.length > 1) {
-    return `${lines.length.toLocaleString()} lines`;
-  }
-  return null;
+  return nonEmptyLines > 1 ? `${nonEmptyLines.toLocaleString()} lines` : null;
 }
 
 /**
@@ -185,24 +422,23 @@ const MCP_ITEM_KEPT_FIELDS = [
  * `{content: [{type: "text", text}, ...]}` record or a raw Claude
  * `tool_result` block whose `content` is a string or block array.
  */
-function extractMcpResultText(result: unknown): string | null {
+function summarizeMcpResultText(result: unknown): string | null {
   const record = asRecord(result);
   if (!record) {
-    return typeof result === "string" ? result : null;
+    return typeof result === "string" ? summarizeToolTextOutput(result) : null;
   }
   if (typeof record.content === "string") {
-    return record.content;
+    return summarizeToolTextOutput(record.content);
   }
   if (Array.isArray(record.content)) {
-    const texts: string[] = [];
     for (const entry of record.content) {
       const text = asRecord(entry)?.text;
-      if (typeof text === "string" && text.trim().length > 0) {
-        texts.push(text);
+      if (typeof text === "string") {
+        const summary = summarizeToolTextOutput(text);
+        if (summary !== null) {
+          return summary;
+        }
       }
-    }
-    if (texts.length > 0) {
-      return texts.join("\n");
     }
   }
   return null;
@@ -212,8 +448,7 @@ function summarizeMcpResult(result: unknown): Record<string, unknown> | undefine
   if (result === undefined || result === null) {
     return undefined;
   }
-  const text = extractMcpResultText(result);
-  const summary = text ? summarizeToolTextOutput(text) : null;
+  const summary = summarizeMcpResultText(result);
   return summary ? { content: summary } : undefined;
 }
 
@@ -223,7 +458,10 @@ function summarizeMcpResult(result: unknown): Record<string, unknown> | undefine
  * keep the expanded-row UI working. Keep the fields the UI actually renders
  * and summarize the result like regular tool output.
  */
-function projectMcpToolCallData(data: Record<string, unknown>): Record<string, unknown> {
+function projectMcpToolCallData(
+  data: Record<string, unknown>,
+  budget: ToolValueBudget,
+): Record<string, unknown> {
   const projectedData: Record<string, unknown> = {};
 
   const item = asRecord(data.item);
@@ -231,7 +469,7 @@ function projectMcpToolCallData(data: Record<string, unknown>): Record<string, u
     const projectedItem: Record<string, unknown> = {};
     for (const key of MCP_ITEM_KEPT_FIELDS) {
       if (key in item) {
-        projectedItem[key] = item[key];
+        projectedItem[key] = projectBoundedToolValue(item[key], budget);
       }
     }
     const result = summarizeMcpResult(item.result);
@@ -242,10 +480,10 @@ function projectMcpToolCallData(data: Record<string, unknown>): Record<string, u
   }
 
   if ("toolName" in data) {
-    projectedData.toolName = data.toolName;
+    projectedData.toolName = projectBoundedToolValue(data.toolName, budget);
   }
   if ("input" in data) {
-    projectedData.input = data.input;
+    projectedData.input = projectBoundedToolValue(data.input, budget);
   }
   if (!item) {
     const result = summarizeMcpResult(data.result);
@@ -255,10 +493,10 @@ function projectMcpToolCallData(data: Record<string, unknown>): Record<string, u
   }
 
   if ("toolCallId" in data) {
-    projectedData.toolCallId = data.toolCallId;
+    projectedData.toolCallId = projectBoundedToolValue(data.toolCallId, budget);
   }
   if ("kind" in data) {
-    projectedData.kind = data.kind;
+    projectedData.kind = projectBoundedToolValue(data.kind, budget);
   }
 
   const changedFiles: string[] = [];
@@ -315,18 +553,18 @@ function projectAcpContent(value: unknown): Record<string, unknown> | undefined 
     return undefined;
   }
 
-  const text = value
-    .map((entryValue) => {
-      const entry = asRecord(entryValue);
-      const content = asRecord(entry?.content);
-      return entry?.type === "content" && content?.type === "text"
-        ? asTrimmedString(content.text)
-        : null;
-    })
-    .filter((entry): entry is string => entry !== null)
-    .join("\n");
-  const summary = summarizeToolTextOutput(text);
-  return summary ? { content: summary } : undefined;
+  for (const entryValue of value) {
+    const entry = asRecord(entryValue);
+    const content = asRecord(entry?.content);
+    if (entry?.type !== "content" || content?.type !== "text" || typeof content.text !== "string") {
+      continue;
+    }
+    const summary = summarizeToolTextOutput(content.text);
+    if (summary !== null) {
+      return { content: summary };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -338,34 +576,62 @@ export function projectActivityPayload(
 ): OrchestrationThreadActivity {
   const payload = asRecord(activity.payload);
   const data = asRecord(payload?.data);
-  if (!payload || !data) {
-    return activity;
+  const summary = truncateActivityText(activity.summary, ACTIVITY_SUMMARY_CHARACTER_LIMIT);
+  if (!payload) {
+    return summary === activity.summary ? activity : { ...activity, summary };
+  }
+
+  const isToolActivity = activity.kind.startsWith("tool.") || "itemType" in payload;
+  const budget = makeToolValueBudget();
+  const commonPayload = {
+    ...payload,
+    ...(typeof payload.detail === "string"
+      ? { detail: truncateActivityText(payload.detail, ACTIVITY_DETAIL_CHARACTER_LIMIT) }
+      : {}),
+    ...(typeof payload.message === "string"
+      ? { message: truncateActivityText(payload.message, ACTIVITY_DETAIL_CHARACTER_LIMIT) }
+      : {}),
+    ...(isToolActivity && payload.command !== undefined
+      ? { command: projectBoundedToolValue(payload.command, budget) }
+      : {}),
+  };
+  if (!data) {
+    if (!isToolActivity) {
+      return { ...activity, summary, payload: commonPayload };
+    }
+    const bounded = projectBoundedToolValue(commonPayload, budget);
+    return {
+      ...activity,
+      summary,
+      payload: asRecord(bounded) ?? {},
+    };
   }
 
   const itemStatus = asRecord(data.item)?.status;
   const projectedPayload =
     payload.status === "completed" && (itemStatus === "failed" || itemStatus === "declined")
-      ? { ...payload, status: itemStatus }
-      : payload;
+      ? { ...commonPayload, status: itemStatus }
+      : commonPayload;
 
   if (payload.itemType === "mcp_tool_call") {
     return {
       ...activity,
+      summary,
       payload: {
         ...projectedPayload,
-        data: projectMcpToolCallData(data),
+        data: projectMcpToolCallData(data, budget),
       },
     };
   }
 
   const projectedData: Record<string, unknown> = {};
-  const item = projectCommandData(data);
+  const item = projectCommandData(data, budget);
   if (item) {
     projectedData.item = item;
   }
   const command = projectCommandValue(data);
   if (command !== undefined) {
-    projectedData.command = command;
+    projectedData.command = projectBoundedToolValue(command, budget);
   }
 
   const changedFiles: string[] = [];
@@ -376,10 +642,10 @@ export function projectActivityPayload(
   }
 
   if ("toolCallId" in data) {
-    projectedData.toolCallId = data.toolCallId;
+    projectedData.toolCallId = projectBoundedToolValue(data.toolCallId, budget);
   }
   if ("kind" in data) {
-    projectedData.kind = data.kind;
+    projectedData.kind = projectBoundedToolValue(data.kind, budget);
   }
 
   const rawOutput = projectRawOutput(data.rawOutput) ?? projectAcpContent(data.content);
@@ -389,6 +655,7 @@ export function projectActivityPayload(
 
   return {
     ...activity,
+    summary,
     payload: {
       ...projectedPayload,
       data: projectedData,

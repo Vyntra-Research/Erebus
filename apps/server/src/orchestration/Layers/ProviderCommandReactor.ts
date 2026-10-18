@@ -6,6 +6,7 @@ import {
   type ModelSelection,
   type OrchestrationEvent,
   type OrchestrationMessage,
+  type OrchestrationThreadDetailSnapshot,
   type ProviderSendTurnInput,
   type ProviderThreadGoal,
   type ProviderTurnStartResult,
@@ -177,13 +178,14 @@ export function buildImportedThreadContinuationInput(input: {
   readonly currentMessageId: MessageId;
   readonly currentInput: string;
   readonly messages: ReadonlyArray<PortableHistoryMessage>;
+  readonly historyTruncated?: boolean;
 }): string | undefined {
   const currentInput = toNonEmptyProviderInput(input.currentInput);
   const precedingMessages = precedingPortableHistoryMessages(
     input.messages,
     input.currentMessageId,
   );
-  if (precedingMessages.length === 0) {
+  if (precedingMessages.length === 0 && input.historyTruncated !== true) {
     return currentInput;
   }
 
@@ -199,7 +201,7 @@ export function buildImportedThreadContinuationInput(input: {
 
   const retained: Array<string> = [];
   let usedChars = 0;
-  let truncated = false;
+  let truncated = input.historyTruncated === true;
   for (const message of precedingMessages.toReversed()) {
     const lineSeparatorChars = retained.length > 0 ? 1 : 0;
     const remaining = historyBudget - usedChars - lineSeparatorChars;
@@ -220,7 +222,7 @@ export function buildImportedThreadContinuationInput(input: {
     }
   }
 
-  if (retained.length === 0) {
+  if (retained.length === 0 && !truncated) {
     return currentInput;
   }
   if (retained.length < precedingMessages.length) {
@@ -231,6 +233,10 @@ export function buildImportedThreadContinuationInput(input: {
     if (usedChars + markerChars <= historyBudget) {
       retained.unshift(IMPORTED_HISTORY_TRUNCATION_RECORD);
     }
+  }
+
+  if (retained.length === 0) {
+    return currentInput;
   }
 
   return `${prefix}${retained.join("\n")}${separator}${currentRequest}${suffix}`;
@@ -263,6 +269,7 @@ const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const MAX_REGENERATION_ATTACHMENTS = 4;
 const MAX_THREAD_TITLE_CONTEXT_CHARS = 8_000;
 const MAX_FIRST_USER_TITLE_CONTEXT_CHARS = 2_000;
+const PROVIDER_COMMAND_THREAD_WINDOW_USER_TURNS = 20;
 const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
 const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
 
@@ -608,7 +615,7 @@ const make = Effect.gen(function* () {
     readonly detail: string;
     readonly createdAt: string;
   }) {
-    const thread = yield* resolveThread(input.threadId);
+    const thread = yield* resolveThreadShell(input.threadId);
     if (!thread) {
       return;
     }
@@ -683,9 +690,21 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
+  const resolveThreadSnapshot = Effect.fnUntraced(function* (threadId: ThreadId) {
     return yield* projectionSnapshotQuery
-      .getThreadDetailById(threadId)
+      .getThreadDetailSnapshot(threadId, {
+        turnLimit: PROVIDER_COMMAND_THREAD_WINDOW_USER_TURNS,
+      })
+      .pipe(Effect.map(Option.getOrUndefined));
+  });
+
+  const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
+    return (yield* resolveThreadSnapshot(threadId))?.thread;
+  });
+
+  const resolveThreadShell = Effect.fnUntraced(function* (threadId: ThreadId) {
+    return yield* projectionSnapshotQuery
+      .getThreadShellById(threadId)
       .pipe(Effect.map(Option.getOrUndefined));
   });
 
@@ -763,7 +782,7 @@ const make = Effect.gen(function* () {
       readonly pendingTurnStart?: boolean;
     },
   ) {
-    const thread = yield* resolveThread(threadId);
+    const thread = yield* resolveThreadShell(threadId);
     if (!thread) {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
@@ -962,7 +981,13 @@ const make = Effect.gen(function* () {
       const modelChanged =
         requestedModelSelection !== undefined &&
         requestedModelSelection.model !== activeSession?.model;
-      const instanceChanged = activeSession?.providerInstanceId !== desiredInstanceId;
+      const routedCodexAccountChanged =
+        codexAccountRouter.routesRequestsTransparently &&
+        activeSession?.provider === CODEX_DRIVER &&
+        desiredDriverKind === CODEX_DRIVER &&
+        currentInfo.driverKind === CODEX_DRIVER;
+      const instanceChanged =
+        activeSession?.providerInstanceId !== desiredInstanceId && !routedCodexAccountChanged;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "unsupported";
       const previousModelSelection = threadModelSelections.get(threadId);
       const shouldRestartForModelSelectionChange =
@@ -1030,13 +1055,15 @@ const make = Effect.gen(function* () {
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
     readonly createdAt: string;
+    readonly threadSnapshot?: OrchestrationThreadDetailSnapshot;
   }) {
-    const thread = yield* resolveThread(input.threadId);
-    if (!thread) {
+    const threadSnapshot = input.threadSnapshot ?? (yield* resolveThreadSnapshot(input.threadId));
+    if (!threadSnapshot) {
       return yield* Effect.die(
         new Error(`Thread '${input.threadId}' was not found in read model.`),
       );
     }
+    const thread = threadSnapshot.thread;
     const importedContextPending = yield* hasPendingImportedThreadContext(input.threadId).pipe(
       Effect.tapCause((cause) =>
         Effect.logWarning("Unable to verify imported thread context provenance", {
@@ -1045,14 +1072,29 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
-    const shouldSeedImportedHistory =
-      importedContextPending &&
-      precedingPortableHistoryMessages(thread.messages, input.messageId).length > 0;
-    const normalizedInput = shouldSeedImportedHistory
+    let importedHistoryMessages: ReadonlyArray<PortableHistoryMessage> = thread.messages;
+    let importedHistoryTruncated = threadSnapshot.page?.hasMore === true;
+    const getThreadContinuationSeedById = projectionSnapshotQuery.getThreadContinuationSeedById;
+    if (importedContextPending && getThreadContinuationSeedById !== undefined) {
+      const continuationSeed = yield* getThreadContinuationSeedById({
+        threadId: input.threadId,
+        currentMessageId: input.messageId,
+        maxChars: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+      }).pipe(Effect.map(Option.getOrUndefined));
+      if (continuationSeed !== undefined) {
+        importedHistoryMessages = [
+          ...continuationSeed.priorMessagesNewestFirst.toReversed(),
+          continuationSeed.currentMessage,
+        ];
+        importedHistoryTruncated = continuationSeed.hasEarlier;
+      }
+    }
+    const normalizedInput = importedContextPending
       ? buildImportedThreadContinuationInput({
           currentMessageId: input.messageId,
           currentInput: input.messageText,
-          messages: thread.messages,
+          messages: importedHistoryMessages,
+          historyTruncated: importedHistoryTruncated,
         })
       : toNonEmptyProviderInput(input.messageText);
     if (importedContextPending) {
@@ -1064,7 +1106,7 @@ const make = Effect.gen(function* () {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
     });
-    const currentThread = yield* resolveThread(input.threadId);
+    const currentThread = yield* resolveThreadShell(input.threadId);
     const isLiveUserSteer =
       currentThread?.session?.status === "running" && currentThread.session.activeTurnId !== null;
     if (input.modelSelection !== undefined) {
@@ -1150,14 +1192,18 @@ const make = Effect.gen(function* () {
 
         return Effect.gen(function* () {
           const [thread, runtimeSessions] = yield* Effect.all([
-            resolveThread(request.threadId),
+            resolveThreadShell(request.threadId),
             providerService.listSessions(),
           ]);
           const runtimeSession = runtimeSessions.find(
             (session) => session.threadId === request.threadId,
           );
-          const exhaustedInstanceId =
+          const physicalInstanceId =
             runtimeSession?.providerInstanceId ?? thread?.session?.providerInstanceId;
+          const routedInstanceId = codexAccountRouter.routesRequestsTransparently
+            ? yield* codexAccountRouter.activeInstanceId
+            : null;
+          const exhaustedInstanceId = routedInstanceId ?? physicalInstanceId;
           if (exhaustedInstanceId === undefined) {
             return yield* Effect.failCause(cause);
           }
@@ -1283,7 +1329,7 @@ const make = Effect.gen(function* () {
         });
         if (!generated) return;
 
-        const thread = yield* resolveThread(input.threadId);
+        const thread = yield* resolveThreadShell(input.threadId);
         if (!thread) return;
         if (!canReplaceThreadTitle(thread.title, input.titleSeed)) {
           return;
@@ -1320,7 +1366,20 @@ const make = Effect.gen(function* () {
       return { _tag: "Superseded" } as const;
     }
 
-    const { message, attachments } = formatThreadTitleContext(thread.messages);
+    let titleMessages: ReadonlyArray<ThreadTitleMessage> = thread.messages;
+    const getFirstUserMessageByThreadId = projectionSnapshotQuery.getFirstUserMessageByThreadId;
+    if (getFirstUserMessageByThreadId !== undefined) {
+      const firstUserMessage = yield* getFirstUserMessageByThreadId(thread.id).pipe(
+        Effect.map(Option.getOrUndefined),
+      );
+      if (
+        firstUserMessage !== undefined &&
+        !thread.messages.some((message) => message.id === firstUserMessage.id)
+      ) {
+        titleMessages = [firstUserMessage, ...titleMessages];
+      }
+    }
+    const { message, attachments } = formatThreadTitleContext(titleMessages);
     if (message.length === 0) {
       return { _tag: "Completed", title: undefined } as const;
     }
@@ -1348,7 +1407,7 @@ const make = Effect.gen(function* () {
       return { _tag: "Completed", title: undefined } as const;
     }
 
-    const latestThread = yield* resolveThread(event.payload.threadId);
+    const latestThread = yield* resolveThreadShell(event.payload.threadId);
     if (
       !latestThread ||
       latestThread.titleRegeneration?.requestId !== requestId ||
@@ -1377,8 +1436,11 @@ const make = Effect.gen(function* () {
   const findInterruptedThreadTitleRegenerations = Effect.fn(
     "findInterruptedThreadTitleRegenerations",
   )(function* () {
-    const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
-    return readModel.threads.flatMap((thread) => {
+    const [active, archived] = yield* Effect.all([
+      projectionSnapshotQuery.getShellSnapshot(),
+      projectionSnapshotQuery.getArchivedShellSnapshot(),
+    ]);
+    return [...active.threads, ...archived.threads].flatMap((thread) => {
       const requestId = thread.titleRegeneration?.requestId;
       return requestId === undefined ? [] : [{ threadId: thread.id, requestId }];
     });
@@ -1485,12 +1547,19 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveThread(event.payload.threadId);
-    if (!thread) {
+    const threadSnapshot = yield* resolveThreadSnapshot(event.payload.threadId);
+    if (!threadSnapshot) {
       return;
     }
+    const thread = threadSnapshot.thread;
 
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+    let message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+    const getThreadMessageById = projectionSnapshotQuery.getThreadMessageById;
+    if (message === undefined && getThreadMessageById !== undefined) {
+      message = yield* getThreadMessageById(event.payload.threadId, event.payload.messageId).pipe(
+        Effect.map(Option.getOrUndefined),
+      );
+    }
     if (!message || message.role !== "user") {
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1506,6 +1575,7 @@ const make = Effect.gen(function* () {
     yield* ensureThreadWorktree(thread);
 
     const isFirstUserMessageTurn =
+      threadSnapshot.page?.hasMore !== true &&
       thread.messages.filter((entry) => entry.role === "user").length === 1;
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
@@ -1582,6 +1652,7 @@ const make = Effect.gen(function* () {
         : {}),
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,
+      threadSnapshot,
     }).pipe(
       Effect.map(Option.some),
       Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
@@ -1620,7 +1691,7 @@ const make = Effect.gen(function* () {
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
@@ -1643,7 +1714,7 @@ const make = Effect.gen(function* () {
 
       const detail = formatFailureDetail(cause);
       return Effect.gen(function* () {
-        const latestThread = yield* resolveThread(event.payload.threadId);
+        const latestThread = yield* resolveThreadShell(event.payload.threadId);
         const latestSession = latestThread?.session;
         if (
           !latestSession ||
@@ -1671,7 +1742,7 @@ const make = Effect.gen(function* () {
             );
           }),
         );
-        const stoppedThread = yield* resolveThread(event.payload.threadId);
+        const stoppedThread = yield* resolveThreadShell(event.payload.threadId);
         const stoppedSession = stoppedThread?.session;
         if (
           !stoppedSession ||
@@ -1794,7 +1865,7 @@ const make = Effect.gen(function* () {
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
@@ -1838,7 +1909,7 @@ const make = Effect.gen(function* () {
     function* (
       event: Extract<ProviderIntentEvent, { type: "thread.user-input-response-requested" }>,
     ) {
-      const thread = yield* resolveThread(event.payload.threadId);
+      const thread = yield* resolveThreadShell(event.payload.threadId);
       if (!thread) {
         return;
       }
@@ -1882,7 +1953,7 @@ const make = Effect.gen(function* () {
   const processSessionStopRequested = Effect.fn("processSessionStopRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
   ) {
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
@@ -1926,7 +1997,7 @@ const make = Effect.gen(function* () {
         yield* threadTitleRegenerationWorker.enqueue(event);
         return;
       case "thread.runtime-mode-set": {
-        const thread = yield* resolveThread(event.payload.threadId);
+        const thread = yield* resolveThreadShell(event.payload.threadId);
         if (!thread?.session || thread.session.status === "stopped") {
           return;
         }
