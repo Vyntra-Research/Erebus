@@ -3,6 +3,7 @@ import * as NodePath from "@effect/platform-node/NodePath";
 import {
   type OrchestrationReadModel,
   ProjectId,
+  ThreadId,
   ThreadSyncError,
   ThreadSyncProjectId,
 } from "@t3tools/contracts";
@@ -34,6 +35,7 @@ const emptySnapshot: OrchestrationReadModel = {
 };
 
 const buildHarness = Effect.fn("ThreadSyncServiceIntegrityTest.buildHarness")(function* (input: {
+  readonly exportIndex?: ProjectionSnapshotQuery.ProjectionThreadSyncExportIndex;
   readonly failFetch?: boolean;
   readonly initialState?: "blocking-directory" | "corrupt" | "missing";
 }) {
@@ -87,6 +89,25 @@ const buildHarness = Effect.fn("ThreadSyncServiceIntegrityTest.buildHarness")(fu
         snapshotReadCount += 1;
         return emptySnapshot;
       }),
+    getThreadSyncExportIndex: () =>
+      Effect.succeed(
+        input.exportIndex ?? {
+          snapshotSequence: 0,
+          projects: [],
+          threads: [],
+          updatedAt: "2026-10-11T12:00:00.000Z",
+        },
+      ),
+    listThreadSyncExportTurnsPage: () =>
+      Effect.die("No thread body should be read during analysis"),
+    listThreadSyncExportMessagesPage: () =>
+      Effect.die("No thread body should be read during analysis"),
+    listThreadSyncExportPlansPage: () =>
+      Effect.die("No thread body should be read during analysis"),
+    listThreadSyncExportActivitiesPage: () =>
+      Effect.die("No thread body should be read during analysis"),
+    readThreadSyncExportTextChunk: () =>
+      Effect.die("No thread body should be read during analysis"),
   } as unknown as ProjectionSnapshotQuery.ProjectionSnapshotQueryShape);
   const turnRepository = ProjectionTurnRepository.of({
     listByThreadId: () => Effect.succeed([]),
@@ -209,6 +230,67 @@ describe("ThreadSyncService corrupt local state", () => {
         yield* Effect.yieldNow;
         yield* Effect.yieldNow;
         expect(harness.fetchCount()).toBeGreaterThanOrEqual(3);
+        expect(harness.snapshotReadCount()).toBe(0);
+      }),
+    ).pipe(Effect.provide(platformLayer)),
+  );
+
+  it.effect("marks local history for the first push when the remote is empty", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const projectId = ProjectId.make("local-project");
+        const threadId = ThreadId.make("local-thread");
+        const harness = yield* buildHarness({
+          initialState: "missing",
+          exportIndex: {
+            snapshotSequence: 12,
+            projects: [
+              {
+                id: projectId,
+                title: "Local project",
+                workspaceRoot: "C:/work/local-project",
+                worktreePath: null,
+                repositoryIdentity: null,
+                defaultModelSelection: null,
+                createdAt: "2026-10-11T12:00:00.000Z",
+                updatedAt: "2026-10-11T12:01:00.000Z",
+                deletedAt: null,
+              } as never,
+            ],
+            threads: [
+              {
+                id: threadId,
+                projectId,
+                title: "Local thread",
+                coagent: null,
+                latestTurnId: null,
+                threadSequence: 12,
+                lifecycle: {
+                  archivedAt: null,
+                  settledOverride: null,
+                  settledAt: null,
+                  deletedAt: null,
+                },
+                createdAt: "2026-10-11T12:00:00.000Z",
+                updatedAt: "2026-10-11T12:01:00.000Z",
+                active: false,
+              },
+            ],
+            updatedAt: "2026-10-11T12:01:00.000Z",
+          },
+        });
+
+        const configured = yield* harness.service.configure({
+          remoteUrl: "https://example.test/threads.git",
+          branch: "main",
+          fetchIntervalSeconds: 60,
+        });
+
+        expect(configured.status.pendingPushCount).toBe(1);
+        expect(configured.status.localRevision).not.toBeNull();
+        const persisted = yield* loadThreadSyncLocalState(harness.statePath);
+        expect(persisted.projectBindings).toHaveLength(1);
+        expect(persisted.threadBindings).toHaveLength(1);
         expect(harness.snapshotReadCount()).toBe(0);
       }),
     ).pipe(Effect.provide(platformLayer)),

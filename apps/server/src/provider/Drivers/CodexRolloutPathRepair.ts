@@ -32,7 +32,97 @@ interface CodexRolloutMetadata {
   readonly cliVersion: string;
 }
 
-function findRolloutMetadata(homePath: string, threadId: string): CodexRolloutMetadata | undefined {
+function readRolloutMetadata(
+  rolloutPath: string,
+  threadId: string,
+): CodexRolloutMetadata | undefined {
+  if (!NodeFS.existsSync(rolloutPath)) return undefined;
+  const descriptor = NodeFS.openSync(rolloutPath, "r");
+  try {
+    const buffer = Buffer.alloc(128 * 1024);
+    const length = NodeFS.readSync(descriptor, buffer, 0, buffer.length, 0);
+    const firstLine = buffer.subarray(0, length).toString("utf8").split(/\r?\n/, 1)[0];
+    if (!firstLine) return undefined;
+    const record = JSON.parse(firstLine) as {
+      readonly type?: string;
+      readonly timestamp?: string;
+      readonly payload?: {
+        readonly id?: string;
+        readonly session_id?: string;
+        readonly cwd?: string;
+        readonly source?: string;
+        readonly model_provider?: string;
+        readonly cli_version?: string;
+      };
+    };
+    const id = record.payload?.id ?? record.payload?.session_id;
+    if (record.type !== "session_meta" || id !== threadId) return undefined;
+    const createdAtMs = Date.parse(record.timestamp ?? "");
+    return {
+      path: rolloutPath,
+      id,
+      createdAt: Number.isFinite(createdAtMs) ? Math.floor(createdAtMs / 1000) : 0,
+      cwd: record.payload?.cwd ?? process.cwd(),
+      source: record.payload?.source ?? "vscode",
+      modelProvider: record.payload?.model_provider ?? "openai",
+      cliVersion: record.payload?.cli_version ?? "",
+    };
+  } finally {
+    NodeFS.closeSync(descriptor);
+  }
+}
+
+function relocatedRolloutPath(homePath: string, rolloutPath: string): string | undefined {
+  const match = ROLLOUT_HOME_SUFFIX.exec(rolloutPath);
+  if (!match?.[1] || !match[2]) return undefined;
+  return NodePath.resolve(homePath, match[1], ...match[2].split(/[\\/]+/).filter(Boolean));
+}
+
+function findStateDatabaseName(homePath: string): string | undefined {
+  return NodeFS.readdirSync(homePath)
+    .filter((entry) => CODEX_STATE_DATABASE.test(entry))
+    .toSorted((left, right) => right.localeCompare(left, undefined, { numeric: true }))[0];
+}
+
+export function readCodexThreadRolloutSize(homePath: string, threadId: string): number | undefined {
+  try {
+    const databaseName = findStateDatabaseName(homePath);
+    if (!databaseName) return undefined;
+    const database = new NodeSqlite.DatabaseSync(NodePath.join(homePath, databaseName), {
+      readOnly: true,
+    });
+    try {
+      const row = database
+        .prepare("SELECT rollout_path FROM threads WHERE id = ?")
+        .get(threadId) as CodexThreadRolloutRow | undefined;
+      if (!row) return undefined;
+      const rolloutPath = NodeFS.existsSync(row.rollout_path)
+        ? row.rollout_path
+        : relocatedRolloutPath(homePath, row.rollout_path);
+      if (!rolloutPath || !NodeFS.existsSync(rolloutPath)) return undefined;
+      return NodeFS.statSync(rolloutPath).size;
+    } finally {
+      database.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+function findRolloutMetadata(
+  homePath: string,
+  threadId: string,
+  indexedPath?: string,
+): CodexRolloutMetadata | undefined {
+  if (indexedPath) {
+    const indexed = readRolloutMetadata(indexedPath, threadId);
+    if (indexed) return indexed;
+    const relocatedPath = relocatedRolloutPath(homePath, indexedPath);
+    if (relocatedPath && relocatedPath !== indexedPath) {
+      const relocated = readRolloutMetadata(relocatedPath, threadId);
+      if (relocated) return relocated;
+    }
+  }
   for (const directory of ["sessions", "archived_sessions"] as const) {
     const root = NodePath.join(homePath, directory);
     if (!NodeFS.existsSync(root)) continue;
@@ -42,39 +132,8 @@ function findRolloutMetadata(homePath: string, threadId: string): CodexRolloutMe
         continue;
       }
       const rolloutPath = NodePath.join(entry.parentPath, entry.name);
-      const descriptor = NodeFS.openSync(rolloutPath, "r");
-      try {
-        const buffer = Buffer.alloc(128 * 1024);
-        const length = NodeFS.readSync(descriptor, buffer, 0, buffer.length, 0);
-        const firstLine = buffer.subarray(0, length).toString("utf8").split(/\r?\n/, 1)[0];
-        if (!firstLine) continue;
-        const record = JSON.parse(firstLine) as {
-          readonly type?: string;
-          readonly timestamp?: string;
-          readonly payload?: {
-            readonly id?: string;
-            readonly session_id?: string;
-            readonly cwd?: string;
-            readonly source?: string;
-            readonly model_provider?: string;
-            readonly cli_version?: string;
-          };
-        };
-        const id = record.payload?.id ?? record.payload?.session_id;
-        if (record.type !== "session_meta" || id !== threadId) continue;
-        const createdAtMs = Date.parse(record.timestamp ?? "");
-        return {
-          path: rolloutPath,
-          id,
-          createdAt: Number.isFinite(createdAtMs) ? Math.floor(createdAtMs / 1000) : 0,
-          cwd: record.payload?.cwd ?? process.cwd(),
-          source: record.payload?.source ?? "vscode",
-          modelProvider: record.payload?.model_provider ?? "openai",
-          cliVersion: record.payload?.cli_version ?? "",
-        };
-      } finally {
-        NodeFS.closeSync(descriptor);
-      }
+      const metadata = readRolloutMetadata(rolloutPath, threadId);
+      if (metadata) return metadata;
     }
   }
   return undefined;
@@ -84,11 +143,7 @@ export const ensureCodexThreadRolloutIndexed = Effect.fn("ensureCodexThreadRollo
   function* (homePath: string, threadId: string) {
     return yield* Effect.try({
       try: () => {
-        const metadata = findRolloutMetadata(homePath, threadId);
-        if (!metadata) return false;
-        const databaseName = NodeFS.readdirSync(homePath)
-          .filter((entry) => CODEX_STATE_DATABASE.test(entry))
-          .toSorted((left, right) => right.localeCompare(left, undefined, { numeric: true }))[0];
+        const databaseName = findStateDatabaseName(homePath);
         if (!databaseName) return false;
         const databasePath = NodePath.join(homePath, databaseName);
         const database = new NodeSqlite.DatabaseSync(databasePath);
@@ -100,6 +155,12 @@ export const ensureCodexThreadRolloutIndexed = Effect.fn("ensureCodexThreadRollo
           const indexedRow = database
             .prepare("SELECT id, rollout_path FROM threads WHERE id = ?")
             .get(threadId) as CodexThreadRolloutRow | undefined;
+          const metadata = findRolloutMetadata(
+            homePath,
+            threadId,
+            physicalRow?.rollout_path ?? indexedRow?.rollout_path,
+          );
+          if (!metadata) return false;
           if (
             indexedRow?.id !== physicalRow?.id ||
             indexedRow?.rollout_path !== physicalRow?.rollout_path

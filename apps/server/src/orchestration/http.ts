@@ -17,6 +17,7 @@ import {
   requireEnvironmentScope,
 } from "../auth/http.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
+import { ProviderCommandReactor } from "./Services/ProviderCommandReactor.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
 export const orchestrationHttpApiLayer = HttpApiBuilder.group(
@@ -25,6 +26,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   Effect.fnUntraced(function* (handlers) {
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
+    const providerCommandReactor = yield* Effect.serviceOption(ProviderCommandReactor);
 
     return handlers
       .handle(
@@ -87,6 +89,16 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
             );
           if (Option.isNone(snapshot)) {
             return yield* failEnvironmentNotFound("thread_not_found");
+          }
+          if (
+            snapshot.value.thread.session?.providerName === "codex" &&
+            (snapshot.value.thread.session.status === "ready" ||
+              snapshot.value.thread.session.status === "error") &&
+            Option.isSome(providerCommandReactor)
+          ) {
+            yield* providerCommandReactor.value
+              .prewarmThread(snapshot.value.thread.id)
+              .pipe(Effect.forkScoped);
           }
           return projectThreadDetailSnapshot(snapshot.value);
         }),

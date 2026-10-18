@@ -9,6 +9,7 @@ import { NodeServices } from "@effect/platform-node";
 
 import {
   ensureCodexThreadRolloutIndexed,
+  readCodexThreadRolloutSize,
   reconcileCodexRolloutPaths,
 } from "./CodexRolloutPathRepair.ts";
 
@@ -174,6 +175,24 @@ it.layer(NodeServices.layer)("CodexRolloutPathRepair", (it) => {
 
           assert.isTrue(yield* ensureCodexThreadRolloutIndexed(homePath, threadId));
           assert.equal(readRolloutPath(databasePath, threadId), rolloutPath);
+        }),
+      ),
+    );
+
+    it.effect("reads the indexed rollout size without hydrating its history", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const homePath = yield* makeTempHome();
+          const threadId = "thread-sized";
+          const rolloutPath = path.join(homePath, "sessions", "rollout-thread-sized.jsonl");
+          yield* fileSystem.makeDirectory(path.dirname(rolloutPath), { recursive: true });
+          yield* fileSystem.writeFileString(rolloutPath, "1234567890");
+          const databasePath = path.join(homePath, "state_7.sqlite");
+          createStateDatabase(databasePath, [[threadId, rolloutPath]]);
+
+          assert.equal(readCodexThreadRolloutSize(homePath, threadId), 10);
         }),
       ),
     );

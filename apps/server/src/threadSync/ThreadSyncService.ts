@@ -2950,12 +2950,13 @@ export const make = Effect.gen(function* () {
     const fetched = yield* git.fetch(configuration);
     const remoteChanged = fetched.remoteRevision !== input.expectedRemoteRevision;
     const checkedOut = yield* git.checkoutRemote(configuration, fetched.remoteRevision, fetched);
+    const now = DateTime.formatIso(yield* DateTime.now);
     const index =
       checkedOut.remoteRevision === null
         ? {
             projects: new Map<ThreadSyncProjectId, ThreadSyncProjectSnapshot>(),
             threadCount: 0,
-            v2: null,
+            v2: emptyThreadSyncV2RepositoryIndex(now),
           }
         : yield* Effect.gen(function* () {
             const v2 = yield* readThreadSyncV2RepositoryIndex(checkedOut.mirrorPath);
@@ -2965,7 +2966,6 @@ export const make = Effect.gen(function* () {
             const v1 = yield* provideIo(readThreadSyncRepositoryIndex(checkedOut.mirrorPath));
             return { ...v1, v2: null };
           });
-    const now = DateTime.formatIso(yield* DateTime.now);
     const nextState: ThreadSyncLocalState = {
       ...state,
       remoteRevision: fetched.remoteRevision,
@@ -2976,8 +2976,33 @@ export const make = Effect.gen(function* () {
       discoveredThreadCount: index.threadCount,
       projects: index.projects,
       v2: index.v2,
+      mirrorPath: checkedOut.mirrorPath,
       state: nextState,
     };
+  });
+
+  const analyzePreparedFetch = Effect.fn("ThreadSyncService.analyzePreparedFetch")(function* (
+    prepared: Effect.Success<ReturnType<typeof prepareFetch>>,
+  ) {
+    if (prepared.v2 !== null) {
+      const analysis = yield* analyzeV2(prepared.state, prepared.v2);
+      return {
+        analysis,
+        remote: {
+          projects: prepared.v2.projects,
+          threads: new Map<ThreadId, ThreadSyncThreadSnapshot>(),
+          blobs: new Map<string, Uint8Array>(),
+        } satisfies ThreadSyncRepositoryDocuments,
+        remoteV2: prepared.v2,
+      };
+    }
+
+    // The legacy format needs full documents. Refuse it before reading either
+    // side when the bounded compatibility check says the local state is too large.
+    yield* assertV1HydrationSafe();
+    const remote = yield* readRepository(prepared.mirrorPath);
+    const analysis = yield* analyze(prepared.state, remote);
+    return { analysis, remote, remoteV2: null };
   });
 
   const fetchUnlocked = Effect.fn("ThreadSyncService.fetchUnlocked")(function* (
@@ -2985,27 +3010,15 @@ export const make = Effect.gen(function* () {
   ): Effect.fn.Return<ThreadSyncFetchResult, ThreadSyncError> {
     const state = yield* Ref.get(stateRef);
     const prepared = yield* prepareFetch(state, input);
-    yield* saveState(prepared.state);
-    yield* Ref.set(remoteV2Ref, prepared.v2);
-    yield* Ref.update(remoteRef, (remote) => ({
-      projects: prepared.projects,
-      threads: remote.threads,
-      blobs: remote.blobs,
-    }));
-    const currentStatus = yield* Ref.get(statusRef);
-    const status: ThreadSyncStatus = {
-      ...(prepared.remoteChanged ? disconnectedStatus() : currentStatus),
-      state: "idle",
-      configuration: publicThreadSyncConfiguration(prepared.state.configuration),
-      remoteRevision: prepared.state.remoteRevision,
-      lastFetchedAt: prepared.state.lastFetchedAt,
-      lastError: null,
-    };
-    yield* publish(status);
+    const analyzed = yield* analyzePreparedFetch(prepared);
+    yield* saveState(analyzed.analysis.state);
+    yield* Ref.set(remoteV2Ref, analyzed.remoteV2);
+    yield* Ref.set(remoteRef, analyzed.remote);
+    yield* publish(analyzed.analysis.status);
     return {
       remoteChanged: prepared.remoteChanged,
       discoveredThreadCount: prepared.discoveredThreadCount,
-      status,
+      status: analyzed.analysis.status,
     };
   });
 
@@ -3028,7 +3041,9 @@ export const make = Effect.gen(function* () {
               ...resetThreadSyncLocalStateAt(bindingBaseline),
               configuration: input,
             };
-        const fetched = yield* git.fetch(input).pipe(
+        const prepared = yield* prepareFetch(next, {
+          expectedRemoteRevision: sameRemote ? current.remoteRevision : null,
+        }).pipe(
           Effect.tapError(() =>
             sameRemote
               ? Effect.void
@@ -3041,26 +3056,11 @@ export const make = Effect.gen(function* () {
                 ),
           ),
         );
-        const now = DateTime.formatIso(yield* DateTime.now);
-        const configuredState = {
-          ...next,
-          remoteRevision: fetched.remoteRevision,
-          lastFetchedAt: now,
-        };
-        yield* saveState(configuredState, { resetInvalidLoadedState: true });
-        if (!sameRemote) {
-          yield* Ref.set(remoteRef, emptyThreadSyncRepositoryDocuments());
-          yield* Ref.set(remoteV2Ref, null);
-        }
-        const configuredStatus: ThreadSyncStatus = {
-          ...disconnectedStatus(),
-          state: "idle",
-          configuration: publicThreadSyncConfiguration(input),
-          remoteRevision: fetched.remoteRevision,
-          lastFetchedAt: now,
-          lastError: null,
-        };
-        yield* publish(configuredStatus);
+        const analyzed = yield* analyzePreparedFetch(prepared);
+        yield* saveState(analyzed.analysis.state, { resetInvalidLoadedState: true });
+        yield* Ref.set(remoteRef, analyzed.remote);
+        yield* Ref.set(remoteV2Ref, analyzed.remoteV2);
+        yield* publish(analyzed.analysis.status);
         if (!sameRemote && current.configuration !== null) {
           yield* git.removeMirror(current.configuration).pipe(
             Effect.catch((cleanupError) =>
@@ -3070,7 +3070,7 @@ export const make = Effect.gen(function* () {
             ),
           );
         }
-        return { status: configuredStatus };
+        return { status: analyzed.analysis.status };
       }),
       { allowInvalidStateReset: true, skipStatusAnalysis: true },
     );

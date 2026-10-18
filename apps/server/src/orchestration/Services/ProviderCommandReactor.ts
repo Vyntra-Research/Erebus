@@ -10,6 +10,8 @@ import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
 
+import type { ThreadId } from "@t3tools/contracts";
+
 /**
  * ProviderCommandReactorShape - Service API for provider command reactors.
  */
@@ -24,6 +26,12 @@ export interface ProviderCommandReactorShape {
    * processing.
    */
   readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+
+  /**
+   * Restores the provider session while a persisted thread is being viewed.
+   * This never starts or resumes a turn.
+   */
+  readonly prewarmThread: (threadId: ThreadId) => Effect.Effect<void>;
 
   /**
    * Resolves when the internal processing queue is empty and idle.

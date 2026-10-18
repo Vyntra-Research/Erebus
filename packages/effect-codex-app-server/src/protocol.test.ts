@@ -14,6 +14,7 @@ import * as CodexRpc from "./rpc.ts";
 import * as CodexSchema from "./schema.ts";
 import { makeInMemoryStdio } from "./_internal/stdio.ts";
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 const encoder = new TextEncoder();
 
@@ -379,6 +380,96 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
       }
 
       assert.deepEqual(yield* Fiber.join(response), { value });
+    }),
+  );
+
+  it.effect("discards fork history while preserving the response metadata", () =>
+    Effect.sync(() => {
+      const methods = new Map([["7", "thread/fork"]]);
+      const buffer = CodexProtocol.makeIncomingWireLineBuffer((requestId) =>
+        methods.get(requestId),
+      );
+      const encoded = `${encodeUnknownJsonString({
+        id: 7,
+        result: {
+          thread: {
+            id: "forked-thread",
+            title: "Forked",
+            turns: [
+              {
+                id: "turn-1",
+                items: [{ text: 'nested brackets [] and a quoted "turns":[' }],
+              },
+            ],
+            status: "ready",
+          },
+          model: "gpt-test",
+        },
+      })}\n`;
+      const lines = [
+        ...buffer.push(encoded.slice(0, 19)),
+        ...buffer.push(encoded.slice(19, 73)),
+        ...buffer.push(encoded.slice(73, 111)),
+        ...buffer.push(encoded.slice(111)),
+      ];
+
+      assert.lengthOf(lines, 1);
+      assert.deepEqual(decodeUnknownJsonString(lines[0]!), {
+        id: 7,
+        result: {
+          thread: {
+            id: "forked-thread",
+            title: "Forked",
+            turns: [],
+            status: "ready",
+          },
+          model: "gpt-test",
+        },
+      });
+    }),
+  );
+
+  it.effect("routes a fragmented fork response after discarding its large history", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({ stdio });
+      const response = yield* transport
+        .request("thread/fork", { threadId: "source" })
+        .pipe(Effect.forkScoped);
+      yield* Queue.take(output);
+
+      const encoded = encoder.encode(
+        `${encodeUnknownJsonString({
+          id: 1,
+          result: {
+            thread: {
+              id: "forked",
+              turns: [{ id: "turn-large", text: "x".repeat(5_000_000) }],
+              status: "ready",
+            },
+          },
+        })}\n`,
+      );
+      for (let offset = 0; offset < encoded.length; offset += 4_096) {
+        yield* Queue.offer(input, encoded.slice(offset, offset + 4_096));
+      }
+
+      assert.deepEqual(yield* Fiber.join(response), {
+        thread: { id: "forked", turns: [], status: "ready" },
+      });
+    }),
+  );
+
+  it.effect("keeps non-fork responses unchanged", () =>
+    Effect.sync(() => {
+      const buffer = CodexProtocol.makeIncomingWireLineBuffer(() => "thread/read");
+      const encoded = `${encodeUnknownJsonString({
+        id: 3,
+        result: { thread: { id: "thread-3", turns: [{ id: "turn-3" }] } },
+      })}\n`;
+      const lines = [...buffer.push(encoded.slice(0, 8)), ...buffer.push(encoded.slice(8))];
+
+      assert.deepEqual(lines, [encoded.trimEnd()]);
     }),
   );
 

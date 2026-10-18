@@ -22,12 +22,14 @@ import {
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { normalizeModelSlug } from "@t3tools/shared/model";
+import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -41,6 +43,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { buildCodexInitializeParams, readCodexProteusHealth } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
+import { readCodexThreadRolloutSize } from "../Drivers/CodexRolloutPathRepair.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
   EREBUS_COMMAND_GUARD_REASON_MARKER,
@@ -77,6 +80,7 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
 ];
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
 const MIN_CODEX_HISTORY_FREE_RESUME_VERSION = "0.125.0";
+const CODEX_ROLLOUT_REBASE_THRESHOLD_BYTES = 256 * 1024 * 1024;
 const CODEX_USER_AGENT_VERSION = /\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s|$|\()/;
 
 export function validateCodexHistoryFreeResumeVersion(
@@ -1351,6 +1355,7 @@ export const makeCodexSessionRuntime = (
       updatedAt: sessionCreatedAt,
     } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
+    const historyRebaseGateRef = yield* Ref.make<Deferred.Deferred<void> | null>(null);
     const lastLiveUserSteerRef = yield* Ref.make<CodexTrackedLiveUserSteer | null>(null);
     const lastCompactionSignalRef = yield* Ref.make<string | null>(null);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
@@ -1912,6 +1917,80 @@ export const makeCodexSessionRuntime = (
       ),
     );
 
+    const awaitHistoryRebase = Ref.get(historyRebaseGateRef).pipe(
+      Effect.flatMap((gate) => (gate === null ? Effect.void : Deferred.await(gate))),
+    );
+
+    const scheduleHistoryRebase = Effect.fn("scheduleHistoryRebase")(function* () {
+      if (!resolvedHomePath) return;
+      const candidate = yield* Deferred.make<void>();
+      const gate = yield* Ref.modify(historyRebaseGateRef, (current) =>
+        current === null ? ([candidate, candidate] as const) : ([current, current] as const),
+      );
+      if (gate !== candidate) return;
+
+      const release = Deferred.succeed(candidate, undefined).pipe(
+        Effect.andThen(
+          Ref.update(historyRebaseGateRef, (current) => (current === candidate ? null : current)),
+        ),
+      );
+      const rebase = Effect.gen(function* () {
+        const session = yield* Ref.get(sessionRef);
+        const providerThreadId = currentProviderThreadId(session);
+        if (!providerThreadId || session.status !== "ready") return;
+        const rolloutSize = readCodexThreadRolloutSize(resolvedHomePath, providerThreadId);
+        if (
+          rolloutSize === undefined ||
+          rolloutSize < CODEX_ROLLOUT_REBASE_THRESHOLD_BYTES ||
+          (yield* Ref.get(collabChildLiveTurnsRef)).size > 0
+        ) {
+          return;
+        }
+
+        const goal = yield* client
+          .request("thread/goal/get", { threadId: providerThreadId })
+          .pipe(Effect.timeout("3 seconds"), Effect.option);
+        if (Option.isNone(goal) || goal.value.goal !== null) return;
+
+        const forked = yield* client.request("thread/fork", {
+          threadId: providerThreadId,
+          ephemeral: false,
+        });
+        const forkedThreadId = forked.thread.id;
+        const updated = yield* Ref.modify(sessionRef, (current) => {
+          if (currentProviderThreadId(current) !== providerThreadId || current.status !== "ready") {
+            return [false, current] as const;
+          }
+          return [
+            true,
+            {
+              ...current,
+              resumeCursor: { threadId: forkedThreadId },
+            },
+          ] as const;
+        });
+        if (updated) {
+          yield* Effect.logInfo("Rebased a large Codex rollout onto native compact history.", {
+            threadId: options.threadId,
+            sourceProviderThreadId: providerThreadId,
+            providerThreadId: forkedThreadId,
+            rolloutSize,
+          });
+        }
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.logDebug("Large Codex rollout rebase was skipped.", {
+                threadId: options.threadId,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+        Effect.ensuring(release),
+      );
+      yield* rebase.pipe(Effect.forkIn(runtimeScope));
+    });
+
     yield* client.handleServerNotification("turn/completed", (payload) =>
       currentSessionProviderThreadId.pipe(
         Effect.flatMap((providerThreadId) => {
@@ -1931,7 +2010,11 @@ export const makeCodexSessionRuntime = (
             status: payload.turn.status === "failed" ? "error" : "ready",
             activeTurnId: undefined,
             ...(lastError ? { lastError } : {}),
-          });
+          }).pipe(
+            Effect.andThen(
+              payload.turn.status === "completed" ? scheduleHistoryRebase() : Effect.void,
+            ),
+          );
         }),
       ),
     );
@@ -2432,6 +2515,7 @@ export const makeCodexSessionRuntime = (
       getSession: Ref.get(sessionRef),
       sendTurn: (input) =>
         Effect.gen(function* () {
+          yield* awaitHistoryRebase;
           const providerThreadId = yield* readProviderThreadId;
           if (hasConfiguredMcpServer(options.appServerArgs)) {
             yield* client.request("config/mcpServer/reload", undefined).pipe(

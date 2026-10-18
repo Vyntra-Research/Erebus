@@ -24,12 +24,14 @@ import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -495,6 +497,7 @@ const make = Effect.gen(function* () {
     timeToLive: HANDLED_TURN_START_KEY_TTL,
     lookup: () => Effect.succeed(true),
   });
+  const prewarmGates = yield* Ref.make(new Map<ThreadId, Deferred.Deferred<void>>());
 
   const hasHandledTurnStartRecently = (key: string) =>
     Cache.getOption(handledTurnStartKeys, key).pipe(
@@ -1047,6 +1050,53 @@ const make = Effect.gen(function* () {
     return startedSession.threadId;
   });
 
+  const awaitThreadPrewarm = (threadId: ThreadId) =>
+    Ref.get(prewarmGates).pipe(
+      Effect.flatMap((current) => {
+        const gate = current.get(threadId);
+        return gate === undefined ? Effect.void : Deferred.await(gate);
+      }),
+    );
+
+  const prewarmThread: ProviderCommandReactorShape["prewarmThread"] = Effect.fn("prewarmThread")(
+    function* (threadId) {
+      const candidate = yield* Deferred.make<void>();
+      const gate = yield* Ref.modify(prewarmGates, (current) => {
+        const existing = current.get(threadId);
+        if (existing !== undefined) return [existing, current] as const;
+        const next = new Map(current);
+        next.set(threadId, candidate);
+        return [candidate, next] as const;
+      });
+      if (gate !== candidate) {
+        yield* Deferred.await(gate);
+        return;
+      }
+
+      const release = Deferred.succeed(candidate, undefined).pipe(
+        Effect.andThen(
+          Ref.update(prewarmGates, (current) => {
+            if (current.get(threadId) !== candidate) return current;
+            const next = new Map(current);
+            next.delete(threadId);
+            return next;
+          }),
+        ),
+      );
+      yield* ensureSessionForThread(threadId, DateTime.formatIso(yield* DateTime.now)).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.logDebug("Provider session prewarm did not complete.", {
+                threadId,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+        Effect.ensuring(release),
+      );
+    },
+  );
+
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly messageId: MessageId;
@@ -1097,6 +1147,7 @@ const make = Effect.gen(function* () {
           historyTruncated: importedHistoryTruncated,
         })
       : toNonEmptyProviderInput(input.messageText);
+    yield* awaitThreadPrewarm(input.threadId);
     if (importedContextPending) {
       yield* resetSessionForImportedContextOnce(input.threadId);
     } else {
@@ -2106,6 +2157,7 @@ const make = Effect.gen(function* () {
 
   return {
     start,
+    prewarmThread,
     drain: Effect.gen(function* () {
       yield* worker.drain;
       yield* threadTitleRegenerationWorker.drain;
