@@ -46,7 +46,6 @@ import {
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
-  FoldersIcon,
   GitBranchIcon,
   MessageSquareIcon,
   PinIcon,
@@ -4314,9 +4313,8 @@ export default function Sidebar() {
                     items.push(
                       <li
                         key="standalone-heading"
-                        className="mt-1 flex list-none items-center gap-2 px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-sidebar-muted-foreground"
+                        className="mt-1 flex list-none items-center px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-sidebar-muted-foreground"
                       >
-                        <MessageSquareIcon aria-hidden className="size-3.5" />
                         <span>Threads</span>
                         <span className="ml-auto tabular-nums opacity-60">
                           {standaloneActiveThreads.length}
@@ -4331,9 +4329,8 @@ export default function Sidebar() {
                     items.push(
                       <li
                         key="projects-heading"
-                        className="mt-2 flex list-none items-center gap-2 px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-sidebar-muted-foreground"
+                        className="mt-2 flex list-none items-center px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-sidebar-muted-foreground"
                       >
-                        <FoldersIcon aria-hidden className="size-3.5" />
                         <span>Projects</span>
                       </li>,
                     );
