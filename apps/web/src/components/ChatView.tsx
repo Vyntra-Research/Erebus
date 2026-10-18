@@ -344,6 +344,7 @@ import {
   scheduleEnvironmentReconnectWarning,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
+  isThreadProjectUnavailable,
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
   shouldShowBranchMismatchBanner,
@@ -1838,6 +1839,10 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
+  const projectSelectionRequired = isThreadProjectUnavailable({
+    projectId: activeThread?.projectId ?? null,
+    hasResolvedProject: activeProject !== null,
+  });
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -5650,7 +5655,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       return;
     }
-    if (!activeProject) {
+    if (projectSelectionRequired) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
@@ -5846,7 +5851,7 @@ function ChatViewContent(props: ChatViewProps) {
     const title = truncate(titleSeed);
     const threadCreateModelSelection = createModelSelection(
       ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
+      ctxSelectedModel || activeProject?.defaultModelSelection?.model || DEFAULT_MODEL,
       ctxSelectedModelSelection.options,
     );
 
@@ -5894,7 +5899,7 @@ function ChatViewContent(props: ChatViewProps) {
               ...(isLocalDraftThread
                 ? {
                     createThread: {
-                      projectId: activeProject.id,
+                      projectId: activeThread.projectId,
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
@@ -5905,7 +5910,7 @@ function ChatViewContent(props: ChatViewProps) {
                     },
                   }
                 : {}),
-              ...(baseBranchForWorktree
+              ...(baseBranchForWorktree && activeProject
                 ? {
                     prepareWorktree: {
                       projectCwd: activeProject.workspaceRoot,
@@ -5959,7 +5964,10 @@ function ChatViewContent(props: ChatViewProps) {
           markPromotedDraftThreadByRef(backgroundThreadRef);
           try {
             const nextDraft = await handleNewThread(
-              scopeProjectRef(activeProject.environmentId, activeProject.id),
+              {
+                environmentId: activeThread.environmentId,
+                projectId: activeThread.projectId,
+              },
               resolveBackgroundDraftWorkspaceOptions({
                 envMode: sendEnvMode,
                 branch: activeThreadBranch,
@@ -7115,7 +7123,7 @@ function ChatViewContent(props: ChatViewProps) {
                             isServerThread={isServerThread}
                             isLocalDraftThread={isLocalDraftThread}
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
-                            projectSelectionRequired={isLocalDraftThread && activeProject === null}
+                            projectSelectionRequired={projectSelectionRequired}
                             phase={phase}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
