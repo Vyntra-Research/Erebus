@@ -44,7 +44,9 @@ import {
   ClockIcon,
   EllipsisIcon,
   FolderIcon,
+  FolderOpenIcon,
   FolderPlusIcon,
+  FoldersIcon,
   GitBranchIcon,
   MessageSquareIcon,
   PinIcon,
@@ -765,6 +767,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   projectCwd: string | null;
   projectFaviconPath: string | null;
   projectTitle: string | null;
+  nestedInProject?: boolean;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -1449,7 +1452,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-px [content-visibility:auto] [contain-intrinsic-size:auto_42px]",
+        "list-none [content-visibility:auto] [contain-intrinsic-size:auto_32px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1469,7 +1472,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 flex h-10 items-center px-[var(--sidebar-row-content-inset)]">
+          <div
+            className={cn(
+              "relative z-10 flex h-8 items-center pr-[var(--sidebar-row-content-inset)]",
+              props.nestedInProject ? "pl-8" : "pl-[var(--sidebar-row-content-inset)]",
+            )}
+          >
             <div className="flex h-5 min-w-0 flex-1 items-center gap-1.5">
               {thread.coagent ? (
                 <Tooltip>
@@ -4119,6 +4127,7 @@ export default function Sidebar() {
                     thread: EnvironmentThreadShell,
                     section: "pinned" | "active" | "snoozed" | "settled",
                     sortable?: SortablePinnedRowBag,
+                    nestedInProject = false,
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
@@ -4198,6 +4207,7 @@ export default function Sidebar() {
                                 `${thread.environmentId}:${thread.projectId}`,
                               ) ?? null)
                         }
+                        nestedInProject={nestedInProject}
                         providerEntryByInstanceId={
                           providerEntriesByEnvironment.get(thread.environmentId) ??
                           EMPTY_PROVIDER_ENTRIES
@@ -4323,7 +4333,7 @@ export default function Sidebar() {
                         key="projects-heading"
                         className="mt-2 flex list-none items-center gap-2 px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-sidebar-muted-foreground"
                       >
-                        <FolderIcon aria-hidden className="size-3.5" />
+                        <FoldersIcon aria-hidden className="size-3.5" />
                         <span>Projects</span>
                       </li>,
                     );
@@ -4356,19 +4366,11 @@ export default function Sidebar() {
                             onClick={() => setProjectExpanded(preferenceKeys, !projectExpanded)}
                             className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 pr-20 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                           >
-                            <ChevronDownIcon
-                              aria-hidden
-                              className={cn(
-                                "size-3.5 shrink-0 transition-transform",
-                                !projectExpanded && "-rotate-90",
-                              )}
-                            />
-                            <ProjectFavicon
-                              environmentId={project.environmentId}
-                              cwd={project.workspaceRoot}
-                              faviconPath={project.faviconPath}
-                              className="size-4 shrink-0"
-                            />
+                            {projectExpanded ? (
+                              <FolderOpenIcon aria-hidden className="size-4 shrink-0" />
+                            ) : (
+                              <FolderIcon aria-hidden className="size-4 shrink-0" />
+                            )}
                             <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
                           </button>
                           <span className="pointer-events-none absolute right-14 shrink-0 text-[10px] font-normal tabular-nums text-sidebar-muted-foreground/60">
@@ -4412,9 +4414,11 @@ export default function Sidebar() {
                             id={projectThreadListId}
                             role="list"
                             aria-label={`${project.displayName} threads`}
-                            className="ml-2 flex flex-col gap-px border-l border-sidebar-border/60 pl-1.5"
+                            className="flex flex-col gap-px"
                           >
-                            {projectThreads.map((thread) => renderThreadRow(thread, "active"))}
+                            {projectThreads.map((thread) =>
+                              renderThreadRow(thread, "active", undefined, true),
+                            )}
                           </ul>
                         ) : null}
                       </li>,
