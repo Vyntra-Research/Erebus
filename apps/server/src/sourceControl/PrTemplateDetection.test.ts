@@ -1,3 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -36,6 +41,19 @@ const PrTemplateDetectionTestLayer = GitVcsDriver.layer.pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
+const tempDirectory = Effect.acquireRelease(
+  Effect.sync(() => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pr-template-"))),
+  (directory) =>
+    Effect.sync(() => {
+      NodeFS.rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 50,
+      });
+    }),
+);
+
 const runGit = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const git = yield* GitVcsDriver.GitVcsDriver;
@@ -51,8 +69,7 @@ const runWithTempDirectory = <A, E, R>(
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-pr-template-" });
+      const cwd = yield* tempDirectory;
       yield* runGit(cwd, ["init", "--initial-branch=main"]);
       yield* runGit(cwd, ["config", "user.email", "test@example.com"]);
       yield* runGit(cwd, ["config", "user.name", "Test User"]);
