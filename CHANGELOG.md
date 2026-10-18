@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2 - 2026-10-17
+
+### Fixed
+
+- Show unsaved local thread history after connecting an empty Git sync repository, so the first push no longer appears up to date.
+- Prepare persisted Codex sessions when their thread opens and keep later resumes bounded without changing active goals.
+
 ## 0.8.1 - 2026-10-17
 
 ### Fixed

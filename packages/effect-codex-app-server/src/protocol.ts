@@ -72,6 +72,163 @@ interface CodexAppServerPendingRequest {
   readonly method: string;
 }
 
+const THREAD_TURNS_ARRAY_PREFIX = '"turns":[';
+const REQUEST_ID_PREFIX = /"id"\s*:\s*(?:"([^"]+)"|(\d+))/;
+
+interface ForkTurnsRedactor {
+  readonly append: (chunk: string) => void;
+  readonly finish: () => string;
+}
+
+function makeForkTurnsRedactor(): ForkTurnsRedactor {
+  const output: Array<string> = [];
+  let searchTail = "";
+  let foundTurns = false;
+  let skippingTurns = false;
+  let arrayDepth = 0;
+  let inString = false;
+  let escaped = false;
+
+  const appendAfterTurns = (chunk: string) => {
+    if (chunk.length > 0) output.push(chunk);
+  };
+
+  const appendInsideTurns = (chunk: string) => {
+    for (let index = 0; index < chunk.length; index += 1) {
+      const character = chunk[index]!;
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (character === '"') {
+        inString = true;
+      } else if (character === "[") {
+        arrayDepth += 1;
+      } else if (character === "]") {
+        arrayDepth -= 1;
+        if (arrayDepth === 0) {
+          skippingTurns = false;
+          appendAfterTurns(chunk.slice(index + 1));
+          return;
+        }
+      }
+    }
+  };
+
+  const append = (chunk: string) => {
+    if (foundTurns) {
+      if (skippingTurns) appendInsideTurns(chunk);
+      else appendAfterTurns(chunk);
+      return;
+    }
+
+    const candidate = searchTail + chunk;
+    const prefixIndex = candidate.indexOf(THREAD_TURNS_ARRAY_PREFIX);
+    if (prefixIndex !== -1) {
+      output.push(candidate.slice(0, prefixIndex), '"turns":[]');
+      foundTurns = true;
+      skippingTurns = true;
+      arrayDepth = 1;
+      searchTail = "";
+      appendInsideTurns(candidate.slice(prefixIndex + THREAD_TURNS_ARRAY_PREFIX.length));
+      return;
+    }
+
+    const retainedLength = Math.min(THREAD_TURNS_ARRAY_PREFIX.length - 1, candidate.length);
+    const emittedLength = candidate.length - retainedLength;
+    if (emittedLength > 0) output.push(candidate.slice(0, emittedLength));
+    searchTail = candidate.slice(emittedLength);
+  };
+
+  return {
+    append,
+    finish: () => {
+      if (!foundTurns && searchTail.length > 0) output.push(searchTail);
+      return output.join("");
+    },
+  };
+}
+
+/**
+ * Buffers newline-delimited app-server messages without retaining the turn
+ * array returned by `thread/fork`. Fork responses repeat the complete provider
+ * history even though callers only need the new thread metadata; on long
+ * research threads that single JSON line can be several gigabytes.
+ */
+export function makeIncomingWireLineBuffer(
+  requestMethod: (requestId: string) => string | undefined,
+): {
+  readonly push: (chunk: string) => ReadonlyArray<string>;
+  readonly finish: () => string;
+} {
+  let mode: "detect" | "plain" | "fork" = "detect";
+  let chunks: Array<string> = [];
+  let forkRedactor: ForkTurnsRedactor | undefined;
+
+  const reset = () => {
+    mode = "detect";
+    chunks = [];
+    forkRedactor = undefined;
+  };
+
+  const append = (segment: string) => {
+    if (mode === "plain") {
+      chunks.push(segment);
+      return;
+    }
+    if (mode === "fork") {
+      forkRedactor!.append(segment);
+      return;
+    }
+
+    chunks.push(segment);
+    const prefix = chunks.join("");
+    const requestIdMatch = REQUEST_ID_PREFIX.exec(prefix);
+    const requestId = requestIdMatch?.[1] ?? requestIdMatch?.[2];
+    if (requestId !== undefined) {
+      if (requestMethod(requestId) === "thread/fork") {
+        mode = "fork";
+        forkRedactor = makeForkTurnsRedactor();
+        forkRedactor.append(prefix);
+        chunks = [];
+      } else {
+        mode = "plain";
+      }
+    } else if (prefix.length >= 4096) {
+      mode = "plain";
+    }
+  };
+
+  const complete = () => {
+    const line = mode === "fork" ? forkRedactor!.finish() : chunks.join("");
+    reset();
+    return line.replace(/\r$/, "");
+  };
+
+  return {
+    push: (chunk) => {
+      const lines: Array<string> = [];
+      let segmentStart = 0;
+      let newlineIndex = chunk.indexOf("\n");
+      while (newlineIndex !== -1) {
+        append(chunk.slice(segmentStart, newlineIndex));
+        lines.push(complete());
+        segmentStart = newlineIndex + 1;
+        newlineIndex = chunk.indexOf("\n", segmentStart);
+      }
+      if (segmentStart < chunk.length) append(chunk.slice(segmentStart));
+      return lines;
+    },
+    finish: complete,
+  };
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -156,12 +313,9 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
     const incomingNotifications = yield* Queue.unbounded<CodexAppServerIncomingNotification>();
     const incomingRequests = yield* Queue.unbounded<CodexAppServerIncomingRequest>();
     const pending = yield* Ref.make(new Map<string, CodexAppServerPendingRequest>());
+    const pendingMethods = new Map<string, string>();
     const nextRequestId = yield* Ref.make(1);
-    // A thread/resume response can be hundreds of megabytes. Keep incomplete
-    // chunks separately and join them once when the newline arrives. Repeatedly
-    // appending to one string makes fragmented responses quadratic and can
-    // block the Erebus server long enough for the desktop client to reconnect.
-    const pendingLineChunks: Array<string> = [];
+    const incomingLines = makeIncomingWireLineBuffer((requestId) => pendingMethods.get(requestId));
     const terminationHandled = yield* Ref.make(false);
 
     const logProtocol = (event: CodexAppServerProtocolLogEvent) => {
@@ -185,6 +339,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
           }),
         ),
         Effect.andThen(Ref.set(pending, new Map())),
+        Effect.andThen(Effect.sync(() => pendingMethods.clear())),
       );
 
     const handleTermination = (classify: () => Effect.Effect<CodexError.CodexAppServerError>) =>
@@ -222,28 +377,36 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       });
 
     const removePending = (requestId: string) =>
-      Ref.update(pending, (current) => {
-        if (!current.has(requestId)) {
-          return current;
-        }
-        const next = new Map(current);
-        next.delete(requestId);
-        return next;
-      });
+      Effect.sync(() => pendingMethods.delete(requestId)).pipe(
+        Effect.andThen(
+          Ref.update(pending, (current) => {
+            if (!current.has(requestId)) {
+              return current;
+            }
+            const next = new Map(current);
+            next.delete(requestId);
+            return next;
+          }),
+        ),
+      );
 
     const resolvePending = (
       requestId: string,
       handler: (pendingRequest: CodexAppServerPendingRequest) => Effect.Effect<void>,
     ) =>
-      Ref.modify(pending, (current) => {
-        const pendingRequest = current.get(requestId);
-        if (!pendingRequest) {
-          return [Effect.void, current] as const;
-        }
-        const next = new Map(current);
-        next.delete(requestId);
-        return [handler(pendingRequest), next] as const;
-      }).pipe(Effect.flatten);
+      Effect.sync(() => pendingMethods.delete(requestId)).pipe(
+        Effect.andThen(
+          Ref.modify(pending, (current) => {
+            const pendingRequest = current.get(requestId);
+            if (!pendingRequest) {
+              return [Effect.void, current] as const;
+            }
+            const next = new Map(current);
+            next.delete(requestId);
+            return [handler(pendingRequest), next] as const;
+          }).pipe(Effect.flatten),
+        ),
+      );
 
     const respond = (requestId: string | number, result: unknown) =>
       offerOutgoing(toProtocolMessage(requestId, { result }));
@@ -355,41 +518,10 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       );
     };
 
-    const takeCompleteLines = (chunk: string): ReadonlyArray<string> => {
-      const lines: Array<string> = [];
-      let segmentStart = 0;
-      let newlineIndex = chunk.indexOf("\n");
-
-      while (newlineIndex !== -1) {
-        const segment = chunk.slice(segmentStart, newlineIndex);
-        let line = segment;
-        if (pendingLineChunks.length > 0) {
-          pendingLineChunks.push(segment);
-          line = pendingLineChunks.join("");
-          pendingLineChunks.length = 0;
-        }
-        lines.push(line.replace(/\r$/, ""));
-        segmentStart = newlineIndex + 1;
-        newlineIndex = chunk.indexOf("\n", segmentStart);
-      }
-
-      if (segmentStart < chunk.length) {
-        pendingLineChunks.push(chunk.slice(segmentStart));
-      }
-
-      return lines;
-    };
-
-    const takeFinalLine = (): string => {
-      const line = pendingLineChunks.join("").replace(/\r$/, "");
-      pendingLineChunks.length = 0;
-      return line;
-    };
-
     yield* options.stdio.stdin.pipe(
       Stream.decodeText(),
       Stream.runForEach((chunk) =>
-        Effect.sync(() => takeCompleteLines(chunk)).pipe(
+        Effect.sync(() => incomingLines.push(chunk)).pipe(
           Effect.flatMap((lines) => Effect.forEach(lines, handleLine, { discard: true })),
         ),
       ),
@@ -399,7 +531,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             Effect.succeed(normalizeIncomingError(error, "read-input-stream")),
           ),
         onSuccess: () =>
-          Effect.sync(takeFinalLine).pipe(
+          Effect.sync(() => incomingLines.finish()).pipe(
             Effect.flatMap((line) => (line.trim().length === 0 ? Effect.void : handleLine(line))),
             Effect.matchEffect({
               onFailure: (error) => handleTermination(() => Effect.succeed(error)),
@@ -424,6 +556,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
           (current) => [current, current + 1] as const,
         );
         const deferred = yield* Deferred.make<unknown, CodexError.CodexAppServerError>();
+        pendingMethods.set(String(requestId), method);
         yield* Ref.update(pending, (current) =>
           new Map(current).set(String(requestId), { deferred, method }),
         );
