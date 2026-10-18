@@ -320,7 +320,10 @@ function chunkEvent(
   };
 }
 
-function commitEvent(stagedHash: string): Omit<ThreadSyncImportedEvent, "sequence"> {
+function commitEvent(
+  stagedHash: string,
+  stagedDescriptor: ThreadSyncImportV2Descriptor = descriptor,
+): Omit<ThreadSyncImportedEvent, "sequence"> {
   const commandId = CommandId.make("command-sync-v2-commit");
   return {
     eventId: EventId.make("event-sync-v2-commit"),
@@ -334,15 +337,15 @@ function commitEvent(stagedHash: string): Omit<ThreadSyncImportedEvent, "sequenc
     metadata: {},
     payload: {
       threadId,
-      sourceRevision,
-      sourceHash,
+      sourceRevision: stagedDescriptor.sourceRevision,
+      sourceHash: stagedDescriptor.sourceHash,
       importedAt,
       thread: importedThread(),
       turns: [],
-      bindingUpdates: descriptor.bindingUpdates,
+      bindingUpdates: stagedDescriptor.bindingUpdates,
       stagedImport: {
-        stageId,
-        recordCount: records.length,
+        stageId: stagedDescriptor.stageId,
+        recordCount: stagedDescriptor.recordCount,
         stagedHash,
       },
     },
@@ -351,6 +354,7 @@ function commitEvent(stagedHash: string): Omit<ThreadSyncImportedEvent, "sequenc
 
 function validatedEvent(
   stagedHash: string,
+  stagedDescriptor: ThreadSyncImportV2Descriptor = descriptor,
 ): Omit<
   Extract<OrchestrationEvent, { readonly type: "thread.sync-import-v2.validated" }>,
   "sequence"
@@ -367,10 +371,10 @@ function validatedEvent(
     correlationId: commandId,
     metadata: {},
     payload: {
-      stageId,
-      threadId,
-      recordCount: records.length,
-      descriptorHash: threadSyncImportDescriptorHash({ ...descriptor, stagedHash }),
+      stageId: stagedDescriptor.stageId,
+      threadId: stagedDescriptor.threadId,
+      recordCount: stagedDescriptor.recordCount,
+      descriptorHash: threadSyncImportDescriptorHash({ ...stagedDescriptor, stagedHash }),
       stagedHash,
       validatedAt: importedAt,
     },
@@ -572,50 +576,73 @@ it.layer(TestLayer)("thread sync v2 interleaved stages", (it) => {
 });
 
 it.layer(TestLayer)("thread sync v2 relational validation", (it) => {
-  it.effect(
-    "rejects staged history with v1-invalid turn relations before swapping projections",
-    () =>
-      Effect.gen(function* () {
-        const eventStore = yield* OrchestrationEventStore;
-        const pipeline = yield* OrchestrationProjectionPipeline;
-        const sql = yield* SqlClient.SqlClient;
-        const invalidRecords = records.map((record) =>
-          record.kind === "message"
-            ? {
-                ...record,
-                value: { ...record.value, turnId: TurnId.make("missing-imported-turn") },
-              }
-            : record,
-        );
+  it.effect("keeps legacy child records while detaching references to missing turns", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const pipeline = yield* OrchestrationProjectionPipeline;
+      const sql = yield* SqlClient.SqlClient;
+      const orphanActivityId = EventId.make("activity-with-pruned-turn");
+      const orphanSummary = "legacy activity remains useful";
+      const invalidRecords: ReadonlyArray<ThreadSyncImportV2Record> = [
+        ...records,
+        {
+          ordinal: records.length,
+          kind: "activity",
+          portableId: EventId.make("portable-activity-with-pruned-turn"),
+          value: {
+            id: orphanActivityId,
+            tone: "info",
+            kind: "tool.completed",
+            summary: {
+              sha256: sha256(orphanSummary),
+              sizeBytes: Buffer.byteLength(orphanSummary, "utf8"),
+              fragmentCount: 1,
+            },
+            turnId: TurnId.make("missing-imported-turn"),
+            sequence: null,
+            createdAt: now,
+          },
+        },
+        {
+          ordinal: records.length + 1,
+          kind: "activity-summary",
+          activityId: orphanActivityId,
+          fragmentIndex: 0,
+          text: orphanSummary,
+        },
+      ];
+      const invalidDescriptor = { ...descriptor, recordCount: invalidRecords.length };
 
-        yield* appendOldState();
-        yield* pipeline.bootstrap;
-        yield* pipeline.projectEvent(yield* eventStore.append(startEvent()));
-        yield* pipeline.projectEvent(yield* eventStore.append(chunkEvent(0, invalidRecords)));
-        const invalidHash = threadSyncImportRecordsHash(invalidRecords);
-        const failure = yield* Effect.flip(
-          validateThreadSyncImportStage({
-            descriptor: { ...descriptor, stagedHash: invalidHash },
-            stagedHash: invalidHash,
-          }),
-        );
-        assert.match(String(failure), /references a missing turn/);
+      yield* appendOldState();
+      yield* pipeline.bootstrap;
+      yield* pipeline.projectEvent(yield* eventStore.append(startEvent(invalidDescriptor)));
+      yield* pipeline.projectEvent(yield* eventStore.append(chunkEvent(0, invalidRecords)));
+      const invalidHash = threadSyncImportRecordsHash(invalidRecords);
+      const prepared = yield* prepareThreadSyncImportStage({
+        descriptor: { ...invalidDescriptor, stagedHash: invalidHash },
+      });
+      assert.equal(prepared.visibleHistory.activities[0]?.turnId, null);
+      yield* validateThreadSyncImportStage({
+        descriptor: { ...invalidDescriptor, stagedHash: invalidHash },
+        stagedHash: invalidHash,
+      });
+      yield* pipeline.projectEvent(
+        yield* eventStore.append(validatedEvent(invalidHash, invalidDescriptor)),
+      );
+      yield* pipeline.projectEvent(
+        yield* eventStore.append(commitEvent(invalidHash, invalidDescriptor)),
+      );
 
-        const finalEvents = yield* sql<{ readonly count: number }>`
-          SELECT COUNT(*) AS count
-          FROM orchestration_events
-          WHERE event_type = 'thread.sync-imported'
-        `;
-        assert.equal(finalEvents[0]?.count, 0);
-        yield* pipeline.bootstrap;
-
-        const messages = yield* sql<{ readonly messageId: string }>`
-        SELECT message_id AS "messageId"
-        FROM projection_thread_messages
+      const activities = yield* sql<{
+        readonly activityId: string;
+        readonly turnId: string | null;
+      }>`
+        SELECT activity_id AS "activityId", turn_id AS "turnId"
+        FROM projection_thread_activities
         WHERE thread_id = ${threadId}
       `;
-        assert.deepEqual(messages, [{ messageId: "message-sync-v2-old" }]);
-      }),
+      assert.deepEqual(activities, [{ activityId: orphanActivityId, turnId: null }]);
+    }),
   );
 });
 

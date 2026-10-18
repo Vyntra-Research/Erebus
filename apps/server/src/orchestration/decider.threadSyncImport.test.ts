@@ -349,6 +349,7 @@ it.layer(NodeServices.layer)("thread sync import decider", (it) => {
         interactionMode: "plan",
         branch: "local-branch",
         worktreePath: "C:/work/local",
+        unsettledAt: importedAt,
         session: null,
         checkpoints: [],
       });

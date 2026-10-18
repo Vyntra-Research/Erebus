@@ -70,6 +70,10 @@ type StagedRecordRow = {
   readonly valueJson: string;
 };
 
+type StagedVisibleRecordRow = StagedRecordRow & {
+  readonly hasValidTurn: number;
+};
+
 function stageIntegrityError(detail: string): PersistenceSqlError {
   return new PersistenceSqlError({
     operation: "ThreadSyncImportProjection",
@@ -366,13 +370,27 @@ export const prepareThreadSyncImportStage = Effect.fn("prepareThreadSyncImportSt
       let messageCursor = descriptor.recordCount;
       let inspectedMessages = 0;
       while (inspectedMessages < 128 && messageBytes < MAX_VISIBLE_MESSAGE_BYTES) {
-        const rows = yield* sql<StagedRecordRow>`
-          SELECT ordinal, owner_id AS "ownerId", value_json AS "valueJson"
-          FROM thread_sync_import_records
-          WHERE stage_id = ${descriptor.stageId}
-            AND kind = 'message'
-            AND ordinal < ${messageCursor}
-          ORDER BY ordinal DESC
+        const rows = yield* sql<StagedVisibleRecordRow>`
+          SELECT
+            child.ordinal,
+            child.owner_id AS "ownerId",
+            child.value_json AS "valueJson",
+            CASE
+              WHEN json_extract(child.value_json, '$.value.turnId') IS NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1
+                FROM thread_sync_import_records AS turn_record
+                WHERE turn_record.stage_id = child.stage_id
+                  AND turn_record.kind = 'turn'
+                  AND turn_record.owner_id = json_extract(child.value_json, '$.value.turnId')
+              ) THEN 1
+              ELSE 0
+            END AS "hasValidTurn"
+          FROM thread_sync_import_records AS child
+          WHERE child.stage_id = ${descriptor.stageId}
+            AND child.kind = 'message'
+            AND child.ordinal < ${messageCursor}
+          ORDER BY child.ordinal DESC
           LIMIT ${HASH_PAGE_SIZE}
         `;
         if (rows.length === 0) break;
@@ -399,7 +417,7 @@ export const prepareThreadSyncImportStage = Effect.fn("prepareThreadSyncImportSt
             role: record.value.role,
             text,
             attachments: record.value.attachments,
-            turnId: record.value.turnId,
+            turnId: row.hasValidTurn === 1 ? record.value.turnId : null,
             streaming: false,
             createdAt: record.value.createdAt,
             updatedAt: record.value.updatedAt,
@@ -413,13 +431,27 @@ export const prepareThreadSyncImportStage = Effect.fn("prepareThreadSyncImportSt
       let planCursor = descriptor.recordCount;
       let inspectedPlans = 0;
       while (inspectedPlans < 200 && planBytes < MAX_VISIBLE_PLAN_BYTES) {
-        const rows = yield* sql<StagedRecordRow>`
-          SELECT ordinal, owner_id AS "ownerId", value_json AS "valueJson"
-          FROM thread_sync_import_records
-          WHERE stage_id = ${descriptor.stageId}
-            AND kind = 'plan'
-            AND ordinal < ${planCursor}
-          ORDER BY ordinal DESC
+        const rows = yield* sql<StagedVisibleRecordRow>`
+          SELECT
+            child.ordinal,
+            child.owner_id AS "ownerId",
+            child.value_json AS "valueJson",
+            CASE
+              WHEN json_extract(child.value_json, '$.value.turnId') IS NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1
+                FROM thread_sync_import_records AS turn_record
+                WHERE turn_record.stage_id = child.stage_id
+                  AND turn_record.kind = 'turn'
+                  AND turn_record.owner_id = json_extract(child.value_json, '$.value.turnId')
+              ) THEN 1
+              ELSE 0
+            END AS "hasValidTurn"
+          FROM thread_sync_import_records AS child
+          WHERE child.stage_id = ${descriptor.stageId}
+            AND child.kind = 'plan'
+            AND child.ordinal < ${planCursor}
+          ORDER BY child.ordinal DESC
           LIMIT ${HASH_PAGE_SIZE}
         `;
         if (rows.length === 0) break;
@@ -443,7 +475,7 @@ export const prepareThreadSyncImportStage = Effect.fn("prepareThreadSyncImportSt
           if (planMarkdown === null) continue;
           plansDescending.push({
             id: record.value.id,
-            turnId: record.value.turnId,
+            turnId: row.hasValidTurn === 1 ? record.value.turnId : null,
             planMarkdown,
             implementedAt: record.value.implementedAt,
             implementationThreadId: record.value.implementationThreadId,
@@ -459,13 +491,27 @@ export const prepareThreadSyncImportStage = Effect.fn("prepareThreadSyncImportSt
       let activityCursor = descriptor.recordCount;
       let inspectedActivities = 0;
       while (inspectedActivities < 500 && activityBytes < MAX_VISIBLE_ACTIVITY_BYTES) {
-        const rows = yield* sql<StagedRecordRow>`
-          SELECT ordinal, owner_id AS "ownerId", value_json AS "valueJson"
-          FROM thread_sync_import_records
-          WHERE stage_id = ${descriptor.stageId}
-            AND kind = 'activity'
-            AND ordinal < ${activityCursor}
-          ORDER BY ordinal DESC
+        const rows = yield* sql<StagedVisibleRecordRow>`
+          SELECT
+            child.ordinal,
+            child.owner_id AS "ownerId",
+            child.value_json AS "valueJson",
+            CASE
+              WHEN json_extract(child.value_json, '$.value.turnId') IS NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1
+                FROM thread_sync_import_records AS turn_record
+                WHERE turn_record.stage_id = child.stage_id
+                  AND turn_record.kind = 'turn'
+                  AND turn_record.owner_id = json_extract(child.value_json, '$.value.turnId')
+              ) THEN 1
+              ELSE 0
+            END AS "hasValidTurn"
+          FROM thread_sync_import_records AS child
+          WHERE child.stage_id = ${descriptor.stageId}
+            AND child.kind = 'activity'
+            AND child.ordinal < ${activityCursor}
+          ORDER BY child.ordinal DESC
           LIMIT ${HASH_PAGE_SIZE}
         `;
         if (rows.length === 0) break;
@@ -492,7 +538,7 @@ export const prepareThreadSyncImportStage = Effect.fn("prepareThreadSyncImportSt
             tone: record.value.tone,
             kind: record.value.kind,
             summary,
-            turnId: record.value.turnId,
+            turnId: row.hasValidTurn === 1 ? record.value.turnId : null,
             ...(record.value.sequence === null ? {} : { sequence: record.value.sequence }),
             createdAt: record.value.createdAt,
           });
@@ -731,24 +777,9 @@ export const validateThreadSyncImportStage = Effect.fn("validateThreadSyncImport
         }
       }
 
-      const missingTurnReferences = yield* sql<{ readonly count: number }>`
-        SELECT COUNT(*) AS count
-        FROM thread_sync_import_records AS child
-        LEFT JOIN thread_sync_import_records AS turn_record
-          ON turn_record.stage_id = child.stage_id
-          AND turn_record.kind = 'turn'
-          AND turn_record.owner_id = json_extract(child.value_json, '$.value.turnId')
-        WHERE child.stage_id = ${descriptor.stageId}
-          AND child.kind IN ('message', 'plan', 'activity')
-          AND json_extract(child.value_json, '$.value.turnId') IS NOT NULL
-          AND turn_record.owner_id IS NULL
-      `;
-      if ((missingTurnReferences[0]?.count ?? 0) !== 0) {
-        return yield* stageIntegrityError(
-          `stage '${descriptor.stageId}' references a missing turn`,
-        );
-      }
-
+      // Old stores can retain a message, plan, or activity after its turn is
+      // pruned. Commit keeps that record and detaches only the orphan child
+      // reference. Relations owned by a surviving turn remain strict.
       const invalidTurnReferences = yield* sql<{ readonly count: number }>`
         SELECT COUNT(*) AS count
         FROM thread_sync_import_records AS turn_record
@@ -1202,11 +1233,20 @@ export const applyThreadSyncImportProjection = Effect.fn("applyThreadSyncImportP
                   attachments_json, is_streaming, created_at, updated_at
                 )
                 SELECT
-                  owner_id,
-                  portable_id,
+                  metadata.owner_id,
+                  metadata.portable_id,
                   ${event.payload.threadId},
-                  json_extract(value_json, '$.value.turnId'),
-                  json_extract(value_json, '$.value.role'),
+                  CASE
+                    WHEN EXISTS (
+                      SELECT 1
+                      FROM thread_sync_import_records AS turn_record
+                      WHERE turn_record.stage_id = metadata.stage_id
+                        AND turn_record.kind = 'turn'
+                        AND turn_record.owner_id = json_extract(metadata.value_json, '$.value.turnId')
+                    ) THEN json_extract(metadata.value_json, '$.value.turnId')
+                    ELSE NULL
+                  END,
+                  json_extract(metadata.value_json, '$.value.role'),
                   COALESCE((
                     SELECT GROUP_CONCAT(fragment_text, '')
                     FROM (
@@ -1218,14 +1258,14 @@ export const applyThreadSyncImportProjection = Effect.fn("applyThreadSyncImportP
                       ORDER BY fragment_index ASC
                     )
                   ), ''),
-                  json_extract(value_json, '$.value.attachments'),
+                  json_extract(metadata.value_json, '$.value.attachments'),
                   0,
-                  json_extract(value_json, '$.value.createdAt'),
-                  json_extract(value_json, '$.value.updatedAt')
-                FROM thread_sync_import_records
-                WHERE stage_id = ${stageId}
-                  AND kind = 'message'
-                  AND ordinal = ${metadataRow.ordinal}
+                  json_extract(metadata.value_json, '$.value.createdAt'),
+                  json_extract(metadata.value_json, '$.value.updatedAt')
+                FROM thread_sync_import_records AS metadata
+                WHERE metadata.stage_id = ${stageId}
+                  AND metadata.kind = 'message'
+                  AND metadata.ordinal = ${metadataRow.ordinal}
               `;
               lastMessageOrdinal = metadataRow.ordinal;
             }
@@ -1250,10 +1290,19 @@ export const applyThreadSyncImportProjection = Effect.fn("applyThreadSyncImportP
                   implemented_at, implementation_thread_id, created_at, updated_at
                 )
                 SELECT
-                  owner_id,
-                  portable_id,
+                  metadata.owner_id,
+                  metadata.portable_id,
                   ${event.payload.threadId},
-                  json_extract(value_json, '$.value.turnId'),
+                  CASE
+                    WHEN EXISTS (
+                      SELECT 1
+                      FROM thread_sync_import_records AS turn_record
+                      WHERE turn_record.stage_id = metadata.stage_id
+                        AND turn_record.kind = 'turn'
+                        AND turn_record.owner_id = json_extract(metadata.value_json, '$.value.turnId')
+                    ) THEN json_extract(metadata.value_json, '$.value.turnId')
+                    ELSE NULL
+                  END,
                   COALESCE((
                     SELECT GROUP_CONCAT(fragment_text, '')
                     FROM (
@@ -1265,14 +1314,14 @@ export const applyThreadSyncImportProjection = Effect.fn("applyThreadSyncImportP
                       ORDER BY fragment_index ASC
                     )
                   ), ''),
-                  json_extract(value_json, '$.value.implementedAt'),
-                  json_extract(value_json, '$.value.implementationThreadId'),
-                  json_extract(value_json, '$.value.createdAt'),
-                  json_extract(value_json, '$.value.updatedAt')
-                FROM thread_sync_import_records
-                WHERE stage_id = ${stageId}
-                  AND kind = 'plan'
-                  AND ordinal = ${metadataRow.ordinal}
+                  json_extract(metadata.value_json, '$.value.implementedAt'),
+                  json_extract(metadata.value_json, '$.value.implementationThreadId'),
+                  json_extract(metadata.value_json, '$.value.createdAt'),
+                  json_extract(metadata.value_json, '$.value.updatedAt')
+                FROM thread_sync_import_records AS metadata
+                WHERE metadata.stage_id = ${stageId}
+                  AND metadata.kind = 'plan'
+                  AND metadata.ordinal = ${metadataRow.ordinal}
               `;
               lastPlanOrdinal = metadataRow.ordinal;
             }
@@ -1297,12 +1346,21 @@ export const applyThreadSyncImportProjection = Effect.fn("applyThreadSyncImportP
                   summary, payload_json, sequence, created_at
                 )
                 SELECT
-                  owner_id,
-                  portable_id,
+                  metadata.owner_id,
+                  metadata.portable_id,
                   ${event.payload.threadId},
-                  json_extract(value_json, '$.value.turnId'),
-                  json_extract(value_json, '$.value.tone'),
-                  json_extract(value_json, '$.value.kind'),
+                  CASE
+                    WHEN EXISTS (
+                      SELECT 1
+                      FROM thread_sync_import_records AS turn_record
+                      WHERE turn_record.stage_id = metadata.stage_id
+                        AND turn_record.kind = 'turn'
+                        AND turn_record.owner_id = json_extract(metadata.value_json, '$.value.turnId')
+                    ) THEN json_extract(metadata.value_json, '$.value.turnId')
+                    ELSE NULL
+                  END,
+                  json_extract(metadata.value_json, '$.value.tone'),
+                  json_extract(metadata.value_json, '$.value.kind'),
                   COALESCE((
                     SELECT GROUP_CONCAT(fragment_text, '')
                     FROM (
@@ -1315,12 +1373,12 @@ export const applyThreadSyncImportProjection = Effect.fn("applyThreadSyncImportP
                     )
                   ), ''),
                   'null',
-                  json_extract(value_json, '$.value.sequence'),
-                  json_extract(value_json, '$.value.createdAt')
-                FROM thread_sync_import_records
-                WHERE stage_id = ${stageId}
-                  AND kind = 'activity'
-                  AND ordinal = ${metadataRow.ordinal}
+                  json_extract(metadata.value_json, '$.value.sequence'),
+                  json_extract(metadata.value_json, '$.value.createdAt')
+                FROM thread_sync_import_records AS metadata
+                WHERE metadata.stage_id = ${stageId}
+                  AND metadata.kind = 'activity'
+                  AND metadata.ordinal = ${metadataRow.ordinal}
               `;
               lastActivityOrdinal = metadataRow.ordinal;
             }

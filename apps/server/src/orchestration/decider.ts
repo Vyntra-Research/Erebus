@@ -693,7 +693,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         archivedAt: descriptor.header.lifecycle.archivedAt,
         settledOverride: descriptor.header.lifecycle.settledOverride,
         settledAt: descriptor.header.lifecycle.settledAt,
-        unsettledAt: existing?.unsettledAt ?? null,
+        unsettledAt:
+          descriptor.header.lifecycle.archivedAt === null &&
+          descriptor.header.lifecycle.deletedAt === null &&
+          descriptor.header.lifecycle.settledAt === null &&
+          descriptor.header.lifecycle.settledOverride !== "settled"
+            ? command.importedAt
+            : (existing?.unsettledAt ?? null),
         snoozedUntil: existing?.snoozedUntil ?? null,
         snoozedAt: existing?.snoozedAt ?? null,
         pinnedAt: existing?.pinnedAt ?? null,
@@ -1071,7 +1077,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           archivedAt: imported.history.archivedAt,
           settledOverride: imported.history.settledOverride,
           settledAt: imported.history.settledAt,
-          unsettledAt: existing?.unsettledAt ?? null,
+          unsettledAt:
+            imported.history.archivedAt === null &&
+            imported.history.deletedAt === null &&
+            imported.history.settledAt === null &&
+            imported.history.settledOverride !== "settled"
+              ? command.importedAt
+              : (existing?.unsettledAt ?? null),
           snoozedUntil: existing?.snoozedUntil ?? null,
           snoozedAt: existing?.snoozedAt ?? null,
           pinnedAt: existing?.pinnedAt ?? null,

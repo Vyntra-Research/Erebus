@@ -16,7 +16,7 @@ import {
   analyzeThreadSyncState,
   buildThreadSyncImportReferenceMaps,
   deriveKeepBothThreadIds,
-  isActivePrimaryThreadForSync,
+  isPortablePrimaryThreadForSync,
   portableRepositoryIdentity,
   pruneDanglingPortableCoagents,
   reconcileExportedThreadBindings,
@@ -144,29 +144,38 @@ describe("thread sync eligibility", () => {
   };
 
   it("includes only visible primary threads", () => {
-    expect(isActivePrimaryThreadForSync(activePrimary)).toBe(true);
+    expect(isPortablePrimaryThreadForSync(activePrimary)).toBe(true);
     expect(
-      isActivePrimaryThreadForSync({
+      isPortablePrimaryThreadForSync({
         ...activePrimary,
         coagent: { status: "ready" },
       }),
     ).toBe(false);
   });
 
-  it.each(["archivedAt", "settledAt", "deletedAt"] as const)(
-    "excludes a thread with %s set",
-    (field) => {
-      expect(
-        isActivePrimaryThreadForSync({
-          ...activePrimary,
-          lifecycle: {
-            ...activePrimary.lifecycle,
-            [field]: "2026-10-17T23:30:00.000Z",
-          },
-        }),
-      ).toBe(false);
-    },
-  );
+  it.each(["archivedAt", "deletedAt"] as const)("excludes a thread with %s set", (field) => {
+    expect(
+      isPortablePrimaryThreadForSync({
+        ...activePrimary,
+        lifecycle: {
+          ...activePrimary.lifecycle,
+          [field]: "2026-10-17T23:30:00.000Z",
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps settled primary threads in portable history", () => {
+    expect(
+      isPortablePrimaryThreadForSync({
+        ...activePrimary,
+        lifecycle: {
+          ...activePrimary.lifecycle,
+          settledAt: "2026-10-17T23:30:00.000Z",
+        },
+      }),
+    ).toBe(true);
+  });
 
   it("removes retired and replaced threads while preserving unrelated remote threads", () => {
     const retired = ThreadId.make("retired");
@@ -1330,6 +1339,24 @@ describe("pruneDanglingPortableCoagents", () => {
 });
 
 describe("reconcileExportedThreadBindings", () => {
+  it("keeps the portable project identity when an imported thread stays standalone locally", () => {
+    const localThreadId = "local-standalone" as ThreadId;
+    const existing = {
+      syncThreadId: "sync-standalone" as ThreadId,
+      localThreadId,
+      syncProjectId: "sync-project" as ThreadSyncProjectId,
+      baseRevision: threadSyncRevision({ remote: true }),
+    };
+
+    expect(
+      reconcileExportedThreadBindings({
+        existing: [existing],
+        threads: [{ id: localThreadId, projectId: null }],
+        syncProjectByLocal: new Map(),
+      }),
+    ).toEqual([existing]);
+  });
+
   it("recovers the write-ahead binding map on either side of an import crash", () => {
     const projectId = "local-project" as ProjectId;
     const syncProjectId = "sync-project" as ThreadSyncProjectId;
