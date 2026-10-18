@@ -71,6 +71,7 @@ import {
   type ProjectionCheckpointRefPage,
   type ProjectionThreadSyncActivityCursor,
   type ProjectionThreadSyncEntityCursor,
+  type ProjectionThreadSyncImportWatermark,
   type ProjectionThreadSyncTurnCursor,
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
@@ -150,6 +151,11 @@ const ThreadSyncActiveThreadRowSchema = Schema.Struct({ threadId: ThreadId });
 const ThreadSyncWatermarkRowSchema = Schema.Struct({
   threadId: ThreadId,
   threadSequence: Schema.Number,
+});
+const ThreadSyncImportWatermarkRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  threadSequence: Schema.Number,
+  sourceRevision: Schema.String,
 });
 const ThreadSyncLatestTurnIdRowSchema = Schema.Struct({
   threadId: ThreadId,
@@ -1135,6 +1141,45 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       ORDER BY threads.thread_id ASC
     `,
   });
+
+  const listThreadSyncImportWatermarks: NonNullable<
+    ProjectionSnapshotQueryShape["listThreadSyncImportWatermarks"]
+  > = () => {
+    const readWatermarks = SqlSchema.findAll({
+      Request: Schema.Void,
+      Result: ThreadSyncImportWatermarkRowSchema,
+      execute: () => sql`
+        WITH latest_imports AS (
+          SELECT stream_id, MAX(sequence) AS sequence
+          FROM orchestration_events
+          WHERE aggregate_kind = 'thread'
+            AND event_type = 'thread.sync-imported'
+          GROUP BY stream_id
+        )
+        SELECT
+          events.stream_id AS "threadId",
+          events.sequence AS "threadSequence",
+          json_extract(events.payload_json, '$.sourceRevision') AS "sourceRevision"
+        FROM latest_imports
+        INNER JOIN orchestration_events AS events
+          ON events.stream_id = latest_imports.stream_id
+          AND events.sequence = latest_imports.sequence
+        ORDER BY events.stream_id ASC
+      `,
+    });
+    return readWatermarks(undefined).pipe(
+      Effect.map((rows): ReadonlyArray<ProjectionThreadSyncImportWatermark> => rows),
+      Effect.mapError((error) =>
+        Schema.isSchemaError(error)
+          ? toPersistenceDecodeError(
+              "ProjectionSnapshotQuery.listThreadSyncImportWatermarks:decode",
+            )(error)
+          : toPersistenceSqlError("ProjectionSnapshotQuery.listThreadSyncImportWatermarks:query")(
+              error,
+            ),
+      ),
+    );
+  };
 
   const readProjectionCounts = SqlSchema.findOne({
     Request: Schema.Void,
@@ -5330,6 +5375,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getThreadProposedPlanById,
     getFirstUserMessageByThreadId,
     getThreadSyncExportIndex,
+    listThreadSyncImportWatermarks,
     getThreadSyncV1HydrationStats,
     listThreadSyncExportTurnsPage,
     listThreadSyncExportMessagesPage,

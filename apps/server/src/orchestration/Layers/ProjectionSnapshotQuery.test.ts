@@ -3417,4 +3417,72 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
       assert.equal(hydrationStats.estimatedBytes > 250_000, true);
     }),
   );
+
+  it.effect("returns the latest durable sync import watermark for each thread", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const threadId = ThreadId.make("thread-sync-import-watermark");
+
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        )
+        VALUES
+          (
+            ${EventId.make("event-sync-import-watermark-1")},
+            ${"thread"},
+            ${threadId},
+            ${0},
+            ${"thread.sync-imported"},
+            ${"2026-10-18T00:00:00.000Z"},
+            ${CommandId.make("command-sync-import-watermark-1")},
+            ${null},
+            ${null},
+            ${"server"},
+            ${'{"sourceRevision":"revision-1"}'},
+            ${"{}"}
+          ),
+          (
+            ${EventId.make("event-sync-import-watermark-2")},
+            ${"thread"},
+            ${threadId},
+            ${1},
+            ${"thread.sync-imported"},
+            ${"2026-10-18T00:00:01.000Z"},
+            ${CommandId.make("command-sync-import-watermark-2")},
+            ${null},
+            ${null},
+            ${"server"},
+            ${'{"sourceRevision":"revision-2"}'},
+            ${"{}"}
+          )
+      `;
+
+      const expectedRows = yield* sql<{ readonly sequence: number }>`
+        SELECT sequence AS "sequence"
+        FROM orchestration_events
+        WHERE event_id = ${EventId.make("event-sync-import-watermark-2")}
+      `;
+      const watermarks = yield* snapshotQuery.listThreadSyncImportWatermarks!();
+      const watermark = watermarks.find((candidate) => candidate.threadId === threadId);
+
+      assert.deepEqual(watermark, {
+        threadId,
+        threadSequence: expectedRows[0]?.sequence,
+        sourceRevision: "revision-2",
+      });
+    }),
+  );
 });

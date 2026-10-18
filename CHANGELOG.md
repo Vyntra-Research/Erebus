@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.4 - 2026-10-18
+
+### Fixed
+
+- Finish Git pull and push operations after the desktop reconnects instead of leaving a partial sync.
+- Recover an imported thread as unchanged when its durable import completed but the final local sync state did not save.
+
 ## 0.9.3 - 2026-10-18
 
 ### Fixed

@@ -7,8 +7,11 @@ import {
   type OrchestrationEvent,
   type ThreadSyncProjectId,
 } from "@t3tools/contracts";
+import { describe, expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
-import { describe, expect, it } from "vite-plus/test";
 
 import { canonicalThreadSyncPlanId, threadSyncRevision } from "./ThreadSyncDocuments.ts";
 import {
@@ -17,11 +20,13 @@ import {
   buildThreadSyncImportReferenceMaps,
   deriveKeepBothThreadIds,
   isPortablePrimaryThreadForSync,
+  keepThreadSyncOperationAlive,
   portableRepositoryIdentity,
   pruneDanglingPortableCoagents,
   reconcileExportedThreadBindings,
   remapImportedSnapshot,
   replayThreadSyncBindingEvents,
+  resolveThreadSyncV2LocalRevision,
   resolveRetiredSyncThreadIds,
   resolveImportedCoagentParent,
   sanitizeThreadSyncRemoteUrl,
@@ -1453,4 +1458,78 @@ describe("deriveKeepBothThreadIds", () => {
     ).not.toEqual(first);
     expect(first.preservedSyncThreadId).not.toBe(first.clonedThreadId);
   });
+});
+
+describe("interrupted v2 sync recovery", () => {
+  it("treats an untouched durable import as synchronized after the caller disconnects", () => {
+    const baseRevision = threadSyncRevision({ version: "remote" });
+    const descriptor = {
+      localThreadId: "local-thread" as ThreadId,
+      sourceKeyHash: "local-source-key",
+      threadSequence: 5028,
+    };
+
+    expect(
+      resolveThreadSyncV2LocalRevision({
+        binding: {
+          syncThreadId: "sync-thread" as ThreadId,
+          localThreadId: descriptor.localThreadId,
+          syncProjectId: "sync-project" as ThreadSyncProjectId,
+          baseRevision,
+        },
+        descriptor,
+        remote: undefined,
+        importWatermark: {
+          threadId: descriptor.localThreadId,
+          threadSequence: 5028,
+          sourceRevision: baseRevision,
+        },
+      }),
+    ).toBe(baseRevision);
+  });
+
+  it("does not hide a local event after the durable import", () => {
+    const baseRevision = threadSyncRevision({ version: "remote" });
+    const descriptor = {
+      localThreadId: "local-thread" as ThreadId,
+      sourceKeyHash: "changed-source-key",
+      threadSequence: 5029,
+    };
+    const localRevision = resolveThreadSyncV2LocalRevision({
+      binding: {
+        syncThreadId: "sync-thread" as ThreadId,
+        localThreadId: descriptor.localThreadId,
+        syncProjectId: "sync-project" as ThreadSyncProjectId,
+        baseRevision,
+      },
+      descriptor,
+      remote: undefined,
+      importWatermark: {
+        threadId: descriptor.localThreadId,
+        threadSequence: 5028,
+        sourceRevision: baseRevision,
+      },
+    });
+
+    expect(localRevision).not.toBe(baseRevision);
+  });
+
+  it.effect("finishes a durable sync mutation after its caller is interrupted", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const finished = yield* Deferred.make<void>();
+      const caller = yield* keepThreadSyncOperationAlive(
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.andThen(Deferred.succeed(finished, undefined)),
+        ),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
+
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(caller);
+      yield* Deferred.succeed(release, undefined);
+      yield* Deferred.await(finished);
+    }),
+  );
 });
