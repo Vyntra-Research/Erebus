@@ -127,6 +127,7 @@ import {
   type ThreadSyncV2RepositoryIndex,
   type ThreadSyncV2RepositorySource,
   type ThreadSyncV2ThreadEntry,
+  type ThreadSyncV2ThreadManifest,
   type ThreadSyncV2ThreadSource,
 } from "./ThreadSyncRepositoryV2.ts";
 import {
@@ -166,6 +167,36 @@ const THREAD_SYNC_V1_MAX_THREAD_HYDRATION_BYTES = 8 * 1024 * 1024;
 const THREAD_SYNC_V1_MAX_HYDRATION_ROWS = 100_000;
 const THREAD_SYNC_V1_MAX_DOCUMENTS = 20_000;
 const THREAD_SYNC_V2_MAX_BLOB_COUNT = 8_192;
+
+interface ThreadSyncEligibilityCandidate {
+  readonly coagent: unknown | null;
+  readonly lifecycle: {
+    readonly archivedAt: string | null;
+    readonly settledAt: string | null;
+    readonly deletedAt: string | null;
+  };
+}
+
+/** Only visible primary threads belong in the portable Git history. */
+export function isActivePrimaryThreadForSync(thread: ThreadSyncEligibilityCandidate): boolean {
+  return (
+    thread.coagent === null &&
+    thread.lifecycle.archivedAt === null &&
+    thread.lifecycle.settledAt === null &&
+    thread.lifecycle.deletedAt === null
+  );
+}
+
+function activePrimaryRemoteThreads(
+  repository: ThreadSyncV2RepositoryIndex,
+): ReadonlyMap<ThreadId, ThreadSyncV2ThreadEntry> {
+  return new Map(
+    [...repository.threads].filter(([threadId]) => {
+      const manifest = repository.threadManifests.get(threadId);
+      return manifest !== undefined && isActivePrimaryThreadForSync(manifest.header);
+    }),
+  );
+}
 
 interface ThreadSyncAnalysisEntry {
   readonly syncThreadId: ThreadId;
@@ -243,6 +274,7 @@ function emptyThreadSyncV2RepositoryIndex(updatedAt: IsoDateTime): ThreadSyncV2R
     },
     projects: new Map(),
     threads: new Map(),
+    threadManifests: new Map(),
     blobs: new Map(),
   };
 }
@@ -1070,13 +1102,14 @@ function analyzeThreadSyncV2State(input: {
   readonly runState?: ThreadSyncStatus["state"];
   readonly lastError?: string | null;
 }): ThreadSyncV2Analysis {
+  const eligibleRemoteThreads = activePrimaryRemoteThreads(input.remote);
   const bindingsBySyncId = new Map(
     input.local.threadBindings.map((binding) => [binding.syncThreadId, binding] as const),
   );
   const localThreadsById = new Map(input.local.index.threads.map((thread) => [thread.id, thread]));
   const allIds = new Set<ThreadId>([
     ...input.local.descriptors.keys(),
-    ...input.remote.threads.keys(),
+    ...eligibleRemoteThreads.keys(),
   ]);
   const entries: ThreadSyncV2AnalysisEntry[] = [];
   for (const syncThreadId of [...allIds].toSorted()) {
@@ -1086,7 +1119,7 @@ function analyzeThreadSyncV2State(input: {
       localDescriptor === undefined || binding === undefined
         ? null
         : (localThreadsById.get(binding.localThreadId) ?? null);
-    const remote = input.remote.threads.get(syncThreadId) ?? null;
+    const remote = eligibleRemoteThreads.get(syncThreadId) ?? null;
     const baseRevision = binding?.baseRevision ?? null;
     const localRevision = input.local.revisions.get(syncThreadId) ?? null;
     const remoteRevision = remote?.revision ?? null;
@@ -1603,9 +1636,18 @@ export const make = Effect.gen(function* () {
         "The projection query does not support bounded v2 export.",
       );
     }
-    const index = yield* getIndex().pipe(
+    const unfilteredIndex = yield* getIndex().pipe(
       Effect.mapError((cause) => syncError("export", "io-failed", String(cause))),
     );
+    const eligibleThreads = unfilteredIndex.threads.filter(isActivePrimaryThreadForSync);
+    const eligibleProjectIds = new Set(eligibleThreads.map((thread) => thread.projectId));
+    const index: ProjectionSnapshotQuery.ProjectionThreadSyncExportIndex = {
+      ...unfilteredIndex,
+      projects: unfilteredIndex.projects.filter(
+        (project) => project.deletedAt === null && eligibleProjectIds.has(project.id),
+      ),
+      threads: eligibleThreads,
+    };
 
     const describeProjects = (bindings: ReadonlyArray<ThreadSyncLocalProjectBinding>) => {
       const byLocal = new Map(bindings.map((binding) => [binding.projectId, binding] as const));
@@ -1909,9 +1951,16 @@ export const make = Effect.gen(function* () {
       readonly remote: ThreadSyncRepositoryDocuments;
       readonly updatedAt: IsoDateTime;
     }) {
+      const activeThreads = [...input.remote.threads.values()].filter(isActivePrimaryThreadForSync);
+      const activeProjectIds = new Set(activeThreads.map((thread) => thread.syncProjectId));
       const source: ThreadSyncV2RepositorySource<ThreadSyncError> = {
-        projects: input.remote.projects,
-        threads: [...input.remote.threads.values()].map(threadSyncV2SourceFromV1Snapshot),
+        projects: new Map(
+          [...input.remote.projects].filter(
+            ([syncProjectId, project]) =>
+              project.deletedAt === null && activeProjectIds.has(syncProjectId),
+          ),
+        ),
+        threads: activeThreads.map(threadSyncV2SourceFromV1Snapshot),
         blobs: [...input.remote.blobs.entries()].map(([sha256, bytes]) => ({
           sha256,
           sizeBytes: bytes.byteLength,
@@ -1925,8 +1974,11 @@ export const make = Effect.gen(function* () {
       });
       const remoteV2: ThreadSyncV2RepositoryIndex = {
         manifest: written.manifest,
-        projects: new Map(input.remote.projects),
+        projects: new Map(source.projects),
         threads: new Map(written.manifest.threads.map((entry) => [entry.threadId, entry])),
+        threadManifests: new Map(
+          [...written.threadResults].map(([threadId, result]) => [threadId, result.manifest]),
+        ),
         blobs: new Map(written.manifest.blobs.map((entry) => [entry.sha256, entry])),
       };
 
@@ -2961,7 +3013,11 @@ export const make = Effect.gen(function* () {
         : yield* Effect.gen(function* () {
             const v2 = yield* readThreadSyncV2RepositoryIndex(checkedOut.mirrorPath);
             if (v2 !== null) {
-              return { projects: v2.projects, threadCount: v2.threads.size, v2 };
+              return {
+                projects: v2.projects,
+                threadCount: activePrimaryRemoteThreads(v2).size,
+                v2,
+              };
             }
             const v1 = yield* provideIo(readThreadSyncRepositoryIndex(checkedOut.mirrorPath));
             return { ...v1, v2: null };
@@ -3732,7 +3788,16 @@ export const make = Effect.gen(function* () {
       }),
     );
     const local = yield* exportLocalV2(cachedResolvedState, input.remote, localThreadIdsToPush);
-    const finalProjects = new Map(input.remote.projects);
+    const eligibleRemoteThreads = activePrimaryRemoteThreads(input.remote);
+    const retainedProjectIds = new Set(
+      [...eligibleRemoteThreads.values()].map((entry) => entry.syncProjectId),
+    );
+    const finalProjects = new Map(
+      [...input.remote.projects].filter(
+        ([syncProjectId, project]) =>
+          project.deletedAt === null && retainedProjectIds.has(syncProjectId),
+      ),
+    );
     for (const [id, project] of local.projects) finalProjects.set(id, project);
 
     for (const [sha256, source] of local.blobs) {
@@ -3756,7 +3821,7 @@ export const make = Effect.gen(function* () {
       threads: local.sources.values(),
       blobs: local.blobs.values(),
       previousThreads: input.remote.threads.values(),
-      retainedThreads: [...input.remote.threads.values()].filter(
+      retainedThreads: [...eligibleRemoteThreads.values()].filter(
         (entry) => !local.sources.has(entry.threadId),
       ),
       retainedBlobs: [...input.remote.blobs.values()].filter(
@@ -3805,10 +3870,25 @@ export const make = Effect.gen(function* () {
     } else if (!sameRepositoryContents(written.manifest) && source.updatedAt !== input.now) {
       written = yield* rewriteRepository(input.now);
     }
+    const writtenThreadManifests = new Map<ThreadId, ThreadSyncV2ThreadManifest>();
+    for (const entry of written.manifest.threads) {
+      const threadManifest =
+        written.threadResults.get(entry.threadId)?.manifest ??
+        input.remote.threadManifests.get(entry.threadId);
+      if (threadManifest === undefined) {
+        return yield* syncError(
+          "push",
+          "integrity-failed",
+          `The written thread '${entry.threadId}' has no verified manifest.`,
+        );
+      }
+      writtenThreadManifests.set(entry.threadId, threadManifest);
+    }
     const writtenV2: ThreadSyncV2RepositoryIndex = {
       manifest: written.manifest,
       projects: finalProjects,
       threads: new Map(written.manifest.threads.map((entry) => [entry.threadId, entry])),
+      threadManifests: writtenThreadManifests,
       blobs: new Map(written.manifest.blobs.map((entry) => [entry.sha256, entry])),
     };
     const noRemoteMutation =

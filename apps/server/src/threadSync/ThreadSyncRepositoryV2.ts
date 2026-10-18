@@ -1917,6 +1917,7 @@ export interface ThreadSyncV2RepositoryIndex {
   readonly manifest: ThreadSyncV2RepositoryManifest;
   readonly projects: ReadonlyMap<ThreadSyncProjectId, ThreadSyncProjectSnapshot>;
   readonly threads: ReadonlyMap<ThreadId, ThreadSyncV2ThreadEntry>;
+  readonly threadManifests: ReadonlyMap<ThreadId, ThreadSyncV2ThreadManifest>;
   readonly blobs: ReadonlyMap<string, ThreadSyncV2BlobEntry>;
 }
 
@@ -2105,6 +2106,7 @@ export function readThreadSyncV2RepositoryIndex(
     }
 
     const threads = new Map<ThreadId, ThreadSyncV2ThreadEntry>();
+    const threadManifests = new Map<ThreadId, ThreadSyncV2ThreadManifest>();
     const threadManifestPaths = new Set<string>();
     for (const entry of manifest.threads) {
       if (threads.has(entry.threadId) || threadManifestPaths.has(entry.manifestPath)) {
@@ -2121,10 +2123,13 @@ export function readThreadSyncV2RepositoryIndex(
           ),
         );
       }
-      yield* effectIo("pull", "Could not validate a v2 thread manifest", () =>
-        readThreadManifestEntry({ mirrorPath, entry }),
+      const threadManifest = yield* effectIo(
+        "pull",
+        "Could not validate a v2 thread manifest",
+        () => readThreadManifestEntry({ mirrorPath, entry }),
       );
       threads.set(entry.threadId, entry);
+      threadManifests.set(entry.threadId, threadManifest);
       threadManifestPaths.add(entry.manifestPath);
     }
 
@@ -2143,7 +2148,7 @@ export function readThreadSyncV2RepositoryIndex(
       totalBlobBytes += blob.sizeBytes;
       blobEntries.set(blob.sha256, blob);
     }
-    return { manifest, projects, threads, blobs: blobEntries };
+    return { manifest, projects, threads, threadManifests, blobs: blobEntries };
   });
 }
 

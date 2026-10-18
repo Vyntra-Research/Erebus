@@ -15,6 +15,7 @@ import {
   analyzeThreadSyncState,
   buildThreadSyncImportReferenceMaps,
   deriveKeepBothThreadIds,
+  isActivePrimaryThreadForSync,
   portableRepositoryIdentity,
   pruneDanglingPortableCoagents,
   reconcileExportedThreadBindings,
@@ -127,6 +128,42 @@ function makeLocal(input: {
     threadBindings: state.threadBindings,
   };
 }
+
+describe("thread sync eligibility", () => {
+  const activePrimary = {
+    coagent: null,
+    lifecycle: {
+      archivedAt: null,
+      settledAt: null,
+      deletedAt: null,
+    },
+  };
+
+  it("includes only visible primary threads", () => {
+    expect(isActivePrimaryThreadForSync(activePrimary)).toBe(true);
+    expect(
+      isActivePrimaryThreadForSync({
+        ...activePrimary,
+        coagent: { status: "ready" },
+      }),
+    ).toBe(false);
+  });
+
+  it.each(["archivedAt", "settledAt", "deletedAt"] as const)(
+    "excludes a thread with %s set",
+    (field) => {
+      expect(
+        isActivePrimaryThreadForSync({
+          ...activePrimary,
+          lifecycle: {
+            ...activePrimary.lifecycle,
+            [field]: "2026-10-17T23:30:00.000Z",
+          },
+        }),
+      ).toBe(false);
+    },
+  );
+});
 
 describe("ThreadSyncService state analysis", () => {
   it("treats different first-sync copies as a conflict", () => {

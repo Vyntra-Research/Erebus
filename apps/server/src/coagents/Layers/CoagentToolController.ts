@@ -521,17 +521,20 @@ const make = Effect.gen(function* () {
                 "A running co-agent cannot be released. Interrupt it and wait for settlement first.",
               );
             }
-            yield* engine.dispatch({
-              type: "thread.delete",
-              commandId: CommandId.make(`coagent-release:${uuid()}`),
-              threadId: target.id,
-            });
-            yield* registry.upsert({
+            const releasedLink = {
               ...link,
               status: "released",
               error: null,
               updatedAt: yield* nowIso,
-            });
+            } as const;
+            yield* registry.upsert(releasedLink);
+            yield* engine
+              .dispatch({
+                type: "thread.delete",
+                commandId: CommandId.make(`coagent-release:${uuid()}`),
+                threadId: target.id,
+              })
+              .pipe(Effect.onError(() => Effect.ignore(registry.upsert(link))));
             return response({
               accepted: true,
               status: "released",
