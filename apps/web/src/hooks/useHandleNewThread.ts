@@ -11,6 +11,7 @@ import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
   type DraftId,
+  type DraftProjectRef,
   type DraftThreadEnvMode,
   type DraftThreadState,
   useComposerDraftStore,
@@ -67,7 +68,7 @@ export function useNewThreadHandler() {
 
   return useCallback(
     (
-      projectRef: ScopedProjectRef,
+      projectRef: DraftProjectRef,
       options?: {
         branch?: string | null;
         worktreePath?: string | null;
@@ -179,7 +180,9 @@ export function useNewThreadHandler() {
       };
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
-        : scopedProjectKey(projectRef);
+        : projectRef.projectId === null
+          ? `standalone:${projectRef.environmentId}`
+          : scopedProjectKey(projectRef as ScopedProjectRef);
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;

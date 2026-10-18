@@ -167,7 +167,7 @@ const ProjectionThreadSearchRequest = Schema.Struct({
 });
 const ProjectionThreadSearchRow = Schema.Struct({
   threadId: ThreadId,
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
   source: OrchestrationThreadSearchSource,
   matchText: Schema.String,
   messageCreatedAt: Schema.NullOr(IsoDateTime),
@@ -841,12 +841,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           FROM projection_thread_proposed_plans AS plans
           INNER JOIN projection_threads AS threads
             ON threads.thread_id = plans.thread_id
-          INNER JOIN projection_projects AS projects
+          LEFT JOIN projection_projects AS projects
             ON projects.project_id = threads.project_id
           WHERE plans.implemented_at IS NULL
             AND threads.archived_at IS NULL
             AND threads.deleted_at IS NULL
-            AND projects.deleted_at IS NULL
+            AND (threads.project_id IS NULL OR projects.deleted_at IS NULL)
         )
         SELECT
           plans.plan_id AS "planId",
@@ -1180,11 +1180,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           FROM projection_thread_messages AS messages
           INNER JOIN projection_threads AS threads
             ON threads.thread_id = messages.thread_id
-          INNER JOIN projection_projects AS projects
+          LEFT JOIN projection_projects AS projects
             ON projects.project_id = threads.project_id
           WHERE threads.deleted_at IS NULL
             AND threads.archived_at IS NULL
-            AND projects.deleted_at IS NULL
+            AND (threads.project_id IS NULL OR projects.deleted_at IS NULL)
             AND messages.is_streaming = 0
             AND (
               messages.role = 'user'

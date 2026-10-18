@@ -64,7 +64,7 @@ const ChunkFileName = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}\.ndjso
 export const ThreadSyncV2ThreadHeader = Schema.Struct({
   formatVersion: Schema.Literal(THREAD_SYNC_V2_FORMAT_VERSION),
   threadId: ThreadId,
-  syncProjectId: ThreadSyncProjectId,
+  syncProjectId: Schema.NullOr(ThreadSyncProjectId),
   title: TrimmedNonEmptyString,
   coagent: Schema.NullOr(ThreadSyncCoagent),
   latestTurnId: Schema.NullOr(TurnId),
@@ -198,7 +198,7 @@ export type ThreadSyncV2ProjectEntry = typeof ThreadSyncV2ProjectEntry.Type;
 
 export const ThreadSyncV2ThreadEntry = Schema.Struct({
   threadId: ThreadId,
-  syncProjectId: ThreadSyncProjectId,
+  syncProjectId: Schema.NullOr(ThreadSyncProjectId),
   title: TrimmedNonEmptyString,
   manifestPath: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}\/[a-f0-9]{64}\.json$/)),
   manifestSha256: Sha256,
@@ -1604,7 +1604,10 @@ export function writeThreadSyncV2Repository<E, R>(input: {
       projectIds.add(id);
     }
     for (const entry of retainedThreads) {
-      if (threadIds.has(entry.threadId) || !projectIds.has(entry.syncProjectId)) {
+      if (
+        threadIds.has(entry.threadId) ||
+        (entry.syncProjectId !== null && !projectIds.has(entry.syncProjectId))
+      ) {
         return yield* Effect.fail(
           repositoryV2Error(
             "push",
@@ -1616,7 +1619,10 @@ export function writeThreadSyncV2Repository<E, R>(input: {
       threadIds.add(entry.threadId);
     }
     for (const source of threads) {
-      if (threadIds.has(source.header.threadId) || !projectIds.has(source.header.syncProjectId)) {
+      if (
+        threadIds.has(source.header.threadId) ||
+        (source.header.syncProjectId !== null && !projectIds.has(source.header.syncProjectId))
+      ) {
         return yield* Effect.fail(
           repositoryV2Error(
             "push",
@@ -2114,7 +2120,7 @@ export function readThreadSyncV2RepositoryIndex(
           repositoryV2Error("pull", "integrity-failed", "The v2 thread index is duplicated."),
         );
       }
-      if (!projects.has(entry.syncProjectId)) {
+      if (entry.syncProjectId !== null && !projects.has(entry.syncProjectId)) {
         return yield* Effect.fail(
           repositoryV2Error(
             "pull",

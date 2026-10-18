@@ -151,7 +151,7 @@ export type ThreadSyncCoagent = typeof ThreadSyncCoagent.Type;
 export const ThreadSyncThreadSnapshot = Schema.Struct({
   formatVersion: Schema.Literal(THREAD_SYNC_FORMAT_VERSION),
   threadId: ThreadId,
-  syncProjectId: ThreadSyncProjectId,
+  syncProjectId: Schema.NullOr(ThreadSyncProjectId),
   title: TrimmedNonEmptyString,
   coagent: Schema.NullOr(ThreadSyncCoagent),
   latestTurn: Schema.NullOr(ThreadSyncTerminalTurn),
@@ -184,7 +184,7 @@ export type ThreadSyncRunState = typeof ThreadSyncRunState.Type;
 
 export const ThreadSyncConflict = Schema.Struct({
   threadId: ThreadId,
-  syncProjectId: ThreadSyncProjectId,
+  syncProjectId: Schema.NullOr(ThreadSyncProjectId),
   title: TrimmedNonEmptyString,
   baseRevision: Schema.NullOr(ThreadSyncRevision),
   localRevision: Schema.NullOr(ThreadSyncRevision),

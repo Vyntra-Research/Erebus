@@ -198,10 +198,22 @@ function activePrimaryRemoteThreads(
   );
 }
 
+export function selectRetainedRemoteThreads<T extends { readonly threadId: ThreadId }>(input: {
+  readonly remoteThreads: Iterable<T>;
+  readonly retiredSyncThreadIds: ReadonlySet<ThreadId>;
+  readonly replacedSyncThreadIds: ReadonlySet<ThreadId>;
+}): ReadonlyArray<T> {
+  return [...input.remoteThreads].filter(
+    (entry) =>
+      !input.retiredSyncThreadIds.has(entry.threadId) &&
+      !input.replacedSyncThreadIds.has(entry.threadId),
+  );
+}
+
 interface ThreadSyncAnalysisEntry {
   readonly syncThreadId: ThreadId;
   readonly localThreadId: ThreadId | null;
-  readonly syncProjectId: ThreadSyncProjectId;
+  readonly syncProjectId: ThreadSyncProjectId | null;
   readonly title: string;
   readonly decision: ThreadSyncThreeWayDecision;
   readonly baseRevision: ThreadSyncRevision | null;
@@ -237,6 +249,8 @@ interface ExportedThreadSyncV2State {
   readonly revisions: ReadonlyMap<ThreadId, ThreadSyncRevision>;
   readonly blobs: ReadonlyMap<string, ThreadSyncV2BlobSource<ThreadSyncError>>;
   readonly activeLocalThreadIds: ReadonlySet<ThreadId>;
+  /** Bound local threads that no longer belong in the active portable set. */
+  readonly retiredSyncThreadIds: ReadonlySet<ThreadId>;
   readonly projectBindings: ReadonlyArray<ThreadSyncLocalProjectBinding>;
   readonly threadBindings: ReadonlyArray<ThreadSyncLocalThreadBinding>;
 }
@@ -244,7 +258,7 @@ interface ExportedThreadSyncV2State {
 interface ThreadSyncV2AnalysisEntry {
   readonly syncThreadId: ThreadId;
   readonly localThreadId: ThreadId | null;
-  readonly syncProjectId: ThreadSyncProjectId;
+  readonly syncProjectId: ThreadSyncProjectId | null;
   readonly title: string;
   readonly decision: ThreadSyncThreeWayDecision;
   readonly baseRevision: ThreadSyncRevision | null;
@@ -378,7 +392,7 @@ export function threadSyncImportCommandId(
   selections: ReadonlyArray<{
     readonly snapshot: ThreadSyncThreadSnapshot;
     readonly targetThreadId: ThreadId;
-    readonly projectId: ProjectId;
+    readonly projectId: ProjectId | null;
     readonly mode: "create" | "replace";
     readonly expectedLocalUpdatedAt: IsoDateTime | null;
     readonly sourceRevision: ThreadSyncRevision;
@@ -450,13 +464,13 @@ function orderedPortableId(prefix: string, ordinal: number, seed: string): strin
 interface ThreadSyncImportReferenceSelection {
   readonly snapshot: ThreadSyncThreadSnapshot;
   readonly targetThreadId: ThreadId;
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectId | null;
   readonly sourceRevision: ThreadSyncRevision;
 }
 
 export interface ThreadSyncImportReferenceMaps {
   readonly threadIds: ReadonlyMap<ThreadId, ThreadId>;
-  readonly projectIds: ReadonlyMap<ThreadId, ProjectId>;
+  readonly projectIds: ReadonlyMap<ThreadId, ProjectId | null>;
   readonly planIds: ReadonlyMap<
     ThreadId,
     ReadonlyMap<OrchestrationProposedPlanId, OrchestrationProposedPlanId>
@@ -506,7 +520,7 @@ export function buildThreadSyncImportReferenceMaps(input: {
   readonly convergentSyncThreadIds: ReadonlySet<ThreadId>;
 }): ThreadSyncImportReferenceMaps {
   const threadIds = new Map<ThreadId, ThreadId>();
-  const projectIds = new Map<ThreadId, ProjectId>();
+  const projectIds = new Map<ThreadId, ProjectId | null>();
   const planIds = new Map<
     ThreadId,
     ReadonlyMap<OrchestrationProposedPlanId, OrchestrationProposedPlanId>
@@ -905,12 +919,12 @@ export function remapImportedSnapshot(input: {
 export function resolveImportedCoagentParent(input: {
   readonly snapshot: ThreadSyncThreadSnapshot;
   readonly targetThreadId: ThreadId;
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectId | null;
   readonly importedTargets: ReadonlyMap<
     ThreadId,
     {
       readonly threadId: ThreadId;
-      readonly projectId: ProjectId;
+      readonly projectId: ProjectId | null;
       readonly deletedAt: IsoDateTime | null;
     }
   >;
@@ -966,8 +980,9 @@ export function reconcileExportedThreadBindings(input: {
     input.existing.map((binding) => [binding.localThreadId, binding] as const),
   );
   return input.threads.flatMap((thread) => {
-    const syncProjectId = input.syncProjectByLocal.get(thread.projectId);
-    if (syncProjectId === undefined) return [];
+    const syncProjectId =
+      thread.projectId === null ? null : (input.syncProjectByLocal.get(thread.projectId) ?? null);
+    if (thread.projectId !== null && syncProjectId === null) return [];
     const current = currentBindingsByLocal.get(thread.id);
     return [
       {
@@ -989,9 +1004,10 @@ export function analyzeThreadSyncState(input: {
 }): ThreadSyncAnalysis {
   const localBySyncId = input.local.threads;
   const remoteBySyncId = input.remote.threads;
-  const bindingsBySyncId = new Map(
-    input.local.threadBindings.map((binding) => [binding.syncThreadId, binding] as const),
-  );
+  const bindingsBySyncId = new Map([
+    ...input.state.threadBindings.map((binding) => [binding.syncThreadId, binding] as const),
+    ...input.local.threadBindings.map((binding) => [binding.syncThreadId, binding] as const),
+  ]);
   const allIds = new Set<string>([...localBySyncId.keys(), ...remoteBySyncId.keys()]);
   const entries: ThreadSyncAnalysisEntry[] = [];
 
@@ -1128,7 +1144,11 @@ export function analyzeThreadSyncV2State(input: {
       localThreadId: binding?.localThreadId ?? null,
       syncProjectId: localDescriptor?.header.syncProjectId ?? remote!.syncProjectId,
       title: localDescriptor?.header.title ?? remote!.title,
-      decision: decideThreadSyncThreeWay({ baseRevision, localRevision, remoteRevision }),
+      decision: input.local.retiredSyncThreadIds.has(syncThreadId)
+        ? remoteRevision === null
+          ? "unchanged"
+          : "push"
+        : decideThreadSyncThreeWay({ baseRevision, localRevision, remoteRevision }),
       baseRevision,
       localRevision,
       remoteRevision,
@@ -1647,6 +1667,17 @@ export const make = Effect.gen(function* () {
     const unfilteredIndex = yield* getIndex().pipe(
       Effect.mapError((cause) => syncError("export", "io-failed", String(cause))),
     );
+    const localThreadsById = new Map(
+      unfilteredIndex.threads.map((thread) => [thread.id, thread] as const),
+    );
+    const retiredSyncThreadIds = new Set(
+      state.threadBindings.flatMap((binding) => {
+        const localThread = localThreadsById.get(binding.localThreadId);
+        return localThread !== undefined && !isActivePrimaryThreadForSync(localThread)
+          ? [binding.syncThreadId]
+          : [];
+      }),
+    );
     const eligibleThreads = unfilteredIndex.threads.filter(isActivePrimaryThreadForSync);
     const eligibleRemoteProjectIds = new Set(
       [...activePrimaryRemoteThreads(remote).values()].map((thread) => thread.syncProjectId),
@@ -1744,7 +1775,8 @@ export const make = Effect.gen(function* () {
     yield* Effect.try({
       try: () => {
         for (const local of index.threads) {
-          const syncProjectId = described.syncProjectByLocal.get(local.projectId);
+          const syncProjectId =
+            local.projectId === null ? null : described.syncProjectByLocal.get(local.projectId);
           const syncThreadId = syncThreadByLocal.get(local.id);
           if (syncProjectId === undefined || syncThreadId === undefined) continue;
           const header = projectionThreadSyncV2Header({
@@ -1955,6 +1987,7 @@ export const make = Effect.gen(function* () {
       revisions,
       blobs,
       activeLocalThreadIds: prepared.activeLocalThreadIds,
+      retiredSyncThreadIds,
       projectBindings: described.bindings,
       threadBindings,
     };
@@ -2105,7 +2138,12 @@ export const make = Effect.gen(function* () {
     const linkedState: ThreadSyncLocalState = {
       ...state,
       projectBindings: local.projectBindings,
-      threadBindings: local.threadBindings,
+      threadBindings: [
+        ...state.threadBindings.filter((binding) =>
+          local.retiredSyncThreadIds.has(binding.syncThreadId),
+        ),
+        ...local.threadBindings,
+      ],
     };
     const result = analyzeThreadSyncV2State({
       local,
@@ -2164,7 +2202,7 @@ export const make = Effect.gen(function* () {
   interface ImportSelection {
     readonly snapshot: ThreadSyncThreadSnapshot;
     readonly targetThreadId: ThreadId;
-    readonly projectId: ProjectId;
+    readonly projectId: ProjectId | null;
     readonly mode: "create" | "replace";
     readonly expectedLocalUpdatedAt: IsoDateTime | null;
     readonly sourceRevision: ThreadSyncRevision;
@@ -3239,7 +3277,7 @@ export const make = Effect.gen(function* () {
       const selections: Array<{
         readonly entry: ThreadSyncV2ThreadEntry;
         readonly targetThreadId: ThreadId;
-        readonly projectId: ProjectId;
+        readonly projectId: ProjectId | null;
         readonly mode: "create" | "replace";
         readonly expectedLocalUpdatedAt: IsoDateTime | null;
         readonly localState?: NonNullable<ThreadSyncV2ImportSelection["localState"]>;
@@ -3286,7 +3324,7 @@ export const make = Effect.gen(function* () {
         const projectBinding = input.analysis.state.projectBindings.find(
           (binding) => binding.syncProjectId === entry.remote!.syncProjectId,
         );
-        if (projectBinding === undefined) continue;
+        const localProjectId = projectBinding?.projectId ?? null;
         const existing =
           entry.localThreadId === null ? undefined : localThreadsById.get(entry.localThreadId);
 
@@ -3326,12 +3364,13 @@ export const make = Effect.gen(function* () {
           selections.push({
             entry: entry.remote,
             targetThreadId: clonedThreadId,
-            projectId: projectBinding.projectId,
+            projectId: localProjectId,
             mode: "create",
             expectedLocalUpdatedAt: null,
             localState: {
-              modelSelection: localProjectsById.get(projectBinding.projectId)
-                ?.defaultModelSelection ?? {
+              modelSelection: (localProjectId === null
+                ? null
+                : localProjectsById.get(localProjectId)?.defaultModelSelection) ?? {
                 instanceId: ProviderInstanceId.make("codex"),
                 model: DEFAULT_MODEL,
               },
@@ -3343,7 +3382,7 @@ export const make = Effect.gen(function* () {
             },
             bindingUpdates: [
               { ...preservedStateBinding, localProjectId: existing.projectId },
-              { ...clonedStateBinding, localProjectId: projectBinding.projectId },
+              { ...clonedStateBinding, localProjectId },
             ],
           });
           appliedThreadIds.push(clonedThreadId);
@@ -3364,11 +3403,11 @@ export const make = Effect.gen(function* () {
         };
         replaceBinding(nextBinding);
         const mode = existing === undefined ? "create" : "replace";
-        const project = localProjectsById.get(projectBinding.projectId);
+        const project = localProjectId === null ? undefined : localProjectsById.get(localProjectId);
         selections.push({
           entry: entry.remote,
           targetThreadId,
-          projectId: projectBinding.projectId,
+          projectId: localProjectId,
           mode,
           expectedLocalUpdatedAt: existing?.updatedAt ?? null,
           ...(mode === "create"
@@ -3386,7 +3425,7 @@ export const make = Effect.gen(function* () {
                 },
               }
             : {}),
-          bindingUpdates: [{ ...nextBinding, localProjectId: projectBinding.projectId }],
+          bindingUpdates: [{ ...nextBinding, localProjectId }],
         });
         appliedThreadIds.push(targetThreadId);
       }
@@ -3398,20 +3437,17 @@ export const make = Effect.gen(function* () {
         ThreadId,
         {
           readonly localThreadId: ThreadId;
-          readonly projectId: ProjectId;
+          readonly projectId: ProjectId | null;
           readonly deletedAt: IsoDateTime | null;
         }
       >();
       for (const binding of bindings) {
-        const projectBinding = input.analysis.state.projectBindings.find(
-          (candidate) => candidate.syncProjectId === binding.syncProjectId,
-        );
-        if (projectBinding === undefined) continue;
         const selected = selectedBySource.get(binding.syncThreadId);
         const local = localThreadsById.get(binding.localThreadId);
+        if (selected === undefined && local === undefined) continue;
         threadIds.set(binding.syncThreadId, {
           localThreadId: binding.localThreadId,
-          projectId: projectBinding.projectId,
+          projectId: selected?.projectId ?? local?.projectId ?? null,
           deletedAt: selected === undefined ? (local?.lifecycle.deletedAt ?? null) : null,
         });
       }
@@ -3555,7 +3591,7 @@ export const make = Effect.gen(function* () {
       const projectBinding = input.analysis.state.projectBindings.find(
         (binding) => binding.syncProjectId === entry.remote!.syncProjectId,
       );
-      if (projectBinding === undefined) continue;
+      const localProjectId = projectBinding?.projectId ?? null;
       const existing =
         entry.localThreadId === null
           ? undefined
@@ -3596,12 +3632,12 @@ export const make = Effect.gen(function* () {
         };
         const clonedBinding: ThreadSyncBindingUpdate = {
           ...clonedStateBinding,
-          localProjectId: projectBinding.projectId,
+          localProjectId,
         };
         selections.push({
           snapshot: entry.remote,
           targetThreadId: clonedThreadId,
-          projectId: projectBinding.projectId,
+          projectId: localProjectId,
           mode: "create",
           expectedLocalUpdatedAt: null,
           sourceRevision: input.sourceRevision,
@@ -3626,12 +3662,12 @@ export const make = Effect.gen(function* () {
       replaceBinding(nextBinding);
       const bindingUpdate: ThreadSyncBindingUpdate = {
         ...nextBinding,
-        localProjectId: projectBinding.projectId,
+        localProjectId,
       };
       selections.push({
         snapshot: entry.remote,
         targetThreadId,
-        projectId: projectBinding.projectId,
+        projectId: localProjectId,
         mode: existing === undefined ? "create" : "replace",
         expectedLocalUpdatedAt: existing?.updatedAt ?? null,
         sourceRevision: input.sourceRevision,
@@ -3805,8 +3841,16 @@ export const make = Effect.gen(function* () {
     );
     const local = yield* exportLocalV2(cachedResolvedState, input.remote, localThreadIdsToPush);
     const eligibleRemoteThreads = activePrimaryRemoteThreads(input.remote);
+    const retainedRemoteThreads = selectRetainedRemoteThreads({
+      remoteThreads: eligibleRemoteThreads.values(),
+      retiredSyncThreadIds: local.retiredSyncThreadIds,
+      replacedSyncThreadIds: new Set(),
+    });
     const retainedProjectIds = new Set(
-      [...eligibleRemoteThreads.values()].map((entry) => entry.syncProjectId),
+      [
+        ...retainedRemoteThreads.map((entry) => entry.syncProjectId),
+        ...[...local.sources.values()].map((source) => source.header.syncProjectId),
+      ].filter((projectId): projectId is ThreadSyncProjectId => projectId !== null),
     );
     const finalProjects = new Map(
       [...input.remote.projects].filter(
@@ -3814,7 +3858,9 @@ export const make = Effect.gen(function* () {
           project.deletedAt === null && retainedProjectIds.has(syncProjectId),
       ),
     );
-    for (const [id, project] of local.projects) finalProjects.set(id, project);
+    for (const [id, project] of local.projects) {
+      if (retainedProjectIds.has(id)) finalProjects.set(id, project);
+    }
 
     for (const [sha256, source] of local.blobs) {
       const prior = input.remote.blobs.get(sha256);
@@ -3827,24 +3873,33 @@ export const make = Effect.gen(function* () {
       }
     }
 
-    const pushedThreadIds: ThreadId[] = [...local.sources.keys()].map(
-      (syncThreadId) =>
-        local.threadBindings.find((binding) => binding.syncThreadId === syncThreadId)
-          ?.localThreadId ?? syncThreadId,
-    );
+    const pushedThreadIds: ThreadId[] = [
+      ...new Set(
+        [...local.sources.keys(), ...local.retiredSyncThreadIds].map(
+          (syncThreadId) =>
+            cachedResolvedState.threadBindings.find(
+              (binding) => binding.syncThreadId === syncThreadId,
+            )?.localThreadId ?? syncThreadId,
+        ),
+      ),
+    ];
     const source: ThreadSyncV2RepositorySource<ThreadSyncError> = {
       projects: finalProjects,
       threads: local.sources.values(),
       blobs: local.blobs.values(),
       previousThreads: input.remote.threads.values(),
-      retainedThreads: [...eligibleRemoteThreads.values()].filter(
-        (entry) => !local.sources.has(entry.threadId),
-      ),
+      retainedThreads: selectRetainedRemoteThreads({
+        remoteThreads: retainedRemoteThreads,
+        retiredSyncThreadIds: new Set(),
+        replacedSyncThreadIds: new Set(local.sources.keys()),
+      }),
       retainedBlobs: [...input.remote.blobs.values()].filter(
         (entry) => !local.blobs.has(entry.sha256),
       ),
       updatedAt:
-        input.retireV1 || local.sources.size > 0 ? input.now : input.remote.manifest.updatedAt,
+        input.retireV1 || local.sources.size > 0 || local.retiredSyncThreadIds.size > 0
+          ? input.now
+          : input.remote.manifest.updatedAt,
     };
     let written = yield* writeThreadSyncV2Repository({
       mirrorPath: input.checkedOut.mirrorPath,
@@ -3931,21 +3986,23 @@ export const make = Effect.gen(function* () {
       remoteRevision: nextRemoteRevision,
       lastFetchedAt: input.now,
       projectBindings: local.projectBindings,
-      threadBindings: local.threadBindings.map((binding) => {
-        const descriptor = local.descriptors.get(binding.syncThreadId);
-        const writtenEntry = writtenV2.threads.get(binding.syncThreadId);
-        const sourceKeyHash =
-          descriptor !== undefined &&
-          (local.sources.has(binding.syncThreadId) ||
-            writtenEntry?.sourceKeyHash === descriptor.sourceKeyHash)
-            ? descriptor.sourceKeyHash
-            : binding.sourceKeyHash;
-        return {
-          ...binding,
-          baseRevision: writtenEntry?.revision ?? binding.baseRevision,
-          ...(sourceKeyHash === undefined ? {} : { sourceKeyHash }),
-        };
-      }),
+      threadBindings: local.threadBindings
+        .filter((binding) => !local.retiredSyncThreadIds.has(binding.syncThreadId))
+        .map((binding) => {
+          const descriptor = local.descriptors.get(binding.syncThreadId);
+          const writtenEntry = writtenV2.threads.get(binding.syncThreadId);
+          const sourceKeyHash =
+            descriptor !== undefined &&
+            (local.sources.has(binding.syncThreadId) ||
+              writtenEntry?.sourceKeyHash === descriptor.sourceKeyHash)
+              ? descriptor.sourceKeyHash
+              : binding.sourceKeyHash;
+          return {
+            ...binding,
+            baseRevision: writtenEntry?.revision ?? binding.baseRevision,
+            ...(sourceKeyHash === undefined ? {} : { sourceKeyHash }),
+          };
+        }),
     };
     const finalAnalysis = yield* analyzeV2(nextState, writtenV2);
     yield* Ref.set(remoteV2Ref, writtenV2);

@@ -734,11 +734,12 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
   const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
-  const projectRef = serverThread
-    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
-    : draftThread
-      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-      : null;
+  const projectRef =
+    serverThread?.projectId != null
+      ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
+      : draftThread?.projectId != null
+        ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+        : null;
   const project = useProject(projectRef);
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, threadRef),
@@ -1103,11 +1104,12 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
 }: PersistentThreadTerminalPanelProps) {
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
   const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
-  const projectRef = serverThread
-    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
-    : draftThread
-      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-      : null;
+  const projectRef =
+    serverThread?.projectId != null
+      ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
+      : draftThread?.projectId != null
+        ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+        : null;
   const project = useProject(projectRef);
   const knownTerminalSessions = useKnownTerminalSessions({
     environmentId: threadRef.environmentId,
@@ -1558,9 +1560,10 @@ function ChatViewContent(props: ChatViewProps) {
     [mountedTerminalThreadKeys],
   );
 
-  const fallbackDraftProjectRef = draftThread
-    ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-    : null;
+  const fallbackDraftProjectRef =
+    draftThread?.projectId != null
+      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+      : null;
   const fallbackDraftProject = useProject(fallbackDraftProjectRef);
   const localDraftError = activeServerThread
     ? null
@@ -1829,7 +1832,9 @@ function ChatViewContent(props: ChatViewProps) {
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProjectRef = useMemo(
     () =>
-      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
+      activeThread?.projectId != null
+        ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
+        : null,
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
@@ -6043,7 +6048,10 @@ function ChatViewContent(props: ChatViewProps) {
           if (failedDraftSession?.threadId === threadIdForSend) {
             setLogicalProjectDraftThreadId(
               failedDraftSession.logicalProjectKey,
-              scopeProjectRef(failedDraftSession.environmentId, failedDraftSession.projectId),
+              {
+                environmentId: failedDraftSession.environmentId,
+                projectId: failedDraftSession.projectId,
+              },
               draftId,
               {
                 threadId: newThreadId(),

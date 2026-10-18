@@ -111,7 +111,7 @@ export interface ProjectionThreadContinuationSeed {
 
 export interface ProjectionThreadSyncExportThread {
   readonly id: ThreadId;
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectId | null;
   readonly title: string;
   readonly coagent: OrchestrationThread["coagent"];
   readonly latestTurnId: ThreadSyncTerminalTurn["turnId"] | null;

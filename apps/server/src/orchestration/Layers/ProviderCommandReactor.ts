@@ -31,12 +31,12 @@ import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
-import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
@@ -59,6 +59,7 @@ import {
 } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { ServerConfig } from "../../config.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
@@ -486,6 +487,8 @@ const make = Effect.gen(function* () {
   const codexAccountRouter = yield* CodexAccountRouter;
   const gitWorkflow = yield* GitWorkflowService;
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const serverConfig = yield* ServerConfig;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
@@ -647,6 +650,21 @@ const make = Effect.gen(function* () {
       .pipe(Effect.map(Option.getOrUndefined));
   });
 
+  const resolveWorkspace = Effect.fnUntraced(function* (thread: {
+    readonly id: ThreadId;
+    readonly projectId: ProjectId | null;
+    readonly worktreePath: string | null;
+  }) {
+    if (thread.worktreePath) return thread.worktreePath;
+    if (thread.projectId !== null) {
+      const project = yield* resolveProject(thread.projectId);
+      return project?.workspaceRoot;
+    }
+    const workspaceRoot = path.join(serverConfig.stateDir, "standalone-workspaces", thread.id);
+    yield* fileSystem.makeDirectory(workspaceRoot, { recursive: true });
+    return workspaceRoot;
+  });
+
   /**
    * Recreates a thread's worktree from its branch when the directory has
    * disappeared. Provider sessions resume into the persisted cwd, so a missing
@@ -655,12 +673,15 @@ const make = Effect.gen(function* () {
    */
   const ensureThreadWorktree = Effect.fnUntraced(function* (thread: {
     readonly id: ThreadId;
-    readonly projectId: ProjectId;
+    readonly projectId: ProjectId | null;
     readonly branch: string | null;
     readonly worktreePath: string | null;
   }) {
     const { worktreePath, branch } = thread;
     if (!worktreePath || !branch) {
+      return;
+    }
+    if (thread.projectId === null) {
       return;
     }
     const exists = yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => true));
@@ -923,11 +944,7 @@ const make = Effect.gen(function* () {
         });
       }
     }
-    const project = yield* resolveProject(thread.projectId);
-    const effectiveCwd = resolveThreadWorkspaceCwd({
-      thread,
-      projects: project ? [project] : [],
-    });
+    const effectiveCwd = yield* resolveWorkspace(thread);
 
     const startProviderSession = (input?: {
       readonly resumeCursor?: unknown;
@@ -935,7 +952,7 @@ const make = Effect.gen(function* () {
     }) =>
       providerService.startSession(threadId, {
         threadId,
-        projectId: thread.projectId,
+        ...(thread.projectId !== null ? { projectId: thread.projectId } : {}),
         ...(preferredProvider ? { provider: preferredProvider } : {}),
         providerInstanceId: desiredInstanceId,
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
@@ -1439,12 +1456,7 @@ const make = Effect.gen(function* () {
     if (thread.title !== previousTitle) {
       return { _tag: "Superseded" } as const;
     }
-    const project = yield* resolveProject(thread.projectId);
-    const cwd =
-      resolveThreadWorkspaceCwd({
-        thread,
-        projects: project ? [project] : [],
-      }) ?? process.cwd();
+    const cwd = (yield* resolveWorkspace(thread)) ?? process.cwd();
     const { textGenerationModelSelection: modelSelection } =
       yield* serverSettingsService.getSettings;
     const generated = yield* textGeneration.generateThreadTitle({
@@ -1629,12 +1641,7 @@ const make = Effect.gen(function* () {
       threadSnapshot.page?.hasMore !== true &&
       thread.messages.filter((entry) => entry.role === "user").length === 1;
     if (isFirstUserMessageTurn) {
-      const project = yield* resolveProject(thread.projectId);
-      const generationCwd =
-        resolveThreadWorkspaceCwd({
-          thread,
-          projects: project ? [project] : [],
-        }) ?? process.cwd();
+      const generationCwd = (yield* resolveWorkspace(thread)) ?? process.cwd();
       const generationInput = {
         messageText: message.text,
         ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),

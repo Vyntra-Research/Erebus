@@ -220,7 +220,7 @@ async function describeText(input: {
 
 export function projectionThreadSyncV2Header(input: {
   readonly local: ProjectionThreadSyncExportThread;
-  readonly syncProjectId: ThreadSyncProjectId;
+  readonly syncProjectId: ThreadSyncProjectId | null;
   readonly syncThreadId: ThreadId;
   readonly syncThreadByLocal: ReadonlyMap<ThreadId, ThreadId>;
 }) {
@@ -330,7 +330,8 @@ export function prepareProjectionThreadSyncV2Export(input: {
         }
         if (input.localThreadIds !== undefined && !input.localThreadIds.has(local.id)) continue;
         if (
-          input.syncProjectByLocal.get(local.projectId) === undefined ||
+          (local.projectId !== null &&
+            input.syncProjectByLocal.get(local.projectId) === undefined) ||
           input.syncThreadByLocal.get(local.id) === undefined
         ) {
           continue;
@@ -364,7 +365,8 @@ export function prepareProjectionThreadSyncV2Export(input: {
       for (const local of input.index.threads) {
         if (local.active) continue;
         if (input.localThreadIds !== undefined && !input.localThreadIds.has(local.id)) continue;
-        const syncProjectId = input.syncProjectByLocal.get(local.projectId);
+        const syncProjectId =
+          local.projectId === null ? null : input.syncProjectByLocal.get(local.projectId);
         const syncThreadId = input.syncThreadByLocal.get(local.id);
         if (syncProjectId === undefined || syncThreadId === undefined) continue;
         const header = projectionThreadSyncV2Header({

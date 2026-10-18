@@ -77,12 +77,7 @@ export function getThreadSyncPresentation(
   if (status.state === "pushing") {
     return { label: "Pushing thread history", tone: "busy" };
   }
-  if (
-    status.conflicts.length > 0 ||
-    status.unlinkedProjects.length > 0 ||
-    status.pendingPullCount > 0 ||
-    status.pendingPushCount > 0
-  ) {
+  if (status.conflicts.length > 0 || status.pendingPullCount > 0 || status.pendingPushCount > 0) {
     return { label: "Thread sync has pending changes", tone: "warning" };
   }
   return { label: "Thread sync is up to date", tone: "success" };
@@ -106,8 +101,7 @@ export function canPushThreadSync(status: ThreadSyncStatus, busy: boolean): bool
   return (
     !busy &&
     status.configuration !== null &&
-    (status.pendingPushCount > 0 || status.conflicts.length > 0) &&
-    status.unlinkedProjects.length === 0
+    (status.pendingPushCount > 0 || status.conflicts.length > 0)
   );
 }
 
@@ -116,8 +110,7 @@ export function canPullThreadSync(status: ThreadSyncStatus, busy: boolean): bool
     !busy &&
     status.configuration !== null &&
     status.remoteRevision !== null &&
-    (status.pendingPullCount > 0 || status.conflicts.length > 0) &&
-    status.unlinkedProjects.length === 0
+    (status.pendingPullCount > 0 || status.conflicts.length > 0)
   );
 }
 
@@ -174,7 +167,7 @@ function StatusSummary({ status }: { readonly status: ThreadSyncStatus }) {
     status.pendingPushCount > 0 ? `${status.pendingPushCount} local` : null,
     status.conflicts.length > 0 ? `${status.conflicts.length} conflicts` : null,
     status.unlinkedProjects.length > 0
-      ? `${status.unlinkedProjects.length} unlinked projects`
+      ? `${status.unlinkedProjects.length} optional project links`
       : null,
   ].filter((item): item is string => item !== null);
 
@@ -454,8 +447,8 @@ function ProjectLinkDialog({
         <DialogHeader>
           <DialogTitle>Link projects on this device</DialogTitle>
           <DialogDescription>
-            Synced projects never carry host paths. Choose the local folder for each project before
-            its threads are imported.
+            Synced projects never carry host paths. Map any project you use on this device. Threads
+            without a local match stay standalone and can be linked later.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="max-h-[min(60vh,32rem)] space-y-4 overflow-y-auto">
@@ -767,7 +760,7 @@ export function SidebarThreadSyncControl() {
                       size="compact"
                       variant="outline"
                     >
-                      <Link2Icon /> Link {status.unlinkedProjects.length} local project
+                      <Link2Icon /> Map {status.unlinkedProjects.length} optional project
                       {status.unlinkedProjects.length === 1 ? "" : "s"}
                     </Button>
                   ) : null}

@@ -1101,8 +1101,14 @@ function OpenCommandPaletteDialog(props: {
           return (
             <ThreadCommandSubtitle
               environmentId={thread.environmentId}
-              projectCwd={projectCwdById.get(thread.projectId) ?? null}
-              projectFaviconPath={projectFaviconPathById.get(thread.projectId) ?? null}
+              projectCwd={
+                thread.projectId === null ? null : (projectCwdById.get(thread.projectId) ?? null)
+              }
+              projectFaviconPath={
+                thread.projectId === null
+                  ? null
+                  : (projectFaviconPathById.get(thread.projectId) ?? null)
+              }
               projectTitle={projectTitle ?? null}
               branch={thread.branch}
               worktreePath={thread.worktreePath}
@@ -1486,6 +1492,26 @@ function OpenCommandPaletteDialog(props: {
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
+  const standaloneEnvironmentId =
+    activeThread?.environmentId ??
+    activeDraftThread?.environmentId ??
+    primaryEnvironmentId ??
+    defaultProjectRef?.environmentId ??
+    null;
+  if (standaloneEnvironmentId !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:new-thread",
+      searchTerms: ["new thread", "standalone", "chat", "create", "draft"],
+      title: "New thread",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.new",
+      run: async () => {
+        await handleNewThread({ environmentId: standaloneEnvironmentId, projectId: null });
+      },
+    });
+  }
+
   if (projects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
@@ -1494,15 +1520,15 @@ function OpenCommandPaletteDialog(props: {
     if (activeProjectTitle) {
       actionItems.push({
         kind: "action",
-        value: "action:new-thread",
-        searchTerms: ["new thread", "chat", "create", "draft"],
+        value: "action:new-thread-current-project",
+        searchTerms: ["new thread", "current project", "chat", "create", "draft"],
         title: (
           <>
             New thread in <span className="font-semibold">{activeProjectTitle}</span>
           </>
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-        shortcutCommand: "chat.new",
+        shortcutCommand: "chat.newLocal",
         run: async () => {
           await startNewThreadFromContext({
             activeDraftThread,

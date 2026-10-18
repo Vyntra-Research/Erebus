@@ -62,7 +62,7 @@ type ScopedSidebarProject = SidebarProject & {
 
 type ScopedSidebarThread = ThreadSortInput & {
   environmentId: string;
-  projectId: string;
+  projectId: string | null;
   archivedAt: string | null;
 };
 
@@ -73,6 +73,33 @@ type LogicalSidebarProject = SidebarProject & {
     projectId: string;
   }[];
 };
+
+export function partitionThreadsByProjectGroup<
+  T extends { readonly environmentId: string; readonly projectId: string | null },
+>(input: {
+  readonly threads: ReadonlyArray<T>;
+  readonly projectGroupKeyByMember: ReadonlyMap<string, string>;
+}): {
+  readonly threadsByProjectGroup: ReadonlyMap<string, ReadonlyArray<T>>;
+  readonly standaloneThreads: ReadonlyArray<T>;
+} {
+  const threadsByProjectGroup = new Map<string, T[]>();
+  const standaloneThreads: T[] = [];
+  for (const thread of input.threads) {
+    const groupKey =
+      thread.projectId === null
+        ? undefined
+        : input.projectGroupKeyByMember.get(`${thread.environmentId}:${thread.projectId}`);
+    if (groupKey === undefined) {
+      standaloneThreads.push(thread);
+      continue;
+    }
+    const groupedThreads = threadsByProjectGroup.get(groupKey) ?? [];
+    groupedThreads.push(thread);
+    threadsByProjectGroup.set(groupKey, groupedThreads);
+  }
+  return { threadsByProjectGroup, standaloneThreads };
+}
 
 export type ThreadTraversalDirection = "previous" | "next";
 
@@ -898,6 +925,7 @@ export function sortProjectsForSidebar<
 ): TProject[] {
   const threadsByProjectId = new Map<string, TThread[]>();
   for (const thread of threads) {
+    if (thread.projectId === null) continue;
     const existing = threadsByProjectId.get(thread.projectId) ?? [];
     existing.push(thread);
     threadsByProjectId.set(thread.projectId, existing);
@@ -966,7 +994,7 @@ export function sortScopedProjectsForSidebar<
     `${environmentId}\u0000${projectId}`;
   const threadsByProject = new Map<string, TThread[]>();
   for (const thread of threads) {
-    if (thread.archivedAt !== null) {
+    if (thread.archivedAt !== null || thread.projectId === null) {
       continue;
     }
     const key = scopedKey(thread.environmentId, thread.projectId);

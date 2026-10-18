@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 - 2026-10-18
+
+### Added
+
+- Create standalone threads and link them to a project later from the thread menu or by dragging them into a project folder.
+- Import synced threads without a local project match as standalone while keeping project links on devices where they exist.
+
+### Fixed
+
+- Treat locally archived threads as local sync changes and remove them from the remote active set on the next push.
+
 ## 0.8.4 - 2026-10-18
 
 ### Fixed

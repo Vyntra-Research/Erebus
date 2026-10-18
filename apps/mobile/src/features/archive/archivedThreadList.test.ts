@@ -120,7 +120,7 @@ describe("buildArchivedThreadGroups", () => {
     });
 
     expect(result).toHaveLength(1);
-    expect(result[0]?.project.environmentId).toBe(environmentId);
+    expect(result[0]?.project?.environmentId).toBe(environmentId);
     expect(result[0]?.threads.map((thread) => thread.id)).toEqual(["thread-1"]);
   });
 
@@ -142,5 +142,26 @@ describe("buildArchivedThreadGroups", () => {
     });
 
     expect(result).toEqual([]);
+  });
+
+  it("keeps archived standalone threads visible", () => {
+    const standalone = makeThread({
+      id: ThreadId.make("thread-standalone"),
+      projectId: null,
+      title: "Standalone research",
+    });
+
+    const result = buildArchivedThreadGroups({
+      snapshots: [makeSnapshot([], [standalone])],
+      environmentLabels: { [environmentId]: "Local" },
+      environmentId: null,
+      searchQuery: "research",
+      sortOrder: "newest",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.project).toBeNull();
+    expect(result[0]?.title).toBe("Threads");
+    expect(result[0]?.threads.map((thread) => thread.id)).toEqual(["thread-standalone"]);
   });
 });

@@ -390,10 +390,12 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      const projects = yield* resolveThreadProjects(thread.projectId);
+      const projectId = thread.projectId;
+      if (projectId === null) return;
+      const projects = yield* resolveThreadProjects(projectId);
       const checkpointCwd = yield* resolveCheckpointCwd({
         threadId: thread.id,
-        thread,
+        thread: { ...thread, projectId },
         projects,
         preferSessionRuntime: true,
       });
@@ -465,10 +467,12 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const projects = yield* resolveThreadProjects(thread.projectId);
+    const projectId = thread.projectId;
+    if (projectId === null) return;
+    const projects = yield* resolveThreadProjects(projectId);
     const checkpointCwd = yield* resolveCheckpointCwd({
       threadId,
-      thread,
+      thread: { ...thread, projectId },
       projects,
       preferSessionRuntime: true,
     });
@@ -500,10 +504,12 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      const projects = yield* resolveThreadProjects(thread.projectId);
+      const projectId = thread.projectId;
+      if (projectId === null) return;
+      const projects = yield* resolveThreadProjects(projectId);
       const checkpointCwd = yield* resolveCheckpointCwd({
         threadId: thread.id,
-        thread,
+        thread: { ...thread, projectId },
         projects,
         preferSessionRuntime: false,
       });
@@ -659,10 +665,12 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const projects = yield* resolveThreadProjects(thread.projectId);
+    const projectId = thread.projectId;
+    if (projectId === null) return;
+    const projects = yield* resolveThreadProjects(projectId);
     const checkpointCwd = yield* resolveCheckpointCwd({
       threadId,
-      thread,
+      thread: { ...thread, projectId },
       projects,
       preferSessionRuntime: false,
     });
