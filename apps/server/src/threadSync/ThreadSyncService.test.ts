@@ -28,6 +28,7 @@ import {
   selectRetainedRemoteThreads,
   selectAutoLinkProject,
   selectPortableProjectDescriptor,
+  threadSyncAttachmentJournalMatchesImportedRecords,
   threadSyncImportCommandId,
   validateThreadSyncImportReferences,
 } from "./ThreadSyncService.ts";
@@ -179,6 +180,45 @@ describe("thread sync eligibility", () => {
         replacedSyncThreadIds: new Set([replaced]),
       }).map((thread) => thread.threadId),
     ).toEqual([retained]);
+  });
+});
+
+describe("threadSyncAttachmentJournalMatchesImportedRecords", () => {
+  it("accepts a missing journal only when the import has no attachments", () => {
+    expect(
+      threadSyncAttachmentJournalMatchesImportedRecords({ journal: null, attachments: [] }),
+    ).toBe(true);
+    expect(
+      threadSyncAttachmentJournalMatchesImportedRecords({
+        journal: null,
+        attachments: [{ attachment: { id: "attachment-1" } }],
+      }),
+    ).toBe(false);
+  });
+
+  it("still rejects missing, extra, or reordered attachment records", () => {
+    const journal = {
+      entries: [{ attachment: { id: "attachment-1" } }, { attachment: { id: "attachment-2" } }],
+    };
+
+    expect(
+      threadSyncAttachmentJournalMatchesImportedRecords({
+        journal,
+        attachments: journal.entries,
+      }),
+    ).toBe(true);
+    expect(
+      threadSyncAttachmentJournalMatchesImportedRecords({
+        journal,
+        attachments: [journal.entries[1]!, journal.entries[0]!],
+      }),
+    ).toBe(false);
+    expect(
+      threadSyncAttachmentJournalMatchesImportedRecords({
+        journal,
+        attachments: [journal.entries[0]!],
+      }),
+    ).toBe(false);
   });
 });
 

@@ -159,6 +159,25 @@ interface ThreadSyncV2AttachmentJournal {
   readonly entries: ReadonlyArray<ThreadSyncV2AttachmentJournalEntry>;
 }
 
+interface ThreadSyncV2AttachmentReference {
+  readonly attachment: Pick<ChatAttachment, "id">;
+}
+
+export function threadSyncAttachmentJournalMatchesImportedRecords(input: {
+  readonly journal: {
+    readonly entries: ReadonlyArray<ThreadSyncV2AttachmentReference>;
+  } | null;
+  readonly attachments: ReadonlyArray<ThreadSyncV2AttachmentReference>;
+}): boolean {
+  if (input.journal === null) return input.attachments.length === 0;
+  return (
+    input.journal.entries.length === input.attachments.length &&
+    input.journal.entries.every(
+      (entry, index) => entry.attachment.id === input.attachments[index]?.attachment.id,
+    )
+  );
+}
+
 // v1 requires one in-memory projection snapshot. Keep its compatibility path
 // well below the on-disk document ceiling so decoding plus canonicalization
 // cannot multiply a large local history into an unbounded heap allocation.
@@ -2709,19 +2728,14 @@ export const make = Effect.gen(function* () {
       prepareCommit: ({ stageId, attachments }) =>
         Effect.gen(function* () {
           const journal = yield* readJournal(stageId);
-          if (
-            journal === null ||
-            journal.entries.length !== attachments.length ||
-            journal.entries.some(
-              (entry, index) => entry.attachment.id !== attachments[index]?.attachment.id,
-            )
-          ) {
+          if (!threadSyncAttachmentJournalMatchesImportedRecords({ journal, attachments })) {
             return yield* syncError(
               "import",
               "integrity-failed",
               "The staged attachment journal does not match the imported records.",
             );
           }
+          if (journal === null) return [];
           yield* Effect.forEach(journal.entries, verifyStagedAttachment, {
             concurrency: 1,
             discard: true,

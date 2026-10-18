@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.2 - 2026-10-18
+
+### Fixed
+
+- Import synchronized threads without attachments instead of rejecting their empty attachment journal.
+
 ## 0.9.1 - 2026-10-18
 
 ### Fixed
