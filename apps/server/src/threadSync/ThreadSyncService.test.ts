@@ -24,6 +24,7 @@ import {
   portableRepositoryIdentity,
   pruneDanglingPortableCoagents,
   reconcileExportedThreadBindings,
+  restoreSynchronizedThreadProjectIdentity,
   remapImportedSnapshot,
   replayThreadSyncBindingEvents,
   resolveThreadSyncV2LocalRevision,
@@ -1360,6 +1361,87 @@ describe("reconcileExportedThreadBindings", () => {
         syncProjectByLocal: new Map(),
       }),
     ).toEqual([existing]);
+  });
+
+  it("keeps the portable project identity when a synced thread is linked to another local project", () => {
+    const localThreadId = "local-linked" as ThreadId;
+    const localProjectId = "local-project" as ProjectId;
+    const existing = {
+      syncThreadId: "sync-linked" as ThreadId,
+      localThreadId,
+      syncProjectId: "remote-project" as ThreadSyncProjectId,
+      baseRevision: threadSyncRevision({ remote: true }),
+    };
+
+    expect(
+      reconcileExportedThreadBindings({
+        existing: [existing],
+        threads: [{ id: localThreadId, projectId: localProjectId }],
+        syncProjectByLocal: new Map([
+          [localProjectId, "different-local-project" as ThreadSyncProjectId],
+        ]),
+      }),
+    ).toEqual([existing]);
+  });
+
+  it("keeps a synced standalone thread portable as standalone after a local link", () => {
+    const localThreadId = "local-standalone-linked" as ThreadId;
+    const localProjectId = "local-project" as ProjectId;
+    const existing = {
+      syncThreadId: "sync-standalone-linked" as ThreadId,
+      localThreadId,
+      syncProjectId: null,
+      baseRevision: threadSyncRevision({ remote: true }),
+    };
+
+    expect(
+      reconcileExportedThreadBindings({
+        existing: [existing],
+        threads: [{ id: localThreadId, projectId: localProjectId }],
+        syncProjectByLocal: new Map([
+          [localProjectId, "different-local-project" as ThreadSyncProjectId],
+        ]),
+      }),
+    ).toEqual([existing]);
+  });
+
+  it("repairs a project identity changed by an older client when its base is still current", () => {
+    const remoteRevision = threadSyncRevision({ remote: true });
+    const binding = {
+      syncThreadId: "sync-thread" as ThreadId,
+      localThreadId: "local-thread" as ThreadId,
+      syncProjectId: "incorrect-local-project" as ThreadSyncProjectId,
+      baseRevision: remoteRevision,
+    };
+
+    expect(
+      restoreSynchronizedThreadProjectIdentity({
+        binding,
+        remote: {
+          revision: remoteRevision,
+          syncProjectId: "remote-project" as ThreadSyncProjectId,
+        },
+      }),
+    ).toEqual({ ...binding, syncProjectId: "remote-project" });
+  });
+
+  it("does not rewrite a divergent project identity from a newer remote revision", () => {
+    const binding = {
+      syncThreadId: "sync-thread" as ThreadId,
+      localThreadId: "local-thread" as ThreadId,
+      syncProjectId: "local-project" as ThreadSyncProjectId,
+      baseRevision: threadSyncRevision({ version: "base" }),
+    };
+
+    expect(
+      restoreSynchronizedThreadProjectIdentity({
+        binding,
+        remote: {
+          revision: threadSyncRevision({ version: "newer" }),
+          syncProjectId: "remote-project" as ThreadSyncProjectId,
+        },
+      }),
+    ).toBe(binding);
   });
 
   it("recovers the write-ahead binding map on either side of an import crash", () => {

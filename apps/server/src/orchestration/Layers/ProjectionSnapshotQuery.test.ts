@@ -3485,4 +3485,71 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
       });
     }),
   );
+
+  it.effect("keeps a project-only thread move out of the portable sync watermark", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const projectId = ProjectId.make("thread-sync-local-project");
+      const threadId = ThreadId.make("thread-sync-local-link");
+      const createdAt = "2026-10-18T01:00:00.000Z";
+      const linkedAt = "2026-10-18T01:01:00.000Z";
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json,
+          scripts_json, created_at, updated_at, deleted_at
+        ) VALUES (
+          ${projectId}, ${"Local project"}, ${"/tmp/thread-sync-local-project"},
+          ${null}, ${"[]"}, ${createdAt}, ${linkedAt}, ${null}
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode,
+          interaction_mode, branch, worktree_path, linked_pull_request_json,
+          latest_turn_id, latest_user_message_at, pending_approval_count,
+          pending_user_input_count, has_actionable_proposed_plan, pinned_at,
+          pin_order_key, created_at, updated_at, deleted_at
+        ) VALUES (
+          ${threadId}, ${projectId}, ${"Thread"},
+          ${'{"instanceId":"codex","model":"gpt-6.1-sol"}'}, ${"full-access"},
+          ${"default"}, ${null}, ${null}, ${null}, ${null}, ${null}, 0, 0, 0,
+          ${null}, ${null}, ${createdAt}, ${linkedAt}, ${null}
+        )
+      `;
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id, aggregate_kind, stream_id, stream_version, event_type,
+          occurred_at, command_id, causation_event_id, correlation_id,
+          actor_kind, payload_json, metadata_json
+        ) VALUES
+          (
+            ${EventId.make("event-thread-sync-local-link-created")}, ${"thread"}, ${threadId}, 0,
+            ${"thread.created"}, ${createdAt},
+            ${CommandId.make("command-thread-sync-local-link-created")},
+            ${null}, ${null}, ${"server"}, ${"{}"}, ${"{}"}
+          ),
+          (
+            ${EventId.make("event-thread-sync-local-link-moved")}, ${"thread"}, ${threadId}, 1,
+            ${"thread.meta-updated"}, ${linkedAt},
+            ${CommandId.make("command-thread-sync-local-link-moved")},
+            ${null}, ${null}, ${"server"},
+            ${'{"projectId":"thread-sync-local-project","updatedAt":"2026-10-18T01:00:00.000Z"}'},
+            ${"{}"}
+          )
+      `;
+
+      const createdSequence = yield* sql<{ readonly sequence: number }>`
+        SELECT sequence AS "sequence"
+        FROM orchestration_events
+        WHERE event_id = ${EventId.make("event-thread-sync-local-link-created")}
+      `;
+      const index = yield* snapshotQuery.getThreadSyncExportIndex!();
+      const thread = index.threads.find((candidate) => candidate.id === threadId);
+
+      assert.equal(thread?.threadSequence, createdSequence[0]?.sequence);
+      assert.equal(thread?.updatedAt, createdAt);
+    }),
+  );
 });

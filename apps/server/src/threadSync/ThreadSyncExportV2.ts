@@ -301,7 +301,7 @@ export function projectionThreadSyncV2SourceKey(input: {
 export function prepareProjectionThreadSyncV2Export(input: {
   readonly query: ProjectionSnapshotQueryShape;
   readonly index: ProjectionThreadSyncExportIndex;
-  readonly syncProjectByLocal: ReadonlyMap<string, ThreadSyncProjectId>;
+  readonly syncProjectByLocalThread: ReadonlyMap<ThreadId, ThreadSyncProjectId | null>;
   readonly syncThreadByLocal: ReadonlyMap<ThreadId, ThreadId>;
   /** When present, only these local threads receive record sources. */
   readonly localThreadIds?: ReadonlySet<ThreadId>;
@@ -330,8 +330,7 @@ export function prepareProjectionThreadSyncV2Export(input: {
         }
         if (input.localThreadIds !== undefined && !input.localThreadIds.has(local.id)) continue;
         if (
-          (local.projectId !== null &&
-            input.syncProjectByLocal.get(local.projectId) === undefined) ||
+          input.syncProjectByLocalThread.get(local.id) === undefined ||
           input.syncThreadByLocal.get(local.id) === undefined
         ) {
           continue;
@@ -365,8 +364,7 @@ export function prepareProjectionThreadSyncV2Export(input: {
       for (const local of input.index.threads) {
         if (local.active) continue;
         if (input.localThreadIds !== undefined && !input.localThreadIds.has(local.id)) continue;
-        const syncProjectId =
-          local.projectId === null ? null : input.syncProjectByLocal.get(local.projectId);
+        const syncProjectId = input.syncProjectByLocalThread.get(local.id);
         const syncThreadId = input.syncThreadByLocal.get(local.id);
         if (syncProjectId === undefined || syncThreadId === undefined) continue;
         const header = projectionThreadSyncV2Header({

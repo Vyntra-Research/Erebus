@@ -1071,10 +1071,12 @@ export function reconcileExportedThreadBindings(input: {
   return input.threads.flatMap((thread) => {
     const current = currentBindingsByLocal.get(thread.id);
     const syncProjectId =
-      thread.projectId === null
-        ? (current?.syncProjectId ?? null)
-        : (input.syncProjectByLocal.get(thread.projectId) ?? null);
-    if (thread.projectId !== null && syncProjectId === null) return [];
+      current !== undefined
+        ? current.syncProjectId
+        : thread.projectId === null
+          ? null
+          : (input.syncProjectByLocal.get(thread.projectId) ?? null);
+    if (current === undefined && thread.projectId !== null && syncProjectId === null) return [];
     return [
       {
         syncThreadId: current?.syncThreadId ?? thread.id,
@@ -1084,6 +1086,22 @@ export function reconcileExportedThreadBindings(input: {
       },
     ];
   });
+}
+
+export function restoreSynchronizedThreadProjectIdentity(input: {
+  readonly binding: ThreadSyncLocalThreadBinding;
+  readonly remote:
+    | {
+        readonly revision: ThreadSyncRevision;
+        readonly syncProjectId: ThreadSyncProjectId | null;
+      }
+    | undefined;
+}): ThreadSyncLocalThreadBinding {
+  return input.remote !== undefined &&
+    input.binding.baseRevision === input.remote.revision &&
+    input.binding.syncProjectId !== input.remote.syncProjectId
+    ? { ...input.binding, syncProjectId: input.remote.syncProjectId }
+    : input.binding;
 }
 
 export function analyzeThreadSyncState(input: {
@@ -1501,7 +1519,19 @@ export const make = Effect.gen(function* () {
     }
 
     const threadBindings = reconcileExportedThreadBindings({
-      existing: state.threadBindings,
+      existing: state.threadBindings.map((binding) => {
+        const remote = authoritativeThreads.get(binding.syncThreadId);
+        return restoreSynchronizedThreadProjectIdentity({
+          binding,
+          remote:
+            remote === undefined
+              ? undefined
+              : {
+                  revision: threadSyncRevision(remote),
+                  syncProjectId: remote.syncProjectId,
+                },
+        });
+      }),
       threads: snapshot.threads,
       syncProjectByLocal,
     });
@@ -1842,12 +1872,23 @@ export const make = Effect.gen(function* () {
     });
 
     const threadBindings = reconcileExportedThreadBindings({
-      existing: state.threadBindings,
+      existing: state.threadBindings.map((binding) =>
+        restoreSynchronizedThreadProjectIdentity({
+          binding,
+          remote: remote.threads.get(binding.syncThreadId),
+        }),
+      ),
       threads: index.threads,
       syncProjectByLocal: described.syncProjectByLocal,
     });
+    const bindingsByLocalThread = new Map(
+      threadBindings.map((binding) => [binding.localThreadId, binding] as const),
+    );
     const syncThreadByLocal = new Map(
       threadBindings.map((binding) => [binding.localThreadId, binding.syncThreadId] as const),
+    );
+    const syncProjectByLocalThread = new Map(
+      threadBindings.map((binding) => [binding.localThreadId, binding.syncProjectId] as const),
     );
     const descriptors = new Map<
       ThreadId,
@@ -1861,17 +1902,15 @@ export const make = Effect.gen(function* () {
     yield* Effect.try({
       try: () => {
         for (const local of index.threads) {
-          const syncProjectId =
-            local.projectId === null ? null : described.syncProjectByLocal.get(local.projectId);
-          const syncThreadId = syncThreadByLocal.get(local.id);
-          if (syncProjectId === undefined || syncThreadId === undefined) continue;
+          const binding = bindingsByLocalThread.get(local.id);
+          if (binding === undefined) continue;
           const header = projectionThreadSyncV2Header({
             local,
-            syncProjectId,
-            syncThreadId,
+            syncProjectId: binding.syncProjectId,
+            syncThreadId: binding.syncThreadId,
             syncThreadByLocal,
           });
-          descriptors.set(syncThreadId, {
+          descriptors.set(binding.syncThreadId, {
             localThreadId: local.id,
             header,
             sourceKeyHash: threadSyncV2Sha256(
@@ -1906,7 +1945,7 @@ export const make = Effect.gen(function* () {
     const prepared = yield* prepareProjectionThreadSyncV2Export({
       query: snapshotQuery,
       index,
-      syncProjectByLocal: described.syncProjectByLocal,
+      syncProjectByLocalThread,
       syncThreadByLocal,
       localThreadIds,
       mapAttachments: ({ message }) =>
