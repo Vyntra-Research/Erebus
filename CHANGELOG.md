@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.3 - 2026-10-18
+
+### Fixed
+
+- Keep settled threads in Git sync until they are archived or deleted.
+- Import valid history when an older record refers to a turn that is no longer present.
+- Preserve remote project identity when a synced thread remains standalone on one device, avoiding false local changes.
+- Keep newly imported active threads visible instead of immediately auto-settling old history.
+
 ## 0.9.2 - 2026-10-18
 
 ### Fixed

@@ -207,6 +207,15 @@ it.layer(TestLayer)("thread sync v2 engine receipts", (it) => {
         `;
         });
         expect(stages).toEqual([{ stageId: stageB }]);
+        const importedThreads = yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          return yield* sql<{ readonly unsettledAt: string | null }>`
+            SELECT unsettled_at AS "unsettledAt"
+            FROM projection_threads
+            WHERE thread_id = ${threadId}
+          `;
+        });
+        expect(importedThreads).toEqual([{ unsettledAt: importedAt }]);
       }),
   );
 

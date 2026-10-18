@@ -192,6 +192,16 @@ describe("threadLastActivityAt", () => {
     expect(threadLastActivityAt(withActivity)).toBe("2026-04-06T00:00:00.000Z");
     expect(threadLastActivityAt(shell)).toBeNull();
   });
+
+  it("uses a recent local re-entry to keep an imported active thread visible", () => {
+    const imported = {
+      ...makeShell({ activityAt: STALE }),
+      unsettledAt: FRESH,
+    };
+
+    expect(threadLastActivityAt(imported)).toBe(FRESH);
+    expect(effectiveSettled(imported, { now: NOW, autoSettleAfterDays: 3 })).toBe(false);
+  });
 });
 
 describe("effectiveSettled", () => {

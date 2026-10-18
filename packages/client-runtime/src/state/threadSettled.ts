@@ -72,13 +72,14 @@ export function changeRequestAutoSettles(
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export function threadLastActivityAt(
-  shell: Pick<OrchestrationThreadShell, "latestUserMessageAt" | "latestTurn">,
+  shell: Pick<OrchestrationThreadShell, "latestUserMessageAt" | "latestTurn" | "unsettledAt">,
 ): string | null {
   const candidates = [
     shell.latestUserMessageAt,
     shell.latestTurn?.requestedAt,
     shell.latestTurn?.startedAt,
     shell.latestTurn?.completedAt,
+    shell.unsettledAt,
   ];
   let latest: string | null = null;
   let latestTimestamp = Number.NEGATIVE_INFINITY;

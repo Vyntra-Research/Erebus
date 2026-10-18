@@ -196,12 +196,11 @@ interface ThreadSyncEligibilityCandidate {
   };
 }
 
-/** Only visible primary threads belong in the portable Git history. */
-export function isActivePrimaryThreadForSync(thread: ThreadSyncEligibilityCandidate): boolean {
+/** Primary threads remain portable until the user archives or deletes them. */
+export function isPortablePrimaryThreadForSync(thread: ThreadSyncEligibilityCandidate): boolean {
   return (
     thread.coagent === null &&
     thread.lifecycle.archivedAt === null &&
-    thread.lifecycle.settledAt === null &&
     thread.lifecycle.deletedAt === null
   );
 }
@@ -219,7 +218,7 @@ export function resolveRetiredSyncThreadIds(input: {
 
   for (const binding of input.threadBindings) {
     const localThread = localThreadsById.get(binding.localThreadId);
-    if (localThread === undefined || !isActivePrimaryThreadForSync(localThread)) {
+    if (localThread === undefined || !isPortablePrimaryThreadForSync(localThread)) {
       retired.add(binding.syncThreadId);
     }
   }
@@ -231,7 +230,7 @@ export function resolveRetiredSyncThreadIds(input: {
   for (const syncThreadId of input.remoteThreadIds) {
     if (boundSyncThreadIds.has(syncThreadId)) continue;
     const sameIdLocalThread = localThreadsById.get(syncThreadId);
-    if (sameIdLocalThread !== undefined && !isActivePrimaryThreadForSync(sameIdLocalThread)) {
+    if (sameIdLocalThread !== undefined && !isPortablePrimaryThreadForSync(sameIdLocalThread)) {
       retired.add(syncThreadId);
     }
   }
@@ -239,13 +238,13 @@ export function resolveRetiredSyncThreadIds(input: {
   return retired;
 }
 
-function activePrimaryRemoteThreads(
+function portablePrimaryRemoteThreads(
   repository: ThreadSyncV2RepositoryIndex,
 ): ReadonlyMap<ThreadId, ThreadSyncV2ThreadEntry> {
   return new Map(
     [...repository.threads].filter(([threadId]) => {
       const manifest = repository.threadManifests.get(threadId);
-      return manifest !== undefined && isActivePrimaryThreadForSync(manifest.header);
+      return manifest !== undefined && isPortablePrimaryThreadForSync(manifest.header);
     }),
   );
 }
@@ -1032,10 +1031,12 @@ export function reconcileExportedThreadBindings(input: {
     input.existing.map((binding) => [binding.localThreadId, binding] as const),
   );
   return input.threads.flatMap((thread) => {
-    const syncProjectId =
-      thread.projectId === null ? null : (input.syncProjectByLocal.get(thread.projectId) ?? null);
-    if (thread.projectId !== null && syncProjectId === null) return [];
     const current = currentBindingsByLocal.get(thread.id);
+    const syncProjectId =
+      thread.projectId === null
+        ? (current?.syncProjectId ?? null)
+        : (input.syncProjectByLocal.get(thread.projectId) ?? null);
+    if (thread.projectId !== null && syncProjectId === null) return [];
     return [
       {
         syncThreadId: current?.syncThreadId ?? thread.id,
@@ -1170,7 +1171,7 @@ export function analyzeThreadSyncV2State(input: {
   readonly runState?: ThreadSyncStatus["state"];
   readonly lastError?: string | null;
 }): ThreadSyncV2Analysis {
-  const eligibleRemoteThreads = activePrimaryRemoteThreads(input.remote);
+  const eligibleRemoteThreads = portablePrimaryRemoteThreads(input.remote);
   const bindingsBySyncId = new Map(
     input.local.threadBindings.map((binding) => [binding.syncThreadId, binding] as const),
   );
@@ -1724,9 +1725,9 @@ export const make = Effect.gen(function* () {
       localThreads: unfilteredIndex.threads,
       remoteThreadIds: remote.threads.keys(),
     });
-    const eligibleThreads = unfilteredIndex.threads.filter(isActivePrimaryThreadForSync);
+    const eligibleThreads = unfilteredIndex.threads.filter(isPortablePrimaryThreadForSync);
     const eligibleRemoteProjectIds = new Set(
-      [...activePrimaryRemoteThreads(remote).values()].map((thread) => thread.syncProjectId),
+      [...portablePrimaryRemoteThreads(remote).values()].map((thread) => thread.syncProjectId),
     );
     const eligibleProjectIds = new Set([
       ...eligibleThreads.map((thread) => thread.projectId),
@@ -2046,16 +2047,18 @@ export const make = Effect.gen(function* () {
       readonly remote: ThreadSyncRepositoryDocuments;
       readonly updatedAt: IsoDateTime;
     }) {
-      const activeThreads = [...input.remote.threads.values()].filter(isActivePrimaryThreadForSync);
-      const activeProjectIds = new Set(activeThreads.map((thread) => thread.syncProjectId));
+      const portableThreads = [...input.remote.threads.values()].filter(
+        isPortablePrimaryThreadForSync,
+      );
+      const portableProjectIds = new Set(portableThreads.map((thread) => thread.syncProjectId));
       const source: ThreadSyncV2RepositorySource<ThreadSyncError> = {
         projects: new Map(
           [...input.remote.projects].filter(
             ([syncProjectId, project]) =>
-              project.deletedAt === null && activeProjectIds.has(syncProjectId),
+              project.deletedAt === null && portableProjectIds.has(syncProjectId),
           ),
         ),
-        threads: activeThreads.map(threadSyncV2SourceFromV1Snapshot),
+        threads: portableThreads.map(threadSyncV2SourceFromV1Snapshot),
         blobs: [...input.remote.blobs.entries()].map(([sha256, bytes]) => ({
           sha256,
           sizeBytes: bytes.byteLength,
@@ -3110,7 +3113,7 @@ export const make = Effect.gen(function* () {
             if (v2 !== null) {
               return {
                 projects: v2.projects,
-                threadCount: activePrimaryRemoteThreads(v2).size,
+                threadCount: portablePrimaryRemoteThreads(v2).size,
                 v2,
               };
             }
@@ -3881,7 +3884,7 @@ export const make = Effect.gen(function* () {
       }),
     );
     const local = yield* exportLocalV2(cachedResolvedState, input.remote, localThreadIdsToPush);
-    const eligibleRemoteThreads = activePrimaryRemoteThreads(input.remote);
+    const eligibleRemoteThreads = portablePrimaryRemoteThreads(input.remote);
     const retainedRemoteThreads = selectRetainedRemoteThreads({
       remoteThreads: eligibleRemoteThreads.values(),
       retiredSyncThreadIds: local.retiredSyncThreadIds,
