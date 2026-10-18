@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.5 - 2026-10-18
+
+### Fixed
+
+- Finish cleanup of large synchronized thread imports without repeatedly scanning the staging table.
+
 ## 0.9.4 - 2026-10-18
 
 ### Fixed
