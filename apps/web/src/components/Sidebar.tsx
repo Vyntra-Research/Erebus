@@ -2021,6 +2021,25 @@ export default function Sidebar() {
     [navigateToProjectSettings],
   );
 
+  const startNewThreadInProject = useCallback(
+    (projectGroup: SidebarProjectSnapshot) => {
+      if (isMobile) setOpenMobile(false);
+      void newThreadContext.handleNewThread(
+        scopeProjectRef(projectGroup.environmentId, projectGroup.id),
+      );
+    },
+    [isMobile, newThreadContext.handleNewThread, setOpenMobile],
+  );
+
+  const handleProjectNewThread = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      startNewThreadInProject(projectGroup);
+    },
+    [startNewThreadInProject],
+  );
+
   const closeProjectRenameDialog = useCallback(() => {
     setProjectRenameTarget(null);
     setProjectRenameTitle("");
@@ -2226,6 +2245,7 @@ export default function Sidebar() {
           ),
       );
       const items: ContextMenuItem<string>[] = [
+        { id: "new-thread", label: "New thread" },
         { id: "settings", label: "Project settings" },
         groupedItem("rename", "Rename"),
         {
@@ -2245,6 +2265,10 @@ export default function Sidebar() {
         api.contextMenu.show(items, { x: rect.right, y: rect.bottom + 2 }),
       );
       if (clicked._tag === "Failure" || clicked.value === null) return;
+      if (clicked.value === "new-thread") {
+        startNewThreadInProject(projectGroup);
+        return;
+      }
       if (clicked.value === "settings") {
         navigateToProjectSettings(projectGroup);
         return;
@@ -2260,6 +2284,7 @@ export default function Sidebar() {
       copyPathToClipboard,
       navigateToProjectSettings,
       removeProjectMember,
+      startNewThreadInProject,
       threads,
     ],
   );
@@ -3493,6 +3518,11 @@ export default function Sidebar() {
                 } satisfies ContextMenuItem<string>,
               ]
             : []),
+          {
+            id: "new-project",
+            label: "New project…",
+            separatorBefore: threadProjectTargets.length > 0 || thread.projectId !== null,
+          },
         ];
         const clicked = await settlePromise(() => api.contextMenu.show(actionItems, position));
         if (clicked._tag === "Failure") return;
@@ -3507,6 +3537,10 @@ export default function Sidebar() {
           const projectId = clicked.value.slice("move-to-project:".length) as ProjectId;
           const project = threadProjectTargets.find((candidate) => candidate.id === projectId);
           if (project) await moveThreadToProject(threadRef, project.id, project.title);
+          return;
+        }
+        if (clicked.value === "new-project") {
+          openAddProjectCommandPalette();
           return;
         }
         if (clicked.value === "remove-from-project") {
@@ -3682,6 +3716,7 @@ export default function Sidebar() {
       handleMultiSelectContextMenu,
       markThreadUnread,
       moveThreadToProject,
+      openAddProjectCommandPalette,
       projectCwdByKey,
       projects,
       serverConfigs,
@@ -4319,7 +4354,7 @@ export default function Sidebar() {
                             aria-expanded={projectExpanded}
                             aria-controls={projectThreadListId}
                             onClick={() => setProjectExpanded(preferenceKeys, !projectExpanded)}
-                            className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 pr-14 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                            className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 pr-20 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                           >
                             <ChevronDownIcon
                               aria-hidden
@@ -4336,24 +4371,41 @@ export default function Sidebar() {
                             />
                             <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
                           </button>
-                          <span className="pointer-events-none absolute right-8 shrink-0 text-[10px] font-normal tabular-nums text-sidebar-muted-foreground/60">
+                          <span className="pointer-events-none absolute right-14 shrink-0 text-[10px] font-normal tabular-nums text-sidebar-muted-foreground/60">
                             {projectThreads.length}
                           </span>
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <button
-                                  type="button"
-                                  aria-label={`Project actions for ${project.displayName}`}
-                                  onClick={(event) => void showProjectFolderMenu(event, project)}
-                                  className="absolute right-1 inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                                >
-                                  <EllipsisIcon aria-hidden className="size-4" />
-                                </button>
-                              }
-                            />
-                            <TooltipPopup side="right">Project actions</TooltipPopup>
-                          </Tooltip>
+                          <div className="absolute right-1 flex items-center">
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    aria-label={`New thread in ${project.displayName}`}
+                                    onClick={(event) => handleProjectNewThread(event, project)}
+                                    className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                                  >
+                                    <SquarePenIcon aria-hidden className="size-3.5" />
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup side="right">New thread</TooltipPopup>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    aria-label={`Project actions for ${project.displayName}`}
+                                    onClick={(event) => void showProjectFolderMenu(event, project)}
+                                    className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                                  >
+                                    <EllipsisIcon aria-hidden className="size-4" />
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup side="right">Project actions</TooltipPopup>
+                            </Tooltip>
+                          </div>
                         </div>
                         {projectExpanded ? (
                           <ul
