@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1 - 2026-10-18
+
+### Fixed
+
+- Show locally archived threads as pending local sync changes instead of remote changes after upgrading from an older release.
+
 ## 0.9.0 - 2026-10-18
 
 ### Added
