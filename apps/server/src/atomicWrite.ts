@@ -3,6 +3,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type * as PlatformError from "effect/PlatformError";
+import * as Stream from "effect/Stream";
 
 export interface ExclusiveFileOwnership {
   readonly filePath: string;
@@ -90,6 +91,51 @@ export const writeFileBytesExclusivelyAtomically = (input: {
 
       const file = yield* fs.open(tempPath, { flag: "wx" });
       yield* file.writeAll(input.contents);
+      yield* file.sync;
+      const sourceInfo = yield* file.stat;
+      const created = yield* fs.link(tempPath, input.filePath).pipe(
+        Effect.as(true),
+        Effect.catchIf(isAlreadyExists, () => Effect.succeed(false)),
+      );
+      if (!created) return { created: false } as const;
+
+      return {
+        created: true,
+        ownership: {
+          filePath: input.filePath,
+          device: sourceInfo.dev,
+          inode: Option.getOrNull(sourceInfo.ino),
+        },
+      } as const;
+    }),
+  );
+
+/**
+ * Publishes a fully drained byte stream without exposing its temporary file.
+ * The destination appears only after the producer reaches its verified end.
+ */
+export const writeFileStreamExclusivelyAtomically = <E, R>(input: {
+  readonly filePath: string;
+  readonly contents: Stream.Stream<Uint8Array, E, R>;
+}): Effect.Effect<
+  ExclusiveAtomicWriteResult,
+  E | PlatformError.PlatformError,
+  FileSystem.FileSystem | Path.Path | R
+> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const targetDirectory = path.dirname(input.filePath);
+
+      yield* fs.makeDirectory(targetDirectory, { recursive: true });
+      const tempDirectory = yield* fs.makeTempDirectoryScoped({
+        directory: targetDirectory,
+        prefix: `${path.basename(input.filePath)}.`,
+      });
+      const tempPath = path.join(tempDirectory, "contents.tmp");
+      const file = yield* fs.open(tempPath, { flag: "wx" });
+      yield* Stream.runForEach(input.contents, (chunk) => file.writeAll(chunk));
       yield* file.sync;
       const sourceInfo = yield* file.stat;
       const created = yield* fs.link(tempPath, input.filePath).pipe(

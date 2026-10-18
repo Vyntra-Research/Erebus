@@ -29,6 +29,8 @@ export const ThreadSyncLocalThreadBinding = Schema.Struct({
   localThreadId: ThreadId,
   syncProjectId: ThreadSyncProjectId,
   baseRevision: Schema.NullOr(ThreadSyncRevision),
+  /** Cheap v2 projection generation cached for the corresponding base revision. */
+  sourceKeyHash: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
 });
 export type ThreadSyncLocalThreadBinding = typeof ThreadSyncLocalThreadBinding.Type;
 

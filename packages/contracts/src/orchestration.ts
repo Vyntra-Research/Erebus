@@ -557,6 +557,149 @@ export const ThreadSyncImportItem = Schema.Struct({
 });
 export type ThreadSyncImportItem = typeof ThreadSyncImportItem.Type;
 
+/** Opaque identity for one resumable v2 import staging transaction. */
+export const ThreadSyncImportStageId = TrimmedNonEmptyString.pipe(
+  Schema.brand("ThreadSyncImportStageId"),
+);
+export type ThreadSyncImportStageId = typeof ThreadSyncImportStageId.Type;
+
+export const ThreadSyncImportSha256 = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
+export type ThreadSyncImportSha256 = typeof ThreadSyncImportSha256.Type;
+
+export const ThreadSyncImportV2Header = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  coagent: Schema.NullOr(OrchestrationCoagentShell),
+  latestTurnId: Schema.NullOr(TurnId),
+  lifecycle: Schema.Struct({
+    archivedAt: Schema.NullOr(IsoDateTime),
+    settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])),
+    settledAt: Schema.NullOr(IsoDateTime),
+    deletedAt: Schema.NullOr(IsoDateTime),
+  }),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2Header = typeof ThreadSyncImportV2Header.Type;
+
+export const ThreadSyncImportV2TextDescriptor = Schema.Struct({
+  sha256: ThreadSyncImportSha256,
+  sizeBytes: NonNegativeInt,
+  fragmentCount: NonNegativeInt,
+});
+export type ThreadSyncImportV2TextDescriptor = typeof ThreadSyncImportV2TextDescriptor.Type;
+
+export const ThreadSyncImportV2MessageMetadata = Schema.Struct({
+  id: MessageId,
+  role: OrchestrationMessageRole,
+  text: ThreadSyncImportV2TextDescriptor,
+  attachments: Schema.Array(ChatAttachment),
+  turnId: Schema.NullOr(TurnId),
+  streaming: Schema.Literal(false),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2MessageMetadata = typeof ThreadSyncImportV2MessageMetadata.Type;
+
+export const ThreadSyncImportV2PlanMetadata = Schema.Struct({
+  id: OrchestrationProposedPlanId,
+  turnId: Schema.NullOr(TurnId),
+  planMarkdown: ThreadSyncImportV2TextDescriptor,
+  implementedAt: Schema.NullOr(IsoDateTime),
+  implementationThreadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2PlanMetadata = typeof ThreadSyncImportV2PlanMetadata.Type;
+
+export const ThreadSyncImportV2ActivityMetadata = Schema.Struct({
+  id: EventId,
+  tone: OrchestrationThreadActivityTone,
+  kind: TrimmedNonEmptyString,
+  summary: ThreadSyncImportV2TextDescriptor,
+  turnId: Schema.NullOr(TurnId),
+  sequence: Schema.NullOr(NonNegativeInt),
+  createdAt: IsoDateTime,
+});
+export type ThreadSyncImportV2ActivityMetadata = typeof ThreadSyncImportV2ActivityMetadata.Type;
+
+/** One independently persisted, already remapped v2 history row. */
+export const ThreadSyncImportV2Record = Schema.Union([
+  Schema.Struct({
+    ordinal: NonNegativeInt,
+    kind: Schema.Literal("turn"),
+    portableId: TurnId,
+    value: ThreadSyncImportedTurn,
+  }),
+  Schema.Struct({
+    ordinal: NonNegativeInt,
+    kind: Schema.Literal("message"),
+    portableId: MessageId,
+    value: ThreadSyncImportV2MessageMetadata,
+  }),
+  Schema.Struct({
+    ordinal: NonNegativeInt,
+    kind: Schema.Literal("message-text"),
+    messageId: MessageId,
+    fragmentIndex: NonNegativeInt,
+    text: Schema.String,
+  }),
+  Schema.Struct({
+    ordinal: NonNegativeInt,
+    kind: Schema.Literal("plan"),
+    portableId: OrchestrationProposedPlanId,
+    value: ThreadSyncImportV2PlanMetadata,
+  }),
+  Schema.Struct({
+    ordinal: NonNegativeInt,
+    kind: Schema.Literal("plan-markdown"),
+    planId: OrchestrationProposedPlanId,
+    fragmentIndex: NonNegativeInt,
+    text: Schema.String,
+  }),
+  Schema.Struct({
+    ordinal: NonNegativeInt,
+    kind: Schema.Literal("activity"),
+    portableId: EventId,
+    value: ThreadSyncImportV2ActivityMetadata,
+  }),
+  Schema.Struct({
+    ordinal: NonNegativeInt,
+    kind: Schema.Literal("activity-summary"),
+    activityId: EventId,
+    fragmentIndex: NonNegativeInt,
+    text: Schema.String,
+  }),
+]);
+export type ThreadSyncImportV2Record = typeof ThreadSyncImportV2Record.Type;
+
+export const ThreadSyncImportV2Descriptor = Schema.Struct({
+  stageId: ThreadSyncImportStageId,
+  mode: Schema.Literals(["create", "replace"]),
+  threadId: ThreadId,
+  projectId: ProjectId,
+  expectedLocalUpdatedAt: Schema.NullOr(IsoDateTime),
+  localState: Schema.optional(ThreadSyncImportLocalState),
+  header: ThreadSyncImportV2Header,
+  sourceRevision: TrimmedNonEmptyString,
+  sourceHash: TrimmedNonEmptyString,
+  stagedHash: Schema.optional(ThreadSyncImportSha256),
+  recordCount: NonNegativeInt,
+  bindingUpdates: Schema.Array(ThreadSyncBindingUpdate).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(2),
+  ),
+});
+export type ThreadSyncImportV2Descriptor = typeof ThreadSyncImportV2Descriptor.Type;
+
+/** Bounded tail carried by the final event for the in-memory command model. */
+export const ThreadSyncImportV2VisibleHistory = Schema.Struct({
+  latestTurn: Schema.NullOr(ThreadSyncImportedTurn),
+  messages: Schema.Array(ThreadSyncImportedMessage).check(Schema.isMaxLength(128)),
+  proposedPlans: Schema.Array(OrchestrationProposedPlan).check(Schema.isMaxLength(200)),
+  activities: Schema.Array(ThreadSyncImportedActivity).check(Schema.isMaxLength(500)),
+});
+export type ThreadSyncImportV2VisibleHistory = typeof ThreadSyncImportV2VisibleHistory.Type;
+
 export const OrchestrationProjectShell = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -708,9 +851,9 @@ export const OrchestrationSubscribeThreadInput = Schema.Struct({
   /**
    * When provided, the fallback snapshot frame (sent when `afterSequence` is
    * missing or the catch-up gap is too large) is windowed to the last
-   * `turnLimit` user-anchored turns and carries `page` metadata. Absent means
-   * the fallback snapshot is the full thread, preserving pre-pagination client
-   * behavior. Live events are unaffected either way.
+   * `turnLimit` user-anchored turns and carries `page` metadata. Omitting it
+   * keeps the complete fallback snapshot required by pre-pagination clients.
+   * Live events are unaffected either way.
    */
   turnLimit: Schema.optionalKey(PositiveInt),
 });
@@ -721,9 +864,9 @@ export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThr
  * turns with a user pending message (subagent/fan-out turns between them ride
  * along), so the window always contains the last N user prompts. `beforeCursor`
  * requests the disjoint page of older turns strictly before a previously
- * returned cursor. Requests without a window get the full thread; pagination is
- * strictly opt-in so older clients keep today's behavior on both HTTP and the
- * WebSocket fallback snapshot.
+ * returned cursor. Transport pagination is opt-in: callers that omit
+ * `turnLimit` receive a complete snapshot for compatibility with clients that
+ * cannot load older pages.
  */
 export const OrchestrationThreadDetailWindow = Schema.Struct({
   turnLimit: Schema.optionalKey(PositiveInt),
@@ -1214,6 +1357,48 @@ export const ThreadSyncImportBatchCommand = Schema.Struct({
 });
 export type ThreadSyncImportBatchCommand = typeof ThreadSyncImportBatchCommand.Type;
 
+export const ThreadSyncImportV2StartCommand = Schema.Struct({
+  type: Schema.Literal("thread.sync.import-v2.start"),
+  commandId: CommandId,
+  descriptor: ThreadSyncImportV2Descriptor,
+  startedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2StartCommand = typeof ThreadSyncImportV2StartCommand.Type;
+
+export const ThreadSyncImportV2ChunkCommand = Schema.Struct({
+  type: Schema.Literal("thread.sync.import-v2.chunk"),
+  commandId: CommandId,
+  stageId: ThreadSyncImportStageId,
+  threadId: ThreadId,
+  chunkIndex: NonNegativeInt,
+  chunkHash: ThreadSyncImportSha256,
+  records: Schema.Array(ThreadSyncImportV2Record).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(64),
+  ),
+  appendedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2ChunkCommand = typeof ThreadSyncImportV2ChunkCommand.Type;
+
+export const ThreadSyncImportV2ValidateCommand = Schema.Struct({
+  type: Schema.Literal("thread.sync.import-v2.validate"),
+  commandId: CommandId,
+  descriptor: ThreadSyncImportV2Descriptor,
+  descriptorHash: ThreadSyncImportSha256,
+  stagedHash: ThreadSyncImportSha256,
+  validatedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2ValidateCommand = typeof ThreadSyncImportV2ValidateCommand.Type;
+
+export const ThreadSyncImportV2CommitCommand = Schema.Struct({
+  type: Schema.Literal("thread.sync.import-v2.commit"),
+  commandId: CommandId,
+  descriptor: ThreadSyncImportV2Descriptor,
+  visibleHistory: ThreadSyncImportV2VisibleHistory,
+  importedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2CommitCommand = typeof ThreadSyncImportV2CommitCommand.Type;
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadImportContextConsumeCommand,
@@ -1225,6 +1410,10 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadRevertCompleteCommand,
   ThreadTitleRegenerationCompleteCommand,
   ThreadSyncImportBatchCommand,
+  ThreadSyncImportV2StartCommand,
+  ThreadSyncImportV2ChunkCommand,
+  ThreadSyncImportV2ValidateCommand,
+  ThreadSyncImportV2CommitCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1267,6 +1456,9 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.sync-import-v2.started",
+  "thread.sync-import-v2.chunk-appended",
+  "thread.sync-import-v2.validated",
   "thread.sync-imported",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
@@ -1330,8 +1522,64 @@ export const ThreadSyncImportedPayload = Schema.Struct({
   bindingUpdates: Schema.Array(ThreadSyncBindingUpdate).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  stagedImport: Schema.optional(
+    Schema.Struct({
+      stageId: ThreadSyncImportStageId,
+      recordCount: NonNegativeInt,
+      stagedHash: ThreadSyncImportSha256,
+    }),
+  ),
 });
 export type ThreadSyncImportedPayload = typeof ThreadSyncImportedPayload.Type;
+
+export const ThreadSyncImportV2StartedPayload = Schema.Struct({
+  descriptor: ThreadSyncImportV2Descriptor,
+  startedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2StartedPayload = typeof ThreadSyncImportV2StartedPayload.Type;
+
+const ThreadSyncImportV2ChunkReferencePayload = Schema.Struct({
+  stageId: ThreadSyncImportStageId,
+  threadId: ThreadId,
+  chunkIndex: NonNegativeInt,
+  chunkHash: ThreadSyncImportSha256,
+  firstOrdinal: NonNegativeInt,
+  lastOrdinal: NonNegativeInt,
+  recordCount: PositiveInt,
+  appendedAt: IsoDateTime,
+});
+
+/**
+ * New events retain only a durable reference to rows written atomically into
+ * the import staging tables. The legacy shape remains decodable so databases
+ * created by an earlier 0.8.1 prerelease can still advance their projections.
+ */
+export const ThreadSyncImportV2ChunkAppendedPayload = Schema.Union([
+  ThreadSyncImportV2ChunkReferencePayload,
+  Schema.Struct({
+    stageId: ThreadSyncImportStageId,
+    threadId: ThreadId,
+    chunkIndex: NonNegativeInt,
+    chunkHash: ThreadSyncImportSha256,
+    records: Schema.Array(ThreadSyncImportV2Record).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(64),
+    ),
+    appendedAt: IsoDateTime,
+  }),
+]);
+export type ThreadSyncImportV2ChunkAppendedPayload =
+  typeof ThreadSyncImportV2ChunkAppendedPayload.Type;
+
+export const ThreadSyncImportV2ValidatedPayload = Schema.Struct({
+  stageId: ThreadSyncImportStageId,
+  threadId: ThreadId,
+  recordCount: NonNegativeInt,
+  descriptorHash: ThreadSyncImportSha256,
+  stagedHash: ThreadSyncImportSha256,
+  validatedAt: IsoDateTime,
+});
+export type ThreadSyncImportV2ValidatedPayload = typeof ThreadSyncImportV2ValidatedPayload.Type;
 
 export const ThreadDeletedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -1586,6 +1834,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.created"),
     payload: ThreadCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.sync-import-v2.started"),
+    payload: ThreadSyncImportV2StartedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.sync-import-v2.chunk-appended"),
+    payload: ThreadSyncImportV2ChunkAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.sync-import-v2.validated"),
+    payload: ThreadSyncImportV2ValidatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

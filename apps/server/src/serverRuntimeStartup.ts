@@ -306,7 +306,11 @@ export const reconcileProviderSessions = Effect.gen(function* () {
   const liveThreadIds = new Set(
     (yield* providerService.listSessions()).map((session) => session.threadId),
   );
-  const { threads } = yield* query.getCommandReadModel();
+  const [activeShell, archivedShell] = yield* Effect.all([
+    query.getShellSnapshot(),
+    query.getArchivedShellSnapshot(),
+  ]);
+  const threads = [...activeShell.threads, ...archivedShell.threads];
   const orphanedThreads = threads.filter(
     (thread) =>
       thread.session !== null &&

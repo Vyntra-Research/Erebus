@@ -190,6 +190,69 @@ describe("projectActivityPayload", () => {
     expect(JSON.stringify(projected.payload).length).toBeLessThan(500);
   });
 
+  it("bounds one huge MCP input without mutating the persisted source payload", () => {
+    const huge = "x".repeat(1_000_000);
+    const source = activity({
+      itemType: "mcp_tool_call",
+      data: {
+        item: {
+          type: "mcpToolCall",
+          id: "item-huge",
+          tool: "write_file",
+          server: "filesystem",
+          status: "completed",
+          arguments: { content: huge },
+          result: { content: [{ type: "text", text: huge }] },
+        },
+        input: { content: huge },
+      },
+    });
+
+    const projected = projectActivityPayload(source);
+    const payload = projected.payload as Record<string, unknown>;
+    const data = payload.data as Record<string, unknown>;
+    const item = data.item as Record<string, unknown>;
+    const args = item.arguments as Record<string, unknown>;
+    expect((args.content as string).length).toBeLessThanOrEqual(16 * 1024);
+    expect(JSON.stringify(payload).length).toBeLessThan(40 * 1024);
+    const sourceData = (source.payload as Record<string, unknown>).data as Record<string, unknown>;
+    const sourceItem = sourceData.item as Record<string, unknown>;
+    const sourceArguments = sourceItem.arguments as Record<string, unknown>;
+    expect((sourceArguments.content as string).length).toBe(1_000_000);
+  });
+
+  it("bounds deeply shared numeric tool inputs by their serialized size", () => {
+    let nested: unknown = Array.from({ length: 128 }, (_, index) => index * 1_000_003);
+    for (let depth = 0; depth < 7; depth += 1) {
+      nested = Array.from({ length: 128 }, () => nested);
+    }
+    const projected = projectActivityPayload(
+      activity({
+        itemType: "mcp_tool_call",
+        data: {
+          toolName: "mcp__fixture__numeric_tree",
+          input: { nested },
+        },
+      }),
+    );
+
+    // The value projector has a 32 KiB JSON budget. Leave 8 KiB for the
+    // activity and data wrappers while asserting the final wire payload.
+    expect(JSON.stringify(projected.payload).length).toBeLessThanOrEqual(40 * 1024);
+  });
+
+  it("bounds non-canonical activity labels and detail text", () => {
+    const projected = projectActivityPayload({
+      ...activity({ detail: "d".repeat(100_000), message: "m".repeat(100_000) }),
+      kind: "runtime.warning",
+      summary: "s".repeat(10_000),
+    });
+    const payload = projected.payload as Record<string, unknown>;
+    expect(projected.summary.length).toBe(512);
+    expect((payload.detail as string).length).toBe(8 * 1024);
+    expect((payload.message as string).length).toBe(8 * 1024);
+  });
+
   it("passes task lifecycle payloads (no data field) through untouched", () => {
     const source = activity({
       taskId: "task-9",

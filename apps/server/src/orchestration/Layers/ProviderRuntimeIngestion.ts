@@ -13,8 +13,6 @@ import {
   ThreadId,
   type ThreadTokenUsageSnapshot,
   TurnId,
-  type OrchestrationCheckpointSummary,
-  type OrchestrationProposedPlan,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
@@ -100,6 +98,7 @@ const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY = 10_000;
 const TASK_DESCRIPTION_BY_TASK_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+const RUNTIME_THREAD_WINDOW_USER_TURNS = 4;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
 type TurnStartRequestedDomainEvent = Extract<
@@ -182,48 +181,6 @@ function findMessageById(
     }
   }
   return undefined;
-}
-
-function findProposedPlanById(
-  proposedPlans: ReadonlyArray<
-    Pick<OrchestrationProposedPlan, "id" | "createdAt" | "implementedAt" | "implementationThreadId">
-  >,
-  planId: string,
-):
-  | Pick<OrchestrationProposedPlan, "id" | "createdAt" | "implementedAt" | "implementationThreadId">
-  | undefined {
-  for (let index = 0; index < proposedPlans.length; index += 1) {
-    const proposedPlan = proposedPlans[index];
-    if (proposedPlan?.id === planId) {
-      return proposedPlan;
-    }
-  }
-  return undefined;
-}
-
-function hasCheckpointForTurn(
-  checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
-  turnId: TurnId,
-): boolean {
-  for (let index = 0; index < checkpoints.length; index += 1) {
-    if (checkpoints[index]?.turnId === turnId) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function maxCheckpointTurnCount(
-  checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
-): number {
-  let maxTurnCount = 0;
-  for (let index = 0; index < checkpoints.length; index += 1) {
-    const checkpoint = checkpoints[index];
-    if (checkpoint && checkpoint.checkpointTurnCount > maxTurnCount) {
-      maxTurnCount = checkpoint.checkpointTurnCount;
-    }
-  }
-  return maxTurnCount;
 }
 
 function truncateDetail(value: string, limit = 180): string {
@@ -1044,8 +1001,24 @@ const make = Effect.gen(function* () {
 
   const resolveThreadDetail = Effect.fn("resolveThreadDetail")(function* (threadId: ThreadId) {
     return yield* projectionSnapshotQuery
-      .getThreadDetailById(threadId)
-      .pipe(Effect.map(Option.getOrUndefined));
+      .getThreadDetailSnapshot(threadId, { turnLimit: RUNTIME_THREAD_WINDOW_USER_TURNS })
+      .pipe(
+        Effect.map(Option.map((snapshot) => snapshot.thread)),
+        Effect.map(Option.getOrUndefined),
+      );
+  });
+
+  const resolveProposedPlanById = Effect.fn("resolveProposedPlanById")(function* (
+    threadId: ThreadId,
+    planId: string,
+  ) {
+    if (projectionSnapshotQuery.getThreadProposedPlanById !== undefined) {
+      return yield* projectionSnapshotQuery
+        .getThreadProposedPlanById(threadId, planId as OrchestrationProposedPlanId)
+        .pipe(Effect.map(Option.getOrUndefined));
+    }
+    const thread = yield* resolveThreadDetail(threadId);
+    return thread?.proposedPlans.find((plan) => plan.id === planId);
   });
 
   const resolveThreadShell = Effect.fn("resolveThreadShell")(function* (threadId: ThreadId) {
@@ -1384,12 +1357,6 @@ const make = Effect.gen(function* () {
   const upsertProposedPlan = (input: {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
-    threadProposedPlans: ReadonlyArray<{
-      id: string;
-      createdAt: string;
-      implementedAt: string | null;
-      implementationThreadId: ThreadId | null;
-    }>;
     planId: string;
     turnId?: TurnId;
     planMarkdown: string | undefined;
@@ -1402,7 +1369,7 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      const existingPlan = findProposedPlanById(input.threadProposedPlans, input.planId);
+      const existingPlan = yield* resolveProposedPlanById(input.threadId, input.planId);
       yield* orchestrationEngine.dispatch({
         type: "thread.proposed-plan.upsert",
         commandId: yield* providerCommandId(input.event, "proposed-plan-upsert"),
@@ -1423,12 +1390,6 @@ const make = Effect.gen(function* () {
   const finalizeBufferedProposedPlan = (input: {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
-    threadProposedPlans: ReadonlyArray<{
-      id: string;
-      createdAt: string;
-      implementedAt: string | null;
-      implementationThreadId: ThreadId | null;
-    }>;
     planId: string;
     turnId?: TurnId;
     fallbackMarkdown?: string;
@@ -1446,7 +1407,6 @@ const make = Effect.gen(function* () {
       yield* upsertProposedPlan({
         event: input.event,
         threadId: input.threadId,
-        threadProposedPlans: input.threadProposedPlans,
         planId: input.planId,
         ...(input.turnId ? { turnId: input.turnId } : {}),
         planMarkdown,
@@ -1562,9 +1522,8 @@ const make = Effect.gen(function* () {
       implementationThreadId: ThreadId,
       implementedAt: string,
     ) {
-      const sourceThread = yield* resolveThreadDetail(sourceThreadId);
-      const sourcePlan = sourceThread?.proposedPlans.find((entry) => entry.id === sourcePlanId);
-      if (!sourceThread || !sourcePlan || sourcePlan.implementedAt !== null) {
+      const sourcePlan = yield* resolveProposedPlanById(sourceThreadId, sourcePlanId);
+      if (!sourcePlan || sourcePlan.implementedAt !== null) {
         return;
       }
 
@@ -1574,7 +1533,7 @@ const make = Effect.gen(function* () {
         commandId: CommandId.make(
           `provider:source-proposed-plan-implemented:${implementationThreadId}:${commandUuid}`,
         ),
-        threadId: sourceThread.id,
+        threadId: sourceThreadId,
         proposedPlan: {
           ...sourcePlan,
           implementedAt,
@@ -1931,11 +1890,9 @@ const make = Effect.gen(function* () {
       }
 
       if (proposedPlanCompletion) {
-        const detailedThread = yield* getLoadedThreadDetail();
         yield* finalizeBufferedProposedPlan({
           event,
           threadId: thread.id,
-          threadProposedPlans: detailedThread?.proposedPlans ?? [],
           planId: proposedPlanCompletion.planId,
           ...(proposedPlanCompletion.turnId ? { turnId: proposedPlanCompletion.turnId } : {}),
           fallbackMarkdown: proposedPlanCompletion.planMarkdown,
@@ -1946,7 +1903,6 @@ const make = Effect.gen(function* () {
       if (event.type === "turn.completed") {
         const detailedThread = yield* getLoadedThreadDetail();
         const messages = detailedThread?.messages ?? [];
-        const proposedPlans = detailedThread?.proposedPlans ?? [];
         const turnId = toTurnId(event.turnId);
         if (turnId) {
           const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
@@ -1971,7 +1927,6 @@ const make = Effect.gen(function* () {
           yield* finalizeBufferedProposedPlan({
             event,
             threadId: thread.id,
-            threadProposedPlans: proposedPlans,
             planId: proposedPlanIdForTurn(thread.id, turnId),
             turnId,
             updatedAt: now,
@@ -2026,9 +1981,10 @@ const make = Effect.gen(function* () {
       if (event.type === "turn.diff.updated") {
         const turnId = toTurnId(event.turnId);
         const checkpointContext = turnId
-          ? yield* projectionSnapshotQuery
-              .getThreadCheckpointContext(thread.id)
-              .pipe(Effect.map(Option.getOrUndefined))
+          ? yield* (
+              projectionSnapshotQuery.getThreadCheckpointHeadContext?.(thread.id, turnId) ??
+              Effect.succeed(Option.none())
+            ).pipe(Effect.map(Option.getOrUndefined))
           : undefined;
         const workspaceCwd =
           checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined;
@@ -2037,7 +1993,7 @@ const make = Effect.gen(function* () {
           // (non-placeholder) capture from CheckpointReactor should not
           // be clobbered, and dispatching a duplicate placeholder for the
           // same turnId would produce an unstable checkpointTurnCount.
-          if (hasCheckpointForTurn(checkpointContext.checkpoints, turnId)) {
+          if (checkpointContext.turnCheckpoint !== null) {
             // Already tracked; no-op.
           } else {
             const assistantMessageId = MessageId.make(
@@ -2053,7 +2009,8 @@ const make = Effect.gen(function* () {
               status: "missing",
               files: [],
               assistantMessageId,
-              checkpointTurnCount: maxCheckpointTurnCount(checkpointContext.checkpoints) + 1,
+              checkpointTurnCount:
+                (checkpointContext.latestCheckpoint?.checkpointTurnCount ?? 0) + 1,
               createdAt: now,
             });
           }

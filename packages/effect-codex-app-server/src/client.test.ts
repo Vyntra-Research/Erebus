@@ -154,7 +154,7 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       assert.equal(initialized.userAgent, "mock-codex-app-server");
     }),
   );
-  it.effect("drops thread resume history after validating session metadata", () =>
+  it.effect("requests a history-free resume and validates only session metadata", () =>
     Effect.gen(function* () {
       const handle = yield* makeHandle();
       const scope = yield* Scope.make();
@@ -163,7 +163,10 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
 
       const resumed = yield* Effect.gen(function* () {
         const client = yield* CodexClient.CodexAppServerClient;
-        return yield* client.request("thread/resume", { threadId: "thread-resumed" });
+        return yield* client.request("thread/resume", {
+          threadId: "thread-resumed",
+          excludeTurns: true,
+        });
       }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
 
       assert.equal(resumed.thread.id, "thread-resumed");

@@ -6,6 +6,7 @@ import {
   MessageId,
   ThreadId,
   type OrchestrationThread,
+  type OrchestrationThreadShell,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
@@ -27,6 +28,7 @@ import {
 const MAX_DIRECT_CHILDREN = 4;
 const FORK_MESSAGE_LIMIT = 12;
 const FORK_CONTEXT_MAX_CHARS = 16_000;
+const COAGENT_THREAD_WINDOW_USER_TURNS = 20;
 
 const listInput = Schema.Struct({ scope: Schema.Literals(["children", "project"]) });
 const readInput = Schema.Struct({
@@ -65,7 +67,7 @@ const response = (value: unknown, success = true): CodexSchema.DynamicToolCallRe
 const failure = (message: string, issues: ReadonlyArray<string> = []) =>
   response({ accepted: false, status: "rejected", message, issues }, false);
 
-const threadStatus = (thread: OrchestrationThread) => {
+const threadStatus = (thread: OrchestrationThread | OrchestrationThreadShell) => {
   if (
     thread.session?.status === "starting" ||
     thread.session?.status === "running" ||
@@ -77,7 +79,7 @@ const threadStatus = (thread: OrchestrationThread) => {
   return "ready";
 };
 
-const threadSummary = (thread: OrchestrationThread) => ({
+const threadSummary = (thread: OrchestrationThread | OrchestrationThreadShell) => ({
   threadId: thread.id,
   title: thread.title,
   status: threadStatus(thread),
@@ -198,15 +200,28 @@ const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const projections = yield* ProjectionSnapshotQuery;
 
-  const getThread = Effect.fn("CoagentToolController.getThread")(function* (threadId: ThreadId) {
-    return Option.getOrUndefined(yield* projections.getThreadDetailById(threadId));
+  const getThreadShell = Effect.fn("CoagentToolController.getThreadShell")(function* (
+    threadId: ThreadId,
+  ) {
+    return Option.getOrUndefined(yield* projections.getThreadShellById(threadId));
+  });
+
+  const getThreadDetail = Effect.fn("CoagentToolController.getThreadDetail")(function* (
+    threadId: ThreadId,
+  ) {
+    const snapshot = Option.getOrUndefined(
+      yield* projections.getThreadDetailSnapshot(threadId, {
+        turnLimit: COAGENT_THREAD_WINDOW_USER_TURNS,
+      }),
+    );
+    return snapshot?.thread;
   });
 
   const callerLink = (context: CoagentToolContext) => registry.getByChild(context.threadId);
 
   const canReadTarget = Effect.fn("CoagentToolController.canReadTarget")(function* (
     context: CoagentToolContext,
-    target: OrchestrationThread,
+    target: OrchestrationThread | OrchestrationThreadShell,
   ) {
     if (target.projectId !== context.projectId) return false;
     const link = Option.getOrUndefined(yield* callerLink(context));
@@ -215,7 +230,7 @@ const make = Effect.gen(function* () {
 
   const canSendTarget = Effect.fn("CoagentToolController.canSendTarget")(function* (
     context: CoagentToolContext,
-    target: OrchestrationThread,
+    target: OrchestrationThread | OrchestrationThreadShell,
   ) {
     if (target.projectId !== context.projectId || target.id === context.threadId) return false;
     const link = Option.getOrUndefined(yield* callerLink(context));
@@ -223,7 +238,7 @@ const make = Effect.gen(function* () {
   });
 
   const startTurn = Effect.fn("CoagentToolController.startTurn")(function* (
-    target: OrchestrationThread,
+    target: OrchestrationThread | OrchestrationThreadShell,
     text: string,
     titleSeed?: string,
   ) {
@@ -253,7 +268,7 @@ const make = Effect.gen(function* () {
     const links = yield* registry.listByParent(parentThreadId);
     const allowed = new Set(links.map((link) => link.childThreadId));
     if (threadIds.some((threadId) => !allowed.has(threadId))) return null;
-    const snapshots = yield* Effect.forEach(threadIds, getThread);
+    const snapshots = yield* Effect.forEach(threadIds, getThreadDetail);
     return snapshots.filter((thread): thread is OrchestrationThread => thread !== undefined);
   });
 
@@ -269,7 +284,7 @@ const make = Effect.gen(function* () {
           return failure("Unknown Erebus task coordination tool.", [params.tool]);
         }
 
-        const caller = yield* getThread(context.threadId);
+        const caller = yield* getThreadShell(context.threadId);
         if (!caller || caller.projectId !== context.projectId) {
           return failure("The calling task is not active in this Erebus project.");
         }
@@ -280,7 +295,9 @@ const make = Effect.gen(function* () {
             const input = yield* Schema.decodeUnknownEffect(listInput)(params.arguments);
             if (input.scope === "children") {
               const links = yield* registry.listByParent(context.threadId);
-              const threads = yield* Effect.forEach(links, (link) => getThread(link.childThreadId));
+              const threads = yield* Effect.forEach(links, (link) =>
+                getThreadShell(link.childThreadId),
+              );
               return response({
                 accepted: true,
                 scope: input.scope,
@@ -293,23 +310,20 @@ const make = Effect.gen(function* () {
             if (childLink) {
               return failure("A co-agent cannot enumerate unrelated project tasks.");
             }
-            const snapshot = yield* projections.getSnapshot();
+            const snapshot = yield* projections.getShellSnapshot();
             return response({
               accepted: true,
               scope: input.scope,
               tasks: snapshot.threads
                 .filter(
-                  (thread) =>
-                    thread.projectId === context.projectId &&
-                    thread.deletedAt === null &&
-                    thread.archivedAt === null,
+                  (thread) => thread.projectId === context.projectId && thread.archivedAt === null,
                 )
                 .map(threadSummary),
             });
           }
           case "read": {
             const input = yield* Schema.decodeUnknownEffect(readInput)(params.arguments);
-            const target = yield* getThread(input.threadId);
+            const target = yield* getThreadDetail(input.threadId);
             if (!target || !(yield* canReadTarget(context, target))) {
               return failure("This task may not read that Erebus task.");
             }
@@ -325,6 +339,11 @@ const make = Effect.gen(function* () {
               return failure("A co-agent cannot create another co-agent task.", [
                 `parentThreadId=${childLink.parentThreadId}`,
               ]);
+            }
+            const forkSource =
+              input.mode === "fork" ? yield* getThreadDetail(context.threadId) : undefined;
+            if (input.mode === "fork" && !forkSource) {
+              return failure("The parent task context could not be loaded for a fork.");
             }
             const childThreadId = ThreadId.make(NodeCrypto.randomUUID());
             const createdAt = yield* nowIso;
@@ -349,7 +368,7 @@ const make = Effect.gen(function* () {
                 const prompt = childAssignmentPrompt({
                   task: input.task.trim(),
                   parentThreadId: context.threadId,
-                  ...(input.mode === "fork" ? { historicalContext: forkContext(caller) } : {}),
+                  ...(forkSource ? { historicalContext: forkContext(forkSource) } : {}),
                 });
                 yield* engine.dispatch({
                   type: "thread.create",
@@ -418,7 +437,7 @@ const make = Effect.gen(function* () {
           }
           case "send": {
             const input = yield* Schema.decodeUnknownEffect(sendInput)(params.arguments);
-            const target = yield* getThread(input.threadId);
+            const target = yield* getThreadShell(input.threadId);
             if (!target || !(yield* canSendTarget(context, target))) {
               return failure("This task may not send a message to that Erebus task.");
             }
@@ -439,7 +458,7 @@ const make = Effect.gen(function* () {
             if (!links.some((link) => link.childThreadId === input.threadId)) {
               return failure("Only a direct co-agent may be interrupted through this tool.");
             }
-            const target = yield* getThread(input.threadId);
+            const target = yield* getThreadShell(input.threadId);
             if (!target) return failure("The co-agent task is not active.");
             yield* engine.dispatch({
               type: "thread.turn.interrupt",
@@ -494,7 +513,7 @@ const make = Effect.gen(function* () {
             if (!link || link.status === "released") {
               return failure("Only an unreleased direct co-agent may be released.");
             }
-            const target = yield* getThread(input.threadId);
+            const target = yield* getThreadShell(input.threadId);
             if (!target)
               return failure("The co-agent task is not active or was already discarded.");
             if (threadStatus(target) === "running") {

@@ -16,10 +16,36 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { THREAD_SYNC_NAMESPACE } from "./ThreadSyncDocuments.ts";
+import {
+  THREAD_SYNC_V2_BLOBS_DIRECTORY,
+  THREAD_SYNC_V2_CHUNKS_DIRECTORY,
+  THREAD_SYNC_V2_MANIFEST_PATH,
+  THREAD_SYNC_V2_NAMESPACE,
+  THREAD_SYNC_V2_PROJECTS_DIRECTORY,
+  THREAD_SYNC_V2_THREADS_DIRECTORY,
+} from "./ThreadSyncRepositoryV2.ts";
 
 const MANAGED_MIRROR_MARKER = "erebus-managed-thread-sync-v1\n";
 const REMOTE_NAME = "origin";
-const SPARSE_CHECKOUT_PATTERN = `/${THREAD_SYNC_NAMESPACE}/`;
+const SPARSE_METADATA_PATTERNS = [
+  // V1 metadata stays available for imports; migrated remotes keep only a
+  // fail-closed retirement marker. V2 separates its bounded index from the
+  // potentially large content-addressed payload.
+  `/${THREAD_SYNC_NAMESPACE}/`,
+  `/${THREAD_SYNC_V2_MANIFEST_PATH}`,
+  `/${THREAD_SYNC_V2_PROJECTS_DIRECTORY}/`,
+  `/${THREAD_SYNC_V2_THREADS_DIRECTORY}/`,
+  `!/${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/`,
+  `!/${THREAD_SYNC_V2_BLOBS_DIRECTORY}/`,
+] as const;
+const MANAGED_SYNC_NAMESPACES = [THREAD_SYNC_NAMESPACE, THREAD_SYNC_V2_NAMESPACE] as const;
+const V2_PAYLOAD_PATH_PATTERN = new RegExp(
+  `^${THREAD_SYNC_V2_NAMESPACE.replaceAll(".", "\\.").replaceAll("/", "\\/")}/(?:chunks/[a-f0-9]{64}\\.ndjson|blobs/[a-f0-9]{64}\\.blob)$`,
+);
+const GIT_PATH_BATCH_SIZE = 128;
+const MANAGED_ATTRIBUTES_BEGIN = "# BEGIN EREBUS THREAD SYNC ATTRIBUTES";
+const MANAGED_ATTRIBUTES_END = "# END EREBUS THREAD SYNC ATTRIBUTES";
+const MANAGED_ATTRIBUTES_RULE = `${THREAD_SYNC_V2_NAMESPACE}/** -text`;
 const isThreadSyncError = Schema.is(ThreadSyncError);
 
 export interface ThreadSyncGitFetchResult {
@@ -34,12 +60,30 @@ export interface ThreadSyncGitShape {
   readonly checkoutRemote: (
     configuration: ThreadSyncConfiguration,
     expectedRemoteRevision: ThreadSyncRevision | null,
+    /** Reuses the immediately preceding discovery instead of contacting the remote twice. */
+    fetched?: ThreadSyncGitFetchResult,
   ) => Effect.Effect<ThreadSyncGitFetchResult, ThreadSyncError>;
   readonly commitAndPush: (input: {
     readonly configuration: ThreadSyncConfiguration;
     readonly expectedRemoteRevision: ThreadSyncRevision | null;
     readonly message: string;
+    /** Exact content-addressed V2 payloads made unreachable by this commit. */
+    readonly removePayloadPaths?: ReadonlyArray<string>;
   }) => Effect.Effect<ThreadSyncRevision, ThreadSyncError>;
+  /**
+   * Hydrates only the selected V2 payload objects. Optional so older test
+   * doubles remain source-compatible while the service adopts lazy payloads.
+   */
+  readonly materializePayloadPaths?: (input: {
+    readonly configuration: ThreadSyncConfiguration;
+    readonly mirrorPath: string;
+    readonly paths: ReadonlyArray<string>;
+  }) => Effect.Effect<void, ThreadSyncError>;
+  /** Removes hydrated V2 payload files while keeping metadata checked out. */
+  readonly prunePayloads?: (input: {
+    readonly configuration: ThreadSyncConfiguration;
+    readonly mirrorPath: string;
+  }) => Effect.Effect<void, ThreadSyncError>;
   readonly removeMirror: (
     configuration: ThreadSyncConfiguration,
   ) => Effect.Effect<void, ThreadSyncError>;
@@ -262,6 +306,7 @@ export const make = Effect.gen(function* () {
     readonly operation: "configure" | "fetch" | "disconnect" | "push";
     readonly cwd: string;
     readonly args: ReadonlyArray<string>;
+    readonly stdin?: string;
     readonly env?: NodeJS.ProcessEnv;
     readonly allowExitCodes?: ReadonlyArray<number>;
   }) {
@@ -271,9 +316,14 @@ export const make = Effect.gen(function* () {
         command: "git",
         args: input.args,
         cwd: input.cwd,
+        ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
         env: { ...input.env, LANG: "C", LC_ALL: "C" },
         allowNonZeroExit: true,
-        timeoutMs: 60_000,
+        timeoutMs: input.args.some(
+          (argument) => argument === "fetch" || argument === "push" || argument === "ls-remote",
+        )
+          ? 10 * 60_000
+          : 60_000,
         maxOutputBytes: 16 * 1024 * 1024,
       })
       .pipe(
@@ -296,6 +346,77 @@ export const make = Effect.gen(function* () {
     }
     return result;
   });
+
+  const applyMetadataSparseCheckout = Effect.fn("ThreadSyncGit.applyMetadataSparseCheckout")(
+    function* (mirrorPath: string, operation: "configure" | "fetch" | "push") {
+      yield* runGit({
+        operation,
+        cwd: mirrorPath,
+        args: ["sparse-checkout", "init", "--no-cone"],
+      });
+      yield* runGit({
+        operation,
+        cwd: mirrorPath,
+        args: ["sparse-checkout", "set", "--no-cone", ...SPARSE_METADATA_PATTERNS],
+      });
+    },
+  );
+
+  const configureManagedContentBytes = Effect.fn("ThreadSyncGit.configureManagedContentBytes")(
+    function* (mirrorPath: string) {
+      // V2 addresses JSON and NDJSON objects by their exact bytes. Pin the
+      // managed mirror so a host-level autocrlf setting cannot rewrite those
+      // bytes during checkout or staging. These settings remain local to the
+      // Erebus-owned repository.
+      yield* runGit({
+        operation: "configure",
+        cwd: mirrorPath,
+        args: ["config", "--local", "core.autocrlf", "false"],
+      });
+      yield* runGit({
+        operation: "configure",
+        cwd: mirrorPath,
+        args: ["config", "--local", "core.eol", "lf"],
+      });
+
+      // A tracked .gitattributes file can override core.autocrlf and rewrite
+      // content-addressed NDJSON or blobs. Pin only Erebus v2 paths in the
+      // repository-local attributes file, which remote commits cannot change.
+      const infoPath = path.join(mirrorPath, ".git", "info");
+      const attributesPath = path.join(infoPath, "attributes");
+      yield* fileSystem
+        .makeDirectory(infoPath, { recursive: true })
+        .pipe(Effect.mapError((cause) => mapThreadSyncIoError("configure", cause)));
+      const existing = (yield* fileSystem.exists(attributesPath))
+        ? yield* fileSystem
+            .readFileString(attributesPath)
+            .pipe(Effect.mapError((cause) => mapThreadSyncIoError("configure", cause)))
+        : "";
+      const lines = existing.split(/\r?\n/);
+      const beginIndex = lines.indexOf(MANAGED_ATTRIBUTES_BEGIN);
+      const endIndex = beginIndex < 0 ? -1 : lines.indexOf(MANAGED_ATTRIBUTES_END, beginIndex + 1);
+      const preserved =
+        beginIndex >= 0 && endIndex > beginIndex
+          ? [...lines.slice(0, beginIndex), ...lines.slice(endIndex + 1)]
+          : lines.filter(
+              (line) => line !== MANAGED_ATTRIBUTES_BEGIN && line !== MANAGED_ATTRIBUTES_END,
+            );
+      while (preserved.at(-1) === "") preserved.pop();
+      const managedAttributes = [
+        ...preserved,
+        ...(preserved.length === 0 ? [] : [""]),
+        MANAGED_ATTRIBUTES_BEGIN,
+        MANAGED_ATTRIBUTES_RULE,
+        MANAGED_ATTRIBUTES_END,
+        "",
+      ].join("\n");
+      if (existing !== managedAttributes) {
+        yield* fileSystem
+          .writeFileString(attributesPath, managedAttributes)
+          .pipe(Effect.mapError((cause) => mapThreadSyncIoError("configure", cause)));
+      }
+    },
+  );
 
   const resolveMirror = Effect.fn("ThreadSyncGit.resolveMirror")(function* (
     configuration: ThreadSyncConfiguration,
@@ -380,6 +501,11 @@ export const make = Effect.gen(function* () {
       });
     }
 
+    // Apply this on every reuse as well as first initialization. Older
+    // mirrors may have inherited a global autocrlf=true setting or retained a
+    // stale local override from a previous build.
+    yield* configureManagedContentBytes(mirrorPath);
+
     yield* runGit({
       operation: "configure",
       cwd: mirrorPath,
@@ -419,20 +545,40 @@ export const make = Effect.gen(function* () {
     }
 
     // Keep the complete remote tree in the index so commits preserve files
-    // owned by other tools, while materializing only Erebus thread data in the
-    // managed worktree. Running these commands again also migrates mirrors
-    // created before sparse checkout was enabled.
-    yield* runGit({
-      operation: "configure",
-      cwd: mirrorPath,
-      args: ["sparse-checkout", "init", "--no-cone"],
-    });
-    yield* runGit({
-      operation: "configure",
-      cwd: mirrorPath,
-      args: ["sparse-checkout", "set", "--no-cone", SPARSE_CHECKOUT_PATTERN],
-    });
+    // owned by other tools. V2 checks out only its bounded index; selected
+    // chunks and blobs are hydrated explicitly. Running this again also
+    // migrates mirrors created before sparse checkout was enabled.
+    yield* applyMetadataSparseCheckout(mirrorPath, "configure");
     return mirrorPath;
+  });
+
+  const verifyManagedMirrorPath = Effect.fn("ThreadSyncGit.verifyManagedMirrorPath")(function* (
+    configuration: ThreadSyncConfiguration,
+    mirrorPath: string,
+  ) {
+    const expectedPath = path.resolve(mirrorsRoot, mirrorKey(configuration));
+    if (
+      path.resolve(mirrorPath) !== expectedPath ||
+      path.dirname(expectedPath) !== path.resolve(mirrorsRoot)
+    ) {
+      return yield* new ThreadSyncError({
+        operation: "fetch",
+        code: "integrity-failed",
+        detail: "The requested payload path does not belong to this managed sync mirror.",
+      });
+    }
+    const markerPath = path.join(expectedPath, ".erebus-thread-sync-managed");
+    const marker = yield* fileSystem
+      .readFileString(markerPath)
+      .pipe(Effect.mapError((cause) => mapThreadSyncIoError("configure", cause)));
+    if (marker !== MANAGED_MIRROR_MARKER) {
+      return yield* new ThreadSyncError({
+        operation: "fetch",
+        code: "integrity-failed",
+        detail: "The managed sync mirror marker is invalid.",
+      });
+    }
+    return expectedPath;
   });
 
   const configurePartialClone = Effect.fn("ThreadSyncGit.configurePartialClone")(function* (input: {
@@ -611,7 +757,7 @@ export const make = Effect.gen(function* () {
       yield* runGit({
         operation,
         cwd: fetched.mirrorPath,
-        args: ["clean", "-fdx", "--", THREAD_SYNC_NAMESPACE],
+        args: ["clean", "-fdx", "--", ...MANAGED_SYNC_NAMESPACES],
       });
       yield* runGit({
         operation,
@@ -640,15 +786,16 @@ export const make = Effect.gen(function* () {
     yield* runGit({
       operation,
       cwd: fetched.mirrorPath,
-      args: ["clean", "-fdx", "--", THREAD_SYNC_NAMESPACE],
+      args: ["clean", "-fdx", "--", ...MANAGED_SYNC_NAMESPACES],
     });
   });
 
   const checkoutRemote = Effect.fn("ThreadSyncGit.checkoutRemote")(function* (
     configuration: ThreadSyncConfiguration,
     expectedRemoteRevision: ThreadSyncRevision | null,
+    prefetched?: ThreadSyncGitFetchResult,
   ): Effect.fn.Return<ThreadSyncGitFetchResult, ThreadSyncError> {
-    const fetched = yield* fetch(configuration);
+    const fetched = prefetched ?? (yield* fetch(configuration));
     if (fetched.remoteRevision !== expectedRemoteRevision) {
       return yield* new ThreadSyncError({
         operation: "fetch",
@@ -659,6 +806,73 @@ export const make = Effect.gen(function* () {
     }
     yield* restoreFetchedCheckout(configuration, fetched, "fetch");
     return fetched;
+  });
+
+  const materializePayloadPaths: NonNullable<ThreadSyncGitShape["materializePayloadPaths"]> =
+    Effect.fn("ThreadSyncGit.materializePayloadPaths")(function* (input) {
+      const mirrorPath = yield* verifyManagedMirrorPath(input.configuration, input.mirrorPath);
+      const payloadPaths = [...new Set(input.paths)].toSorted();
+      if (payloadPaths.some((payloadPath) => !V2_PAYLOAD_PATH_PATTERN.test(payloadPath))) {
+        return yield* new ThreadSyncError({
+          operation: "fetch",
+          code: "integrity-failed",
+          detail: "Only content-addressed V2 chunk and blob paths can be materialized.",
+        });
+      }
+      if (payloadPaths.length > 0) {
+        yield* runGit({
+          operation: "fetch",
+          cwd: mirrorPath,
+          args: ["sparse-checkout", "add", "--stdin"],
+          stdin: `${payloadPaths.map((payloadPath) => `/${payloadPath}`).join("\n")}\n`,
+        });
+      }
+    });
+
+  const prunePayloads: NonNullable<ThreadSyncGitShape["prunePayloads"]> = Effect.fn(
+    "ThreadSyncGit.prunePayloads",
+  )(function* (input) {
+    const mirrorPath = yield* verifyManagedMirrorPath(input.configuration, input.mirrorPath);
+    yield* applyMetadataSparseCheckout(mirrorPath, "fetch");
+  });
+
+  function nullSeparatedPaths(value: string): ReadonlyArray<string> {
+    return value.split("\0").filter((entry) => entry.length > 0);
+  }
+
+  const managedDirtyPaths = Effect.fn("ThreadSyncGit.managedDirtyPaths")(function* (
+    mirrorPath: string,
+  ) {
+    const changed = yield* runGit({
+      operation: "push",
+      cwd: mirrorPath,
+      args: ["diff", "--name-only", "--no-renames", "-z", "--", ...MANAGED_SYNC_NAMESPACES],
+    });
+    const untracked = yield* runGit({
+      operation: "push",
+      cwd: mirrorPath,
+      args: ["ls-files", "--others", "--exclude-standard", "-z", "--", ...MANAGED_SYNC_NAMESPACES],
+    });
+    const staged = yield* runGit({
+      operation: "push",
+      cwd: mirrorPath,
+      args: [
+        "diff",
+        "--cached",
+        "--name-only",
+        "--no-renames",
+        "-z",
+        "--",
+        ...MANAGED_SYNC_NAMESPACES,
+      ],
+    });
+    return [
+      ...new Set([
+        ...nullSeparatedPaths(changed.stdout),
+        ...nullSeparatedPaths(untracked.stdout),
+        ...nullSeparatedPaths(staged.stdout),
+      ]),
+    ].toSorted();
   });
 
   const commitAndPush: ThreadSyncGitShape["commitAndPush"] = Effect.fn(
@@ -679,17 +893,42 @@ export const make = Effect.gen(function* () {
         detail: "The sync remote advanced while the local snapshot was being prepared.",
       });
     }
-    const status = yield* runGit({
-      operation: "push",
-      cwd: checkedOut.mirrorPath,
-      args: ["status", "--porcelain", "--", THREAD_SYNC_NAMESPACE],
-    });
-    if (status.stdout.trim().length > 0) {
+    const removePayloadPaths = [...new Set(input.removePayloadPaths ?? [])].toSorted();
+    if (removePayloadPaths.some((payloadPath) => !V2_PAYLOAD_PATH_PATTERN.test(payloadPath))) {
+      return yield* new ThreadSyncError({
+        operation: "push",
+        code: "integrity-failed",
+        detail: "Only exact content-addressed V2 payload paths can be removed.",
+      });
+    }
+    for (let offset = 0; offset < removePayloadPaths.length; offset += GIT_PATH_BATCH_SIZE) {
       yield* runGit({
         operation: "push",
         cwd: checkedOut.mirrorPath,
-        args: ["add", "--", THREAD_SYNC_NAMESPACE],
+        args: [
+          "update-index",
+          "--force-remove",
+          "--",
+          ...removePayloadPaths.slice(offset, offset + GIT_PATH_BATCH_SIZE),
+        ],
       });
+    }
+    const dirtyPaths = yield* managedDirtyPaths(checkedOut.mirrorPath);
+    if (dirtyPaths.length > 0) {
+      const removedPayloadPathSet = new Set(removePayloadPaths);
+      const pathsToStage = dirtyPaths.filter((dirtyPath) => !removedPayloadPathSet.has(dirtyPath));
+      for (let offset = 0; offset < pathsToStage.length; offset += GIT_PATH_BATCH_SIZE) {
+        yield* runGit({
+          operation: "push",
+          cwd: checkedOut.mirrorPath,
+          args: [
+            "add",
+            "--sparse",
+            "--",
+            ...pathsToStage.slice(offset, offset + GIT_PATH_BATCH_SIZE),
+          ],
+        });
+      }
       yield* runGit({
         operation: "push",
         cwd: checkedOut.mirrorPath,
@@ -706,6 +945,7 @@ export const make = Effect.gen(function* () {
       cwd: checkedOut.mirrorPath,
       args: ["rev-parse", "HEAD"],
     });
+    yield* applyMetadataSparseCheckout(checkedOut.mirrorPath, "push");
     return revision.stdout.trim() as ThreadSyncRevision;
   });
 
@@ -734,7 +974,14 @@ export const make = Effect.gen(function* () {
       yield* fileSystem.remove(mirrorPath, { recursive: true });
     }).pipe(Effect.mapError((cause) => mapThreadSyncIoError("disconnect", cause)));
 
-  return ThreadSyncGit.of({ fetch, checkoutRemote, commitAndPush, removeMirror });
+  return ThreadSyncGit.of({
+    fetch,
+    checkoutRemote,
+    commitAndPush,
+    materializePayloadPaths,
+    prunePayloads,
+    removeMirror,
+  });
 });
 
 export const layer = Layer.effect(ThreadSyncGit, make).pipe(Layer.provide(VcsProcess.layer));

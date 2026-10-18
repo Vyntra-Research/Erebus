@@ -64,7 +64,11 @@ const makeProviderService = (liveThreadIds: ReadonlyArray<ThreadId> = []) =>
 
 const queryWithThreads = (threads: ReadonlyArray<ReturnType<typeof makeThread>>) =>
   ({
-    getCommandReadModel: () => Effect.succeed({ threads } as never),
+    getCommandReadModel: () => Effect.die("reconciliation must not hydrate the command model"),
+    getShellSnapshot: () =>
+      Effect.succeed({ threads: threads.filter((thread) => thread.archivedAt === null) } as never),
+    getArchivedShellSnapshot: () =>
+      Effect.succeed({ threads: threads.filter((thread) => thread.archivedAt !== null) } as never),
   }) as unknown as ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"];
 
 const runReconciliation = (input: {
@@ -275,7 +279,13 @@ it.effect("does not fail startup when the live provider session inventory cannot
   let queried = false;
   return ServerRuntimeStartup.reconcileProviderSessions.pipe(
     Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-      getCommandReadModel: () =>
+      getCommandReadModel: () => Effect.die("reconciliation must not hydrate the command model"),
+      getShellSnapshot: () =>
+        Effect.sync(() => {
+          queried = true;
+          return { threads: [] } as never;
+        }),
+      getArchivedShellSnapshot: () =>
         Effect.sync(() => {
           queried = true;
           return { threads: [] } as never;

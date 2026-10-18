@@ -26,6 +26,7 @@ import {
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
   toMcpElicitationResponse,
+  validateCodexHistoryFreeResumeVersion,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
@@ -935,6 +936,63 @@ describe("codexSessionAppServerArgs", () => {
 });
 
 describe("openCodexThread", () => {
+  it("requires a Codex version that supports history-free resume", () => {
+    NodeAssert.equal(validateCodexHistoryFreeResumeVersion("t3code_desktop/0.125.0"), null);
+    NodeAssert.equal(validateCodexHistoryFreeResumeVersion("t3code_desktop/0.163.0"), null);
+    NodeAssert.equal(
+      validateCodexHistoryFreeResumeVersion(
+        "Codex Desktop/0.150.0-alpha.12.2 (Windows 10.0.26200; x86_64)",
+      ),
+      null,
+    );
+
+    const oldVersion = validateCodexHistoryFreeResumeVersion("t3code_desktop/0.124.0");
+    NodeAssert.ok(oldVersion);
+    NodeAssert.match(oldVersion.message, /requires Codex 0\.125\.0 or newer/);
+
+    const oldPrerelease = validateCodexHistoryFreeResumeVersion(
+      "Codex Desktop/0.124.0-alpha.1 (Windows 10.0.26200; x86_64)",
+    );
+    NodeAssert.ok(oldPrerelease);
+    NodeAssert.match(oldPrerelease.message, /version 0\.124\.0-alpha\.1/);
+
+    const unknownVersion = validateCodexHistoryFreeResumeVersion("custom-codex");
+    NodeAssert.ok(unknownVersion);
+    NodeAssert.match(unknownVersion.message, /unknown version/);
+  });
+
+  it.effect("resumes without requesting historical turns", () =>
+    Effect.gen(function* () {
+      let resumePayload: CodexRpc.ClientRequestParamsByMethod["thread/resume"] | undefined;
+      const client = {
+        request: <M extends "thread/start" | "thread/resume">(
+          method: M,
+          payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) => {
+          if (method === "thread/resume") {
+            resumePayload = payload as CodexRpc.ClientRequestParamsByMethod["thread/resume"];
+          }
+          return Effect.succeed(
+            makeThreadOpenResponse("resumed-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
+          );
+        },
+      };
+
+      yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: "provider-thread-1",
+      });
+
+      NodeAssert.equal(resumePayload?.threadId, "provider-thread-1");
+      NodeAssert.equal(resumePayload?.excludeTurns, true);
+    }),
+  );
+
   it.effect("registers dynamic tools on a fresh Codex thread", () =>
     Effect.gen(function* () {
       let startPayload: CodexRpc.ClientRequestParamsByMethod["thread/start"] | undefined;

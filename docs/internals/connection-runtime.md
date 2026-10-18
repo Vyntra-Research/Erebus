@@ -110,6 +110,10 @@ Finite requests, durable subscriptions, and commands are separate APIs:
   no `failed` status. Thread status adds `deleted`.
 - Cached shell and thread projections are never allowed to overwrite newer live
   data during a fast reconnect.
+- Pagination-capable clients request a recent thread window and load older
+  turns with an opaque cursor. They cache only that recent window; pages loaded
+  for scrolling stay in memory for the current view. Clients that omit the
+  window request retain the full-snapshot contract for version compatibility.
 - Domain atom factories route effects through the environment registry and
   resolve the current scoped service at execution time. Project and thread
   commands are Atom factories under `src/state`

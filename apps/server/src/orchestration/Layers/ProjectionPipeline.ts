@@ -54,8 +54,10 @@ import {
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
+import { applyThreadSyncImportProjection } from "../ThreadSyncImportProjection.ts";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
+  threadSyncImports: "projection.thread-sync-imports",
   projects: "projection.projects",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
@@ -575,6 +577,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
+    const applyThreadSyncImportsProjection: ProjectorDefinition["apply"] = (
+      event,
+      _attachmentSideEffects,
+    ) =>
+      applyThreadSyncImportProjection(event).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
     const refreshThreadShellSummary = Effect.fn("refreshThreadShellSummary")(function* (
       threadId: ThreadId,
     ) {
@@ -625,6 +633,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, attachmentSideEffects) {
       switch (event.type) {
         case "thread.sync-imported": {
+          if (event.payload.stagedImport !== undefined) return;
           const thread = event.payload.thread;
           let latestUserMessageAt: string | null = null;
           for (const message of thread.messages) {
@@ -1080,6 +1089,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, attachmentSideEffects) {
       switch (event.type) {
         case "thread.sync-imported":
+          if (event.payload.stagedImport !== undefined) return;
           yield* projectionThreadMessageRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });
@@ -1188,6 +1198,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
         case "thread.sync-imported":
+          if (event.payload.stagedImport !== undefined) return;
           yield* projectionThreadProposedPlanRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });
@@ -1260,6 +1271,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
         case "thread.sync-imported":
+          if (event.payload.stagedImport !== undefined) return;
           yield* projectionThreadActivityRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });
@@ -1333,6 +1345,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       "applyThreadSessionsProjection",
     )(function* (event, _attachmentSideEffects) {
       if (event.type === "thread.sync-imported") {
+        if (event.payload.stagedImport !== undefined) return;
         yield* projectionThreadSessionRepository.deleteByThreadId({
           threadId: event.payload.threadId,
         });
@@ -1358,6 +1371,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
         case "thread.sync-imported":
+          if (event.payload.stagedImport !== undefined) return;
           yield* projectionTurnRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });
@@ -1722,6 +1736,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
         case "thread.sync-imported": {
+          if (event.payload.stagedImport !== undefined) return;
           const existingApprovals = yield* projectionPendingApprovalRepository.listByThreadId({
             threadId: event.payload.threadId,
           });
@@ -1859,6 +1874,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
     const projectors: ReadonlyArray<ProjectorDefinition> = [
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.threadSyncImports,
+        apply: applyThreadSyncImportsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
         apply: applyProjectsProjection,
       },
@@ -1929,23 +1948,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       );
     });
 
-    const bootstrapProjector = (projector: ProjectorDefinition) =>
-      projectionStateRepository
-        .getByProjector({
-          projector: projector.name,
-        })
-        .pipe(
-          Effect.flatMap((stateRow) =>
-            Stream.runForEach(
-              eventStore.readFromSequence(
-                Option.isSome(stateRow) ? stateRow.value.lastAppliedSequence : 0,
-                Number.MAX_SAFE_INTEGER,
-              ),
-              (event) => runProjectorForEvent(projector, event),
-            ),
-          ),
-        );
-
     const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
       Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event), {
         concurrency: 1,
@@ -1959,11 +1961,44 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         ),
       );
 
-    const bootstrap: OrchestrationProjectionPipelineShape["bootstrap"] = Effect.forEach(
-      projectors,
-      bootstrapProjector,
-      { concurrency: 1 },
-    ).pipe(
+    const bootstrap: OrchestrationProjectionPipelineShape["bootstrap"] = Effect.gen(function* () {
+      const states = yield* Effect.forEach(
+        projectors,
+        (projector) =>
+          projectionStateRepository
+            .getByProjector({ projector: projector.name })
+            .pipe(
+              Effect.map(
+                (state) =>
+                  [
+                    projector.name,
+                    Option.isSome(state) ? state.value.lastAppliedSequence : 0,
+                  ] as const,
+              ),
+            ),
+        { concurrency: 1 },
+      );
+      const cursors = new Map(states);
+      const firstSequence = Math.min(...cursors.values());
+      yield* Stream.runForEach(
+        eventStore.readFromSequence(firstSequence, Number.MAX_SAFE_INTEGER),
+        (event) =>
+          Effect.forEach(
+            projectors,
+            (projector) =>
+              (cursors.get(projector.name) ?? 0) < event.sequence
+                ? runProjectorForEvent(projector, event).pipe(
+                    Effect.tap(() =>
+                      Effect.sync(() => {
+                        cursors.set(projector.name, event.sequence);
+                      }),
+                    ),
+                  )
+                : Effect.void,
+            { concurrency: 1, discard: true },
+          ),
+      );
+    }).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
       Effect.provideService(ServerConfig, serverConfig),

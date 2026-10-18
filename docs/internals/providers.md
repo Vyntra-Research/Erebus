@@ -41,6 +41,11 @@ Two registries separate configuration from live processes:
 [`ProviderService`][service] sits on top. It combines the adapter registry with the provider session
 directory to route session and turn operations for a thread, so callers name a thread, not an agent.
 
+Codex accounts share one app-server process. A loopback request gateway selects the active account
+for each new model request, so changing the primary account does not restart or detach the thread.
+If an account rejects a request for lack of quota, the gateway can retry that request through the
+next usable account. It never replays a response after streaming has begun.
+
 Enabling another driver also requires an explicit release decision, settings UI, tests, and support
 policy. Adding it to `BUILT_IN_DRIVERS` alone does not enable it in Erebus.
 
@@ -69,6 +74,10 @@ The engine persists an event for the command, and a server-side reactor performs
 Provider output comes back as internal commands such as `thread.message.assistant.delta` and
 `thread.session.set`, which clients observe through `orchestration.subscribeThread`. See
 [overview.md](./overview.md) for the command/event loop.
+
+When Codex resumes an existing native thread, Erebus asks the app-server to omit its stored turns;
+the orchestration projection remains the UI history. An imported thread without a native Codex
+history receives a bounded continuation seed rather than the complete transcript.
 
 ## Server-side workers
 

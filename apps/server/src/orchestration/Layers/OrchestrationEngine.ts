@@ -1,6 +1,7 @@
 import type {
   OrchestrationClientOrigin,
   OrchestrationEvent,
+  OrchestrationProposedPlan,
   OrchestrationReadModel,
   ProjectId,
   ThreadId,
@@ -41,6 +42,12 @@ import {
 } from "../Errors.ts";
 import { decideOrchestrationCommand } from "../decider.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
+import {
+  appendThreadSyncImportStageChunk,
+  assertThreadSyncImportStageReadyToCommit,
+  threadSyncImportDescriptorHash,
+  validateThreadSyncImportStage,
+} from "../ThreadSyncImportProjection.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -82,6 +89,17 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateKind: "thread",
         aggregateId: command.imports.at(-1)!.threadId,
       };
+    case "thread.sync.import-v2.start":
+    case "thread.sync.import-v2.commit":
+      return {
+        aggregateKind: "thread",
+        aggregateId: command.descriptor.threadId,
+      };
+    case "thread.sync.import-v2.validate":
+      return {
+        aggregateKind: "thread",
+        aggregateId: command.descriptor.threadId,
+      };
     default:
       return {
         aggregateKind: "thread",
@@ -114,6 +132,84 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         nextReadModel = yield* projectEvent(nextReadModel, event);
       }
       return nextReadModel;
+    });
+
+  const hydrateExactCommandProposedPlans = (
+    baseReadModel: OrchestrationReadModel,
+    command: OrchestrationCommand,
+  ): Effect.Effect<OrchestrationReadModel, OrchestrationDispatchError> =>
+    Effect.gen(function* () {
+      const getExactPlan = projectionSnapshotQuery.getThreadProposedPlanById;
+      if (getExactPlan === undefined) {
+        return baseReadModel;
+      }
+
+      const references: Array<{
+        readonly threadId: ThreadId;
+        readonly planId: Parameters<typeof getExactPlan>[1];
+      }> = [];
+      if (command.type === "thread.turn.start" && command.sourceProposedPlan !== undefined) {
+        references.push(command.sourceProposedPlan);
+      } else if (command.type === "thread.sync.import-batch") {
+        for (const imported of command.imports) {
+          for (const turn of imported.history.turns) {
+            if (turn.sourceProposedPlanThreadId !== null && turn.sourceProposedPlanId !== null) {
+              references.push({
+                threadId: turn.sourceProposedPlanThreadId,
+                planId: turn.sourceProposedPlanId,
+              });
+            }
+          }
+        }
+      }
+
+      const hydratedPlansByThread = new Map<ThreadId, OrchestrationProposedPlan[]>();
+      const seen = new Set<string>();
+      for (const reference of references) {
+        const referenceKey = `${reference.threadId}\0${reference.planId}`;
+        if (seen.has(referenceKey)) {
+          continue;
+        }
+        seen.add(referenceKey);
+
+        const sourceThread = baseReadModel.threads.find(
+          (thread) => thread.id === reference.threadId,
+        );
+        const hydratedPlans = hydratedPlansByThread.get(reference.threadId);
+        if (
+          sourceThread === undefined ||
+          sourceThread.proposedPlans.some((plan) => plan.id === reference.planId) ||
+          hydratedPlans?.some((plan) => plan.id === reference.planId) === true
+        ) {
+          continue;
+        }
+
+        const exactPlan = yield* getExactPlan(reference.threadId, reference.planId);
+        if (Option.isNone(exactPlan)) {
+          continue;
+        }
+
+        if (hydratedPlans === undefined) {
+          hydratedPlansByThread.set(reference.threadId, [exactPlan.value]);
+        } else {
+          hydratedPlans.push(exactPlan.value);
+        }
+      }
+      if (hydratedPlansByThread.size === 0) {
+        return baseReadModel;
+      }
+      return {
+        ...baseReadModel,
+        threads: baseReadModel.threads.map((thread) => {
+          const hydratedPlans = hydratedPlansByThread.get(thread.id);
+          return hydratedPlans === undefined
+            ? thread
+            : {
+                ...thread,
+                proposedPlans: [...thread.proposedPlans, ...hydratedPlans],
+              };
+        }),
+      };
     });
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
@@ -179,9 +275,41 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
 
+        if (envelope.command.type === "thread.sync.import-v2.validate") {
+          if (
+            envelope.command.descriptorHash !==
+            threadSyncImportDescriptorHash(envelope.command.descriptor)
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: envelope.command.type,
+              detail: "The staged import descriptor hash does not match its descriptor.",
+            });
+          }
+          yield* validateThreadSyncImportStage({
+            descriptor: envelope.command.descriptor,
+            stagedHash: envelope.command.stagedHash,
+          }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+        } else if (envelope.command.type === "thread.sync.import-v2.commit") {
+          const stagedHash = envelope.command.descriptor.stagedHash;
+          if (stagedHash === undefined) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: envelope.command.type,
+              detail: `Staged import '${envelope.command.descriptor.stageId}' requires a final staged hash.`,
+            });
+          }
+          yield* assertThreadSyncImportStageReadyToCommit({
+            descriptor: envelope.command.descriptor,
+            stagedHash,
+          }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+        }
+
+        const decisionReadModel = yield* hydrateExactCommandProposedPlans(
+          commandReadModel,
+          envelope.command,
+        );
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
-          readModel: commandReadModel,
+          readModel: decisionReadModel,
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
           Effect.mapError((cause) =>
@@ -209,6 +337,17 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             Effect.gen(function* () {
               const committedEvents: OrchestrationEvent[] = [];
               let nextCommandReadModel = commandReadModel;
+
+              if (envelope.command.type === "thread.sync.import-v2.chunk") {
+                yield* appendThreadSyncImportStageChunk({
+                  stageId: envelope.command.stageId,
+                  threadId: envelope.command.threadId,
+                  chunkIndex: envelope.command.chunkIndex,
+                  chunkHash: envelope.command.chunkHash,
+                  records: envelope.command.records,
+                  appendedAt: envelope.command.appendedAt,
+                }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+              }
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);

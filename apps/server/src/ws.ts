@@ -142,6 +142,7 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
+
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -1538,10 +1539,9 @@ const makeWsRpcLayer = (
               const snapshot = yield* projectionSnapshotQuery
                 .getThreadDetailSnapshot(
                   input.threadId,
-                  // Windowing the fallback snapshot is opt-in per subscription:
-                  // clients that don't send turnLimit (including all
-                  // pre-pagination clients) get the full thread, since they
-                  // have no way to load older pages.
+                  // A missing limit identifies a pre-pagination client. It
+                  // cannot fetch older pages, including after a reconnect
+                  // falls back from event replay to a fresh snapshot.
                   input.turnLimit === undefined ? undefined : { turnLimit: input.turnLimit },
                 )
                 .pipe(

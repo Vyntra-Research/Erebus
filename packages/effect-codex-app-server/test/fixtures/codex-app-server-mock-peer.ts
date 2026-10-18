@@ -104,13 +104,22 @@ const handleMethod = (message: Record<string, unknown>) => {
       return;
     }
     case "thread/resume": {
+      const params = message.params as { readonly excludeTurns?: unknown } | undefined;
+      if (params?.excludeTurns !== true) {
+        respondError(
+          message.id as number | string,
+          -32602,
+          "thread/resume must exclude historical turns",
+        );
+        return;
+      }
       respond(message.id as number | string, {
         cwd: process.cwd(),
         model: "gpt-test",
         thread: {
           id: "thread-resumed",
-          // The client intentionally leaves historical turns opaque here. A
-          // malformed unused item proves this path does not deep-decode them.
+          // The client asks the server to omit history. Keep a malformed turn
+          // here to ensure it also tolerates an older server returning one.
           turns: [{ items: [{ type: "futureItem", payload: { value: 1 } }] }],
         },
       });

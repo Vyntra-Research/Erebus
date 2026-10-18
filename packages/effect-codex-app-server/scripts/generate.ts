@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import * as NodeURL from "node:url";
+
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { make as makeJsonSchemaGenerator } from "@effect/openapi-generator/JsonSchemaGenerator";
@@ -668,6 +670,26 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     }
   }
 
+  // The pinned upstream JSON export omits the experimental
+  // `thread/resume.excludeTurns` field even though the pinned runtime accepts
+  // it. Keep this overlay until that export includes the field so regeneration
+  // preserves the history-free resume contract.
+  const threadResumeParams = aggregateSchemas.V2ThreadResumeParams;
+  if (
+    threadResumeParams &&
+    typeof threadResumeParams === "object" &&
+    !Array.isArray(threadResumeParams)
+  ) {
+    const properties = (threadResumeParams as Record<string, unknown>).properties;
+    if (properties && !Array.isArray(properties) && typeof properties === "object") {
+      (properties as Record<string, unknown>).excludeTurns = {
+        type: "boolean",
+        description:
+          "When true, return only thread metadata and live-resume state without populating `thread.turns`.",
+      };
+    }
+  }
+
   const generator = makeJsonSchemaGenerator();
   for (const [name, schema] of Object.entries(aggregateSchemas).toSorted(([left], [right]) =>
     left.localeCompare(right),
@@ -822,9 +844,12 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
 
   yield* Effect.log(`Generated Codex App Server schemas from ${UPSTREAM_REF}`);
 
+  const vitePlusBin = NodeURL.fileURLToPath(import.meta.resolve("vite-plus/bin"));
   yield* Effect.service(ChildProcessSpawner.ChildProcessSpawner).pipe(
     Effect.flatMap((spawner) =>
-      spawner.spawn(ChildProcess.make("vp", ["fmt", generatedDir, "--write"])),
+      spawner.spawn(
+        ChildProcess.make(process.execPath, [vitePlusBin, "fmt", generatedDir, "--write"]),
+      ),
     ),
     Effect.flatMap((child) => child.exitCode),
     Effect.tap((code) =>

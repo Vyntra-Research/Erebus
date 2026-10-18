@@ -12,12 +12,27 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ServerConfig from "../config.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { THREAD_SYNC_NAMESPACE } from "./ThreadSyncDocuments.ts";
 import * as ThreadSyncGit from "./ThreadSyncGit.ts";
+import {
+  THREAD_SYNC_V2_BLOBS_DIRECTORY,
+  THREAD_SYNC_V2_CHUNKS_DIRECTORY,
+  THREAD_SYNC_V2_MANIFEST_PATH,
+  THREAD_SYNC_V2_NAMESPACE,
+  THREAD_SYNC_V2_PROJECTS_DIRECTORY,
+  THREAD_SYNC_V2_THREADS_DIRECTORY,
+  ThreadSyncV2Record,
+  ThreadSyncV2ThreadHeader,
+  threadSyncV2Sha256,
+  type ThreadSyncV2Record as ThreadSyncV2RecordType,
+  type ThreadSyncV2ThreadSource,
+  writeThreadSyncV2Thread,
+} from "./ThreadSyncRepositoryV2.ts";
 
 function runGit(cwd: string, args: ReadonlyArray<string>): string {
   const result = NodeChildProcess.spawnSync("git", args, {
@@ -36,6 +51,8 @@ const testLayer = ThreadSyncGit.layer.pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 const decodeConfiguration = Schema.decodeUnknownEffect(ThreadSyncConfiguration);
+const decodeV2Header = Schema.decodeUnknownSync(ThreadSyncV2ThreadHeader);
+const decodeV2Record = Schema.decodeUnknownSync(ThreadSyncV2Record);
 
 describe("ThreadSyncGit", () => {
   it("allows only supported Git remote forms without embedded URL state", () => {
@@ -160,11 +177,13 @@ describe("ThreadSyncGit", () => {
   it.effect("does not retry an ignored object filter with an unfiltered network fetch", () => {
     const calls: Array<ReadonlyArray<string>> = [];
     const environments: Array<NodeJS.ProcessEnv | undefined> = [];
+    const timeouts: number[] = [];
     const vcsProcess = VcsProcess.VcsProcess.of({
       run: (input) =>
         Effect.sync(() => {
           calls.push(input.args);
           environments.push(input.env);
+          timeouts.push(input.timeoutMs ?? -1);
           const isRemoteLookup = input.args[0] === "remote" && input.args[1] === "get-url";
           const isReferenceLookup = input.args.includes("ls-remote");
           const isFilteredFetch =
@@ -207,6 +226,15 @@ describe("ThreadSyncGit", () => {
       expect(environments.every((env) => env?.LANG === "C" && env?.LC_ALL === "C")).toBe(true);
       const referenceLookupIndex = calls.findIndex((args) => args.includes("ls-remote"));
       expect(environments[referenceLookupIndex]?.GIT_TRACE_PACKET).toBe("1");
+      expect(timeouts[referenceLookupIndex]).toBe(10 * 60_000);
+      const filteredFetchIndex = calls.findIndex(
+        (args) => args[0] === "fetch" && args.includes("--filter=blob:none"),
+      );
+      expect(timeouts[filteredFetchIndex]).toBe(10 * 60_000);
+      const localConfigIndex = calls.findIndex(
+        (args) => args[0] === "config" && args[1] === "user.name",
+      );
+      expect(timeouts[localConfigIndex]).toBe(60_000);
     }).pipe(Effect.provide(dependencies));
   });
 
@@ -370,6 +398,139 @@ describe("ThreadSyncGit", () => {
     ).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect("re-exports unpublished v2 chunks after a real remote race restores the checkout", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "thread-sync-v2-race-" });
+        const remotePath = NodePath.join(root, "remote.git");
+        NodeFS.mkdirSync(remotePath);
+        runGit(remotePath, ["init", "--bare"]);
+        const configuration = yield* decodeConfiguration({
+          remoteUrl: remotePath,
+          branch: "main",
+          fetchIntervalSeconds: 60,
+        });
+        const syncGit = yield* ThreadSyncGit.ThreadSyncGit;
+        const prepared = yield* syncGit.checkoutRemote(configuration, null);
+        const namespacePath = NodePath.join(prepared.mirrorPath, THREAD_SYNC_NAMESPACE);
+        NodeFS.mkdirSync(namespacePath, { recursive: true });
+        NodeFS.writeFileSync(
+          NodePath.join(namespacePath, "manifest.json"),
+          '{"formatVersion":1,"kind":"erebus-thread-sync","updatedAt":"2026-10-17T12:00:00.000Z"}\n',
+        );
+        const firstRevision = yield* syncGit.commitAndPush({
+          configuration,
+          expectedRemoteRevision: null,
+          message: "Initial sync",
+        });
+        yield* syncGit.checkoutRemote(configuration, firstRevision);
+
+        const raceHeader = decodeV2Header({
+          formatVersion: 2,
+          threadId: "sync-thread-git-race",
+          syncProjectId: "sync-project-git-race",
+          title: "Git race thread",
+          coagent: null,
+          latestTurnId: null,
+          lifecycle: {
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            deletedAt: null,
+          },
+          createdAt: "2026-10-17T12:00:00.000Z",
+          updatedAt: "2026-10-17T12:01:00.000Z",
+        });
+        const raceRecords: ReadonlyArray<ThreadSyncV2RecordType> = Array.from(
+          { length: 3 },
+          (_, ordinal) =>
+            decodeV2Record({
+              ordinal,
+              kind: "turn",
+              portableId: `portable-turn-race-git-${ordinal}`,
+              value: {
+                turnId: `turn-race-git-${ordinal}`,
+                pendingMessageId: null,
+                sourceProposedPlanThreadId: null,
+                sourceProposedPlanId: null,
+                state: "completed",
+                requestedAt: "2026-10-17T12:00:00.000Z",
+                startedAt: "2026-10-17T12:00:00.000Z",
+                completedAt: "2026-10-17T12:00:01.000Z",
+                assistantMessageId: null,
+              },
+            }),
+        );
+        const raceSource: ThreadSyncV2ThreadSource = {
+          sourceKey: "projection:sync-thread-git-race:1",
+          header: raceHeader,
+          records: (resumeToken) => {
+            const offset = resumeToken === null ? 0 : Number(resumeToken);
+            return Stream.fromIterable(
+              raceRecords.slice(offset).map((record, index) => ({
+                record,
+                nextResumeToken: String(offset + index + 1),
+              })),
+            );
+          },
+        };
+        const firstWrite = yield* writeThreadSyncV2Thread({
+          mirrorPath: prepared.mirrorPath,
+          source: raceSource,
+          targetChunkBytes: 1,
+        });
+
+        const competitorPath = NodePath.join(root, "competitor");
+        runGit(root, ["clone", "--branch", "main", remotePath, competitorPath]);
+        runGit(competitorPath, ["config", "user.name", "Competitor"]);
+        runGit(competitorPath, ["config", "user.email", "competitor@localhost"]);
+        NodeFS.writeFileSync(NodePath.join(competitorPath, "race.txt"), "remote winner\n");
+        runGit(competitorPath, ["add", "race.txt"]);
+        runGit(competitorPath, ["commit", "-m", "Concurrent winner"]);
+        runGit(competitorPath, ["push", "origin", "main"]);
+
+        const stale = yield* syncGit
+          .commitAndPush({
+            configuration,
+            expectedRemoteRevision: firstRevision,
+            message: "Stale v2 sync",
+          })
+          .pipe(Effect.flip);
+        expect(stale.code).toBe("remote-changed");
+        const firstChunkPath = NodePath.join(
+          prepared.mirrorPath,
+          THREAD_SYNC_V2_CHUNKS_DIRECTORY,
+          firstWrite.manifest.chunks[0]!.fileName,
+        );
+        expect(NodeFS.existsSync(firstChunkPath)).toBe(false);
+
+        const latestRevision = (yield* syncGit.fetch(configuration)).remoteRevision;
+        expect(latestRevision).not.toBeNull();
+        yield* syncGit.checkoutRemote(configuration, latestRevision);
+        const retriedWrite = yield* writeThreadSyncV2Thread({
+          mirrorPath: prepared.mirrorPath,
+          source: raceSource,
+          targetChunkBytes: 1,
+        });
+        expect(retriedWrite.resumedAtOrdinal).toBe(0);
+        expect(retriedWrite.manifest.revision).toBe(firstWrite.manifest.revision);
+        yield* syncGit.commitAndPush({
+          configuration,
+          expectedRemoteRevision: latestRevision,
+          message: "Retry v2 sync after race",
+        });
+        expect(
+          runGit(remotePath, [
+            "show",
+            `refs/heads/main:${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${retriedWrite.manifest.chunks[0]!.fileName}`,
+          ]),
+        ).toContain("turn-race-git-0");
+        expect(runGit(remotePath, ["show", "refs/heads/main:race.txt"])).toBe("remote winner");
+      }),
+    ).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("does not materialize a large unrelated blob and preserves it after push", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -401,7 +562,6 @@ describe("ThreadSyncGit", () => {
         runGit(seedPath, ["branch", "-M", "main"]);
         runGit(seedPath, ["remote", "add", "origin", remotePath]);
         runGit(seedPath, ["push", "origin", "main"]);
-
         const configuration = yield* decodeConfiguration({
           remoteUrl: NodeURL.pathToFileURL(remotePath).href,
           branch: "main",
@@ -435,6 +595,453 @@ describe("ThreadSyncGit", () => {
         expect(
           runGit(remotePath, ["show", `refs/heads/main:${THREAD_SYNC_NAMESPACE}/manifest.json`]),
         ).toContain("12:01:00.000Z");
+      }),
+    ).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("pins managed bytes for new and reused mirrors so V2 hashes round-trip", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-eol-",
+        });
+        const remotePath = NodePath.join(root, "remote.git");
+        const seedPath = NodePath.join(root, "seed");
+        NodeFS.mkdirSync(remotePath);
+        NodeFS.mkdirSync(seedPath);
+        runGit(remotePath, ["init", "--bare"]);
+        runGit(seedPath, ["init"]);
+        runGit(seedPath, ["config", "user.name", "Seed"]);
+        runGit(seedPath, ["config", "user.email", "seed@localhost"]);
+        runGit(seedPath, ["config", "core.autocrlf", "false"]);
+
+        const chunk = '{"ordinal":0,"kind":"turn"}\n{"ordinal":1,"kind":"message"}\n';
+        const chunkHash = threadSyncV2Sha256(chunk);
+        const chunkRelativePath = `${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${chunkHash}.ndjson`;
+        const chunkPath = NodePath.join(seedPath, ...chunkRelativePath.split("/"));
+        NodeFS.mkdirSync(NodePath.dirname(chunkPath), { recursive: true });
+        NodeFS.writeFileSync(chunkPath, chunk, "utf8");
+        NodeFS.writeFileSync(
+          NodePath.join(seedPath, ".gitattributes"),
+          "* text eol=crlf\n",
+          "utf8",
+        );
+        runGit(seedPath, ["add", "."]);
+        runGit(seedPath, ["commit", "-m", "Seed content-addressed V2 chunk"]);
+        runGit(seedPath, ["branch", "-M", "main"]);
+        runGit(seedPath, ["remote", "add", "origin", remotePath]);
+        runGit(seedPath, ["push", "origin", "main"]);
+
+        const configuration = yield* decodeConfiguration({
+          remoteUrl: remotePath,
+          branch: "main",
+          fetchIntervalSeconds: 60,
+        });
+        const syncGit = yield* ThreadSyncGit.ThreadSyncGit;
+        const fetched = yield* syncGit.fetch(configuration);
+
+        // A new mirror must be isolated from any host-level Git setting.
+        expect(runGit(fetched.mirrorPath, ["config", "--local", "--get", "core.autocrlf"])).toBe(
+          "false",
+        );
+        expect(runGit(fetched.mirrorPath, ["config", "--local", "--get", "core.eol"])).toBe("lf");
+        const infoAttributesPath = NodePath.join(fetched.mirrorPath, ".git", "info", "attributes");
+        const initialAttributes = NodeFS.readFileSync(infoAttributesPath, "utf8");
+        expect(initialAttributes).toContain(`${THREAD_SYNC_V2_NAMESPACE}/** -text`);
+        NodeFS.writeFileSync(infoAttributesPath, `docs/** -text\n${initialAttributes}`, "utf8");
+
+        // Simulate an existing mirror carrying the effective Windows setting.
+        // Resolving it again must repair the local policy before checkout.
+        runGit(fetched.mirrorPath, ["config", "--local", "core.autocrlf", "true"]);
+        runGit(fetched.mirrorPath, ["config", "--local", "core.eol", "native"]);
+        const checkedOut = yield* syncGit.checkoutRemote(configuration, fetched.remoteRevision);
+        expect(runGit(checkedOut.mirrorPath, ["config", "--local", "--get", "core.autocrlf"])).toBe(
+          "false",
+        );
+        expect(runGit(checkedOut.mirrorPath, ["config", "--local", "--get", "core.eol"])).toBe(
+          "lf",
+        );
+        const repairedAttributes = NodeFS.readFileSync(infoAttributesPath, "utf8");
+        expect(repairedAttributes).toContain("docs/** -text");
+        expect(repairedAttributes.split(`${THREAD_SYNC_V2_NAMESPACE}/** -text`).length - 1).toBe(1);
+        expect(runGit(checkedOut.mirrorPath, ["check-attr", "text", "--", chunkRelativePath])).toBe(
+          `${chunkRelativePath}: text: unset`,
+        );
+
+        yield* syncGit.materializePayloadPaths!({
+          configuration,
+          mirrorPath: checkedOut.mirrorPath,
+          paths: [chunkRelativePath],
+        });
+        const restored = NodeFS.readFileSync(
+          NodePath.join(checkedOut.mirrorPath, ...chunkRelativePath.split("/")),
+          "utf8",
+        );
+        expect(restored).toBe(chunk);
+        expect(threadSyncV2Sha256(restored)).toBe(chunkHash);
+      }),
+    ).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("keeps V2 payloads sparse and materializes only selected objects", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-v2-sparse-",
+        });
+        const remotePath = NodePath.join(root, "remote.git");
+        const seedPath = NodePath.join(root, "seed");
+        NodeFS.mkdirSync(remotePath);
+        NodeFS.mkdirSync(seedPath);
+        runGit(remotePath, ["init", "--bare"]);
+        runGit(remotePath, ["config", "uploadpack.allowFilter", "true"]);
+        runGit(seedPath, ["init"]);
+        runGit(seedPath, ["config", "user.name", "Seed"]);
+        runGit(seedPath, ["config", "user.email", "seed@localhost"]);
+
+        const selectedChunk = `${"1".repeat(64)}.ndjson`;
+        const otherChunk = `${"2".repeat(64)}.ndjson`;
+        const selectedBlob = `${"3".repeat(64)}.blob`;
+        const metadataFiles = [
+          [THREAD_SYNC_V2_MANIFEST_PATH, '{"formatVersion":2}\n'],
+          [`${THREAD_SYNC_V2_PROJECTS_DIRECTORY}/${"4".repeat(64)}.json`, "{}\n"],
+          [`${THREAD_SYNC_V2_THREADS_DIRECTORY}/${"5".repeat(64)}/${"6".repeat(64)}.json`, "{}\n"],
+        ] as const;
+        const payloadFiles = [
+          [`${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${selectedChunk}`, "selected\n"],
+          [`${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${otherChunk}`, "other\n"],
+          [`${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${selectedBlob}`, "blob"],
+        ] as const;
+        for (const [relativePath, contents] of [...metadataFiles, ...payloadFiles]) {
+          const filePath = NodePath.join(seedPath, ...relativePath.split("/"));
+          NodeFS.mkdirSync(NodePath.dirname(filePath), { recursive: true });
+          NodeFS.writeFileSync(filePath, contents);
+        }
+        runGit(seedPath, ["add", "."]);
+        runGit(seedPath, ["commit", "-m", "Seed V2 repository"]);
+        runGit(seedPath, ["branch", "-M", "main"]);
+        runGit(seedPath, ["remote", "add", "origin", remotePath]);
+        runGit(seedPath, ["push", "origin", "main"]);
+        const selectedChunkObject = runGit(remotePath, [
+          "rev-parse",
+          `refs/heads/main:${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${selectedChunk}`,
+        ]);
+        const otherChunkObject = runGit(remotePath, [
+          "rev-parse",
+          `refs/heads/main:${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${otherChunk}`,
+        ]);
+        const selectedBlobObject = runGit(remotePath, [
+          "rev-parse",
+          `refs/heads/main:${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${selectedBlob}`,
+        ]);
+
+        const configuration = yield* decodeConfiguration({
+          remoteUrl: NodeURL.pathToFileURL(remotePath).href,
+          branch: "main",
+          fetchIntervalSeconds: 60,
+        });
+        const syncGit = yield* ThreadSyncGit.ThreadSyncGit;
+        const fetched = yield* syncGit.fetch(configuration);
+        const checkedOut = yield* syncGit.checkoutRemote(configuration, fetched.remoteRevision);
+        for (const [relativePath] of metadataFiles) {
+          expect(
+            NodeFS.existsSync(NodePath.join(checkedOut.mirrorPath, ...relativePath.split("/"))),
+          ).toBe(true);
+        }
+        for (const [relativePath] of payloadFiles) {
+          expect(
+            NodeFS.existsSync(NodePath.join(checkedOut.mirrorPath, ...relativePath.split("/"))),
+          ).toBe(false);
+        }
+        const missingAfterCheckout = runGit(checkedOut.mirrorPath, [
+          "rev-list",
+          "--objects",
+          "--missing=print",
+          "HEAD",
+        ]);
+        expect(missingAfterCheckout).toContain(`?${selectedChunkObject}`);
+        expect(missingAfterCheckout).toContain(`?${otherChunkObject}`);
+        expect(missingAfterCheckout).toContain(`?${selectedBlobObject}`);
+
+        const selectedChunkPath = `${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${selectedChunk}`;
+        const selectedBlobPath = `${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${selectedBlob}`;
+        yield* syncGit.materializePayloadPaths!({
+          configuration,
+          mirrorPath: checkedOut.mirrorPath,
+          paths: [selectedChunkPath],
+        });
+        expect(
+          NodeFS.readFileSync(
+            NodePath.join(checkedOut.mirrorPath, ...selectedChunkPath.split("/")),
+            "utf8",
+          ).trim(),
+        ).toBe("selected");
+        expect(
+          NodeFS.existsSync(
+            NodePath.join(checkedOut.mirrorPath, THREAD_SYNC_V2_CHUNKS_DIRECTORY, otherChunk),
+          ),
+        ).toBe(false);
+        const missingAfterChunk = runGit(checkedOut.mirrorPath, [
+          "rev-list",
+          "--objects",
+          "--missing=print",
+          "HEAD",
+        ]);
+        expect(missingAfterChunk).not.toContain(`?${selectedChunkObject}`);
+        expect(missingAfterChunk).toContain(`?${otherChunkObject}`);
+        expect(missingAfterChunk).toContain(`?${selectedBlobObject}`);
+
+        yield* syncGit.materializePayloadPaths!({
+          configuration,
+          mirrorPath: checkedOut.mirrorPath,
+          paths: [selectedBlobPath],
+        });
+        expect(
+          NodeFS.existsSync(NodePath.join(checkedOut.mirrorPath, ...selectedChunkPath.split("/"))),
+        ).toBe(true);
+        expect(
+          NodeFS.readFileSync(
+            NodePath.join(checkedOut.mirrorPath, ...selectedBlobPath.split("/")),
+            "utf8",
+          ),
+        ).toBe("blob");
+
+        yield* syncGit.prunePayloads!({ configuration, mirrorPath: checkedOut.mirrorPath });
+        expect(
+          NodeFS.existsSync(NodePath.join(checkedOut.mirrorPath, ...selectedChunkPath.split("/"))),
+        ).toBe(false);
+        expect(
+          NodeFS.existsSync(NodePath.join(checkedOut.mirrorPath, ...selectedBlobPath.split("/"))),
+        ).toBe(false);
+        expect(
+          NodeFS.existsSync(NodePath.join(checkedOut.mirrorPath, THREAD_SYNC_V2_MANIFEST_PATH)),
+        ).toBe(true);
+      }),
+    ).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect(
+    "pushes new sparse V2 objects without materializing or deleting retained payloads",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const root = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "thread-sync-v2-push-",
+          });
+          const remotePath = NodePath.join(root, "remote.git");
+          const seedPath = NodePath.join(root, "seed");
+          NodeFS.mkdirSync(remotePath);
+          NodeFS.mkdirSync(seedPath);
+          runGit(remotePath, ["init", "--bare"]);
+          runGit(remotePath, ["config", "uploadpack.allowFilter", "true"]);
+          runGit(seedPath, ["init"]);
+          runGit(seedPath, ["config", "user.name", "Seed"]);
+          runGit(seedPath, ["config", "user.email", "seed@localhost"]);
+
+          const retainedChunk = `${"7".repeat(64)}.ndjson`;
+          const retainedBlob = `${"8".repeat(64)}.blob`;
+          const initialFiles = [
+            [THREAD_SYNC_V2_MANIFEST_PATH, '{"formatVersion":2,"revision":1}\n'],
+            [`${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${retainedChunk}`, "retained chunk\n"],
+            [`${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${retainedBlob}`, "retained blob"],
+          ] as const;
+          for (const [relativePath, contents] of initialFiles) {
+            const filePath = NodePath.join(seedPath, ...relativePath.split("/"));
+            NodeFS.mkdirSync(NodePath.dirname(filePath), { recursive: true });
+            NodeFS.writeFileSync(filePath, contents);
+          }
+          runGit(seedPath, ["add", "."]);
+          runGit(seedPath, ["commit", "-m", "Seed V2 payload"]);
+          runGit(seedPath, ["branch", "-M", "main"]);
+          runGit(seedPath, ["remote", "add", "origin", remotePath]);
+          runGit(seedPath, ["push", "origin", "main"]);
+          const retainedChunkObject = runGit(remotePath, [
+            "rev-parse",
+            `refs/heads/main:${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${retainedChunk}`,
+          ]);
+          const retainedBlobObject = runGit(remotePath, [
+            "rev-parse",
+            `refs/heads/main:${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${retainedBlob}`,
+          ]);
+
+          const configuration = yield* decodeConfiguration({
+            remoteUrl: NodeURL.pathToFileURL(remotePath).href,
+            branch: "main",
+            fetchIntervalSeconds: 60,
+          });
+          const syncGit = yield* ThreadSyncGit.ThreadSyncGit;
+          const fetched = yield* syncGit.fetch(configuration);
+          const checkedOut = yield* syncGit.checkoutRemote(configuration, fetched.remoteRevision);
+          const newChunk = `${"9".repeat(64)}.ndjson`;
+          const newChunkPath = NodePath.join(
+            checkedOut.mirrorPath,
+            THREAD_SYNC_V2_CHUNKS_DIRECTORY,
+            newChunk,
+          );
+          NodeFS.mkdirSync(NodePath.dirname(newChunkPath), { recursive: true });
+          NodeFS.writeFileSync(newChunkPath, "new chunk\n");
+          NodeFS.writeFileSync(
+            NodePath.join(checkedOut.mirrorPath, THREAD_SYNC_V2_MANIFEST_PATH),
+            '{"formatVersion":2,"revision":2}\n',
+          );
+
+          yield* syncGit.commitAndPush({
+            configuration,
+            expectedRemoteRevision: fetched.remoteRevision,
+            message: "Add one V2 chunk",
+          });
+          expect(
+            runGit(remotePath, [
+              "show",
+              `refs/heads/main:${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${retainedChunk}`,
+            ]),
+          ).toBe("retained chunk");
+          expect(
+            runGit(remotePath, [
+              "show",
+              `refs/heads/main:${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${retainedBlob}`,
+            ]),
+          ).toBe("retained blob");
+          expect(
+            runGit(remotePath, [
+              "show",
+              `refs/heads/main:${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${newChunk}`,
+            ]),
+          ).toBe("new chunk");
+          expect(NodeFS.existsSync(newChunkPath)).toBe(false);
+          expect(
+            NodeFS.existsSync(
+              NodePath.join(checkedOut.mirrorPath, THREAD_SYNC_V2_CHUNKS_DIRECTORY, retainedChunk),
+            ),
+          ).toBe(false);
+          const missingAfterPush = runGit(checkedOut.mirrorPath, [
+            "rev-list",
+            "--objects",
+            "--missing=print",
+            "HEAD",
+          ]);
+          expect(missingAfterPush).toContain(`?${retainedChunkObject}`);
+          expect(missingAfterPush).toContain(`?${retainedBlobObject}`);
+        }),
+      ).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("removes unreachable sparse payloads without touching retained or outside paths", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "thread-sync-v2-sparse-gc-",
+        });
+        const remotePath = NodePath.join(root, "remote.git");
+        const seedPath = NodePath.join(root, "seed");
+        NodeFS.mkdirSync(remotePath);
+        NodeFS.mkdirSync(seedPath);
+        runGit(remotePath, ["init", "--bare"]);
+        runGit(remotePath, ["config", "uploadpack.allowFilter", "true"]);
+        runGit(seedPath, ["init"]);
+        runGit(seedPath, ["config", "user.name", "Seed"]);
+        runGit(seedPath, ["config", "user.email", "seed@localhost"]);
+
+        const retainedBlob = `${"a".repeat(64)}.blob`;
+        const unreachableBlob = `${"b".repeat(64)}.blob`;
+        const retainedChunk = `${"c".repeat(64)}.ndjson`;
+        const unreachableChunk = `${"d".repeat(64)}.ndjson`;
+        for (const [relativePath, contents] of [
+          [THREAD_SYNC_V2_MANIFEST_PATH, '{"formatVersion":2,"revision":1}\n'],
+          [`${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${retainedBlob}`, "retained"],
+          [`${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${unreachableBlob}`, "unreachable"],
+          [`${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${retainedChunk}`, "retained chunk\n"],
+          [`${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${unreachableChunk}`, "unreachable chunk\n"],
+          ["outside.keep", "outside\n"],
+        ] as const) {
+          const filePath = NodePath.join(seedPath, ...relativePath.split("/"));
+          NodeFS.mkdirSync(NodePath.dirname(filePath), { recursive: true });
+          NodeFS.writeFileSync(filePath, contents);
+        }
+        runGit(seedPath, ["add", "."]);
+        runGit(seedPath, ["commit", "-m", "Seed sparse GC"]);
+        runGit(seedPath, ["branch", "-M", "main"]);
+        runGit(seedPath, ["remote", "add", "origin", remotePath]);
+        runGit(seedPath, ["push", "origin", "main"]);
+
+        const configuration = yield* decodeConfiguration({
+          remoteUrl: NodeURL.pathToFileURL(remotePath).href,
+          branch: "main",
+          fetchIntervalSeconds: 60,
+        });
+        const syncGit = yield* ThreadSyncGit.ThreadSyncGit;
+        const fetched = yield* syncGit.fetch(configuration);
+        const checkedOut = yield* syncGit.checkoutRemote(configuration, fetched.remoteRevision);
+        expect(
+          NodeFS.existsSync(
+            NodePath.join(checkedOut.mirrorPath, THREAD_SYNC_V2_BLOBS_DIRECTORY, unreachableBlob),
+          ),
+        ).toBe(false);
+        NodeFS.writeFileSync(
+          NodePath.join(checkedOut.mirrorPath, THREAD_SYNC_V2_MANIFEST_PATH),
+          '{"formatVersion":2,"revision":2}\n',
+        );
+        const revision = yield* syncGit.commitAndPush({
+          configuration,
+          expectedRemoteRevision: fetched.remoteRevision,
+          message: "Collect unreachable sparse blob",
+          removePayloadPaths: [
+            `${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${unreachableBlob}`,
+            `${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${unreachableChunk}`,
+          ],
+        });
+        const removed = NodeChildProcess.spawnSync(
+          "git",
+          [
+            "cat-file",
+            "-e",
+            `refs/heads/main:${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${unreachableBlob}`,
+          ],
+          { cwd: remotePath, encoding: "utf8", windowsHide: true },
+        );
+        expect(removed.status).not.toBe(0);
+        const removedChunk = NodeChildProcess.spawnSync(
+          "git",
+          [
+            "cat-file",
+            "-e",
+            `refs/heads/main:${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${unreachableChunk}`,
+          ],
+          { cwd: remotePath, encoding: "utf8", windowsHide: true },
+        );
+        expect(removedChunk.status).not.toBe(0);
+        expect(
+          runGit(remotePath, [
+            "show",
+            `refs/heads/main:${THREAD_SYNC_V2_BLOBS_DIRECTORY}/${retainedBlob}`,
+          ]),
+        ).toBe("retained");
+        expect(
+          runGit(remotePath, [
+            "show",
+            `refs/heads/main:${THREAD_SYNC_V2_CHUNKS_DIRECTORY}/${retainedChunk}`,
+          ]),
+        ).toBe("retained chunk");
+        expect(runGit(remotePath, ["show", "refs/heads/main:outside.keep"])).toBe("outside");
+
+        NodeFS.writeFileSync(
+          NodePath.join(checkedOut.mirrorPath, THREAD_SYNC_V2_MANIFEST_PATH),
+          '{"formatVersion":2,"revision":3}\n',
+        );
+        const rejected = yield* syncGit
+          .commitAndPush({
+            configuration,
+            expectedRemoteRevision: revision,
+            message: "Invalid GC path",
+            removePayloadPaths: ["outside.keep"],
+          })
+          .pipe(Effect.flip);
+        expect(rejected.code).toBe("integrity-failed");
+        expect(runGit(remotePath, ["show", "refs/heads/main:outside.keep"])).toBe("outside");
       }),
     ).pipe(Effect.provide(testLayer)),
   );
@@ -582,6 +1189,43 @@ describe("ThreadSyncGit", () => {
 
         expect(NodeFS.existsSync(mainMirror)).toBe(true);
         expect(NodeFS.existsSync(alternateMirror)).toBe(false);
+      }),
+    ).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("reuses an initialized managed mirror when configuration persistence is retried", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "thread-sync-retry-" });
+        const remotePath = NodePath.join(root, "remote.git");
+        NodeFS.mkdirSync(remotePath);
+        runGit(remotePath, ["init", "--bare"]);
+        const configuration = yield* decodeConfiguration({
+          remoteUrl: remotePath,
+          branch: "main",
+          fetchIntervalSeconds: 60,
+        });
+        const syncGit = yield* ThreadSyncGit.ThreadSyncGit;
+
+        // The first validation represents a process that initialized the
+        // managed mirror and then stopped before state.json was committed.
+        const orphan = yield* syncGit.fetch(configuration);
+        const sentinelPath = NodePath.join(orphan.mirrorPath, ".retry-sentinel");
+        NodeFS.writeFileSync(sentinelPath, "preserve");
+
+        const retried = yield* syncGit.fetch(configuration);
+        expect(retried.mirrorPath).toBe(orphan.mirrorPath);
+        expect(retried.remoteRevision).toBeNull();
+        expect(NodeFS.readFileSync(sentinelPath, "utf8")).toBe("preserve");
+        expect(
+          NodeFS.readFileSync(
+            NodePath.join(retried.mirrorPath, ".erebus-thread-sync-managed"),
+            "utf8",
+          ),
+        ).toBe("erebus-managed-thread-sync-v1\n");
+        expect(runGit(retried.mirrorPath, ["remote", "get-url", "origin"])).toBe(remotePath);
+        expect(runGit(retried.mirrorPath, ["rev-list", "--all", "--count"])).toBe("0");
       }),
     ).pipe(Effect.provide(testLayer)),
   );

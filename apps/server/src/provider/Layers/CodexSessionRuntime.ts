@@ -19,6 +19,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import { satisfiesSemverRange } from "@t3tools/shared/semver";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Crypto from "effect/Crypto";
@@ -75,6 +76,28 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
 ];
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+const MIN_CODEX_HISTORY_FREE_RESUME_VERSION = "0.125.0";
+const CODEX_USER_AGENT_VERSION = /\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s|$|\()/;
+
+export function validateCodexHistoryFreeResumeVersion(
+  userAgent: string,
+): CodexErrors.CodexAppServerRequestError | null {
+  const version = userAgent.match(CODEX_USER_AGENT_VERSION)?.[1];
+  if (
+    version !== undefined &&
+    satisfiesSemverRange(version, `>=${MIN_CODEX_HISTORY_FREE_RESUME_VERSION}`)
+  ) {
+    return null;
+  }
+
+  const detected =
+    version === undefined
+      ? "Codex reported an unknown version"
+      : `Codex reported version ${version}`;
+  return CodexErrors.CodexAppServerRequestError.invalidRequest(
+    `Cannot safely resume this thread because ${detected}. Erebus requires Codex ${MIN_CODEX_HISTORY_FREE_RESUME_VERSION} or newer to resume without loading the full thread history. Update Codex and retry.`,
+  );
+}
 
 export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | undefined): boolean {
   return appServerArgs?.some((argument) => argument.includes("mcp_servers.")) === true;
@@ -815,6 +838,7 @@ export const openCodexThread = (input: {
 
   return input.client.request("thread/resume", {
     threadId: resumeThreadId,
+    excludeTurns: true,
     ...resumeParams,
   });
 };
@@ -2301,7 +2325,7 @@ export const makeCodexSessionRuntime = (
 
     const start = Effect.fn("CodexSessionRuntime.start")(function* () {
       yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
-      yield* client.request("initialize", buildCodexInitializeParams());
+      const initialized = yield* client.request("initialize", buildCodexInitializeParams());
       yield* client.notify("initialized", undefined);
 
       if (options.handleDynamicTool || options.onProteusHealth) {
@@ -2316,6 +2340,13 @@ export const makeCodexSessionRuntime = (
       }
 
       const requestedModel = normalizeCodexModelSlug(options.model);
+      const resumeThreadId = readResumeCursorThreadId(options.resumeCursor);
+      if (resumeThreadId !== undefined) {
+        const versionError = validateCodexHistoryFreeResumeVersion(initialized.userAgent);
+        if (versionError !== null) {
+          return yield* versionError;
+        }
+      }
 
       const opened = yield* openCodexThread({
         client,
@@ -2324,7 +2355,7 @@ export const makeCodexSessionRuntime = (
         cwd: options.cwd,
         requestedModel,
         serviceTier: options.serviceTier,
-        resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        resumeThreadId,
         ...(options.dynamicTools ? { dynamicTools: options.dynamicTools } : {}),
       });
 

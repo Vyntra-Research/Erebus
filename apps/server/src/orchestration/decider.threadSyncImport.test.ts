@@ -6,6 +6,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  ThreadSyncImportStageId,
   TurnId,
   type OrchestrationCommand,
   type OrchestrationCoagentShell,
@@ -189,6 +190,40 @@ function importCommand(
   } satisfies Extract<OrchestrationCommand, { type: "thread.sync.import-batch" }>;
 }
 
+function importV2StartCommand(mode: "create" | "replace", expectedLocalUpdatedAt: string | null) {
+  const legacy = importCommand(mode, expectedLocalUpdatedAt).imports[0]!;
+  return {
+    type: "thread.sync.import-v2.start",
+    commandId: CommandId.make(`command-import-v2-start-${mode}`),
+    descriptor: {
+      stageId: ThreadSyncImportStageId.make(`stage-import-v2-${mode}`),
+      mode,
+      threadId,
+      projectId,
+      expectedLocalUpdatedAt,
+      ...(mode === "create" ? { localState: legacy.localState! } : {}),
+      header: {
+        title: legacy.history.title,
+        coagent: null,
+        latestTurnId: null,
+        lifecycle: {
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          deletedAt: null,
+        },
+        createdAt: now,
+        updatedAt: importedAt,
+      },
+      sourceRevision: "revision-v2",
+      sourceHash: "revision-v2",
+      recordCount: 0,
+      bindingUpdates: legacy.bindingUpdates,
+    },
+    startedAt: importedAt,
+  } satisfies Extract<OrchestrationCommand, { type: "thread.sync.import-v2.start" }>;
+}
+
 function crossProjectImportCommand(
   sourceProjectId: ProjectId,
   relation: "source-plan" | "implementation",
@@ -244,6 +279,57 @@ function crossProjectImportCommand(
 }
 
 it.layer(NodeServices.layer)("thread sync import decider", (it) => {
+  it.effect("starts a staged v2 create only for an absent target", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedProject;
+      const command = importV2StartCommand("create", null);
+      const decided = yield* decideOrchestrationCommand({ command, readModel });
+      const started = (Array.isArray(decided) ? decided : [decided])[0];
+
+      expect(started?.type).toBe("thread.sync-import-v2.started");
+      if (started?.type !== "thread.sync-import-v2.started") return;
+      expect(started.payload.descriptor).toEqual(command.descriptor);
+    }),
+  );
+
+  it.effect("rejects a staged v2 replace after the local thread changed", () =>
+    Effect.gen(function* () {
+      let readModel = yield* seedProject;
+      readModel = yield* projectEvent(
+        readModel,
+        event({
+          sequence: 2,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          payload: {
+            threadId,
+            projectId,
+            title: "Changed locally",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex-existing"),
+              model: "gpt-existing",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: importedAt,
+          },
+        }),
+      );
+
+      const error = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: importV2StartCommand("replace", now),
+          readModel,
+        }),
+      );
+      expect(error.message).toContain("changed after sync conflict resolution");
+    }),
+  );
+
   it.effect("materializes a new provider-independent thread with local defaults", () =>
     Effect.gen(function* () {
       const readModel = yield* seedProject;

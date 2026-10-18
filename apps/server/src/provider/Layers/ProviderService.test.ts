@@ -1253,6 +1253,40 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("keeps the session owner binding when a Codex turn selects another account", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const threadId = asThreadId("thread-codex-account-route");
+      const routedAccountId = ProviderInstanceId.make("codex_work");
+
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      routing.codex.startSession.mockClear();
+      routing.codex.sendTurn.mockClear();
+
+      yield* provider.sendTurn({
+        threadId,
+        input: "continue with the routed account",
+        attachments: [],
+        modelSelection: createModelSelection(routedAccountId, "gpt-5.4", []),
+      });
+
+      const binding = Option.getOrThrow(yield* directory.getBinding(threadId));
+      assert.equal(routing.codex.startSession.mock.calls.length, 0);
+      assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+      assert.equal(binding.providerInstanceId, codexInstanceId);
+      assert.equal(
+        routing.codex.sendTurn.mock.calls[0]?.[0].modelSelection?.instanceId,
+        routedAccountId,
+      );
+    }),
+  );
+
   it.effect("routes feedback to the Codex adapter and returns its feedback ID", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;

@@ -46,7 +46,7 @@ Erebus manages Proteus inside this isolated profile. It ships a tested fallback,
 
 Use **Add Codex account** to add another login. Erebus creates its account profile and keeps `auth.json` separate. Sessions, configuration, skills, plugins, MCPs, and memories continue to use the default Erebus Codex home. Erebus uses native links to share that state: symbolic links on Linux, and directory junctions plus verified hard links on Windows. Windows does not require Developer Mode or administrator access.
 
-Sign in from the new account card, then choose which account is **Primary**. Automatic routing prefers that account until its remaining quota reaches the configured switch point. It then sends new turns to a signed-in fallback account. When the primary quota resets, new turns return to it. A running turn stays on its current account; Erebus changes accounts only at a turn boundary and resumes the same Codex task from the shared session store.
+Sign in from the new account card, then choose which account is **Primary**. Automatic routing prefers that account until its remaining quota reaches the configured switch point. It then sends new model requests to a signed-in fallback account. When the primary quota resets, later requests return to it. Erebus applies account changes without restarting or detaching the Codex task. If an account rejects a request for lack of quota before streaming begins, Erebus can retry that request through another usable account; it never replays a response after streaming starts.
 
 The default switch point is 5% remaining. A fallback is preserved at 1% when the primary still has quota. You can change both values or disable automatic routing under **Advanced provider settings**.
 

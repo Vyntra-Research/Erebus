@@ -17,6 +17,7 @@ import {
   EventId,
   MessageId,
   type OrchestrationCommand,
+  OrchestrationProposedPlanId,
   ProjectId,
   ProviderItemId,
   type ServerSettings,
@@ -1465,6 +1466,34 @@ describe("ProviderRuntimeIngestion", () => {
       implementedAt: null,
       implementationThreadId: null,
     });
+
+    // Keep the referenced plan outside the recent-detail plan cap after the
+    // target command has persisted its exact source reference. The runtime
+    // must still resolve that plan by id when the implementation turn starts.
+    await Effect.runPromise(
+      Effect.forEach(
+        Array.from({ length: 205 }, (_, index) => index),
+        (index) =>
+          harness.engine.dispatch({
+            type: "thread.proposed-plan.upsert",
+            commandId: CommandId.make(`cmd-plan-source-decoy-${index}`),
+            threadId: sourceThreadId,
+            proposedPlan: {
+              id: OrchestrationProposedPlanId.make(
+                `zz-plan-decoy-${index.toString().padStart(3, "0")}`,
+              ),
+              turnId: null,
+              planMarkdown: `# Decoy ${index}`,
+              implementedAt: null,
+              implementationThreadId: null,
+              createdAt: "2026-01-01T00:00:01.000Z",
+              updatedAt: "2026-01-01T00:00:01.000Z",
+            },
+            createdAt: "2026-01-01T00:00:01.000Z",
+          }),
+        { concurrency: 1, discard: true },
+      ),
+    );
 
     harness.emit({
       type: "turn.started",

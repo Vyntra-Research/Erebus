@@ -74,6 +74,27 @@ function canonicalPortableId(kind: "activity" | "message" | "plan" | "turn", see
   return `${kind}-${digest}`;
 }
 
+export function canonicalThreadSyncTurnId(threadId: ThreadId, index: number) {
+  return canonicalPortableId(
+    "turn",
+    `${threadId}\0turn\0${String(index)}`,
+  ) as ThreadSyncThreadSnapshot["turns"][number]["turnId"];
+}
+
+export function canonicalThreadSyncMessageId(threadId: ThreadId, index: number) {
+  return canonicalPortableId(
+    "message",
+    `${threadId}\0message\0${String(index)}`,
+  ) as ThreadSyncThreadSnapshot["messages"][number]["id"];
+}
+
+export function canonicalThreadSyncActivityId(threadId: ThreadId, index: number) {
+  return canonicalPortableId(
+    "activity",
+    `${threadId}\0activity\0${String(index)}`,
+  ) as ThreadSyncThreadSnapshot["activities"][number]["id"];
+}
+
 export function canonicalThreadSyncPlanId(
   threadId: ThreadId,
   index: number,
@@ -112,20 +133,12 @@ export function canonicalizeThreadSyncThreadSnapshot(
   const orderedTurns = orderTurnsForThreadSync(snapshot.turns);
   const turnIds = new Map(
     orderedTurns.map(
-      (turn, index) =>
-        [
-          turn.turnId,
-          canonicalPortableId("turn", `${seed}\0turn\0${String(index)}`) as typeof turn.turnId,
-        ] as const,
+      (turn, index) => [turn.turnId, canonicalThreadSyncTurnId(seed, index)] as const,
     ),
   );
   const messageIds = new Map(
     snapshot.messages.map(
-      (message, index) =>
-        [
-          message.id,
-          canonicalPortableId("message", `${seed}\0message\0${String(index)}`) as typeof message.id,
-        ] as const,
+      (message, index) => [message.id, canonicalThreadSyncMessageId(seed, index)] as const,
     ),
   );
   const planIds = new Map(
@@ -173,10 +186,7 @@ export function canonicalizeThreadSyncThreadSnapshot(
     })),
     activities: snapshot.activities.map((activity, index) => ({
       ...activity,
-      id: canonicalPortableId(
-        "activity",
-        `${seed}\0activity\0${String(index)}`,
-      ) as typeof activity.id,
+      id: canonicalThreadSyncActivityId(seed, index),
       turnId: activity.turnId === null ? null : (turnIds.get(activity.turnId) ?? null),
     })),
   };
