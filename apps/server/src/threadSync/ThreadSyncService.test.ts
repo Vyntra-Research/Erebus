@@ -1,10 +1,10 @@
 import {
   ThreadSyncProjectSnapshot,
   ThreadSyncThreadSnapshot,
+  ThreadId,
   type OrchestrationProposedPlanId,
   type ProjectId,
   type OrchestrationEvent,
-  type ThreadId,
   type ThreadSyncProjectId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -12,6 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { canonicalThreadSyncPlanId, threadSyncRevision } from "./ThreadSyncDocuments.ts";
 import {
+  analyzeThreadSyncV2State,
   analyzeThreadSyncState,
   buildThreadSyncImportReferenceMaps,
   deriveKeepBothThreadIds,
@@ -328,6 +329,76 @@ describe("ThreadSyncService state analysis", () => {
         suggestedProjectId: "local-project",
       },
     ]);
+  });
+
+  it("requests relinking only for projects that still contain active primary threads", () => {
+    const staleProject = makeProject({ syncProjectId: "stale-project", title: "Stale" });
+    const activeProject = makeProject({ syncProjectId: "active-project", title: "Active" });
+    const activeThreadId = ThreadId.make("active-thread");
+    const state = emptyThreadSyncLocalState();
+    const local = {
+      index: { projects: [], threads: [] },
+      projects: new Map(),
+      descriptors: new Map(),
+      revisions: new Map(),
+      sources: new Map(),
+      blobs: new Map(),
+      activeLocalThreadIds: new Set<ThreadId>(),
+      projectBindings: [],
+      threadBindings: [],
+    };
+    const remote = {
+      manifest: {},
+      projects: new Map([
+        [staleProject.syncProjectId, staleProject],
+        [activeProject.syncProjectId, activeProject],
+      ]),
+      threads: new Map([
+        [
+          activeThreadId,
+          {
+            threadId: activeThreadId,
+            syncProjectId: activeProject.syncProjectId,
+            title: "Active thread",
+            revision: "active-revision",
+          },
+        ],
+      ]),
+      threadManifests: new Map([
+        [
+          activeThreadId,
+          {
+            header: {
+              coagent: null,
+              lifecycle: { archivedAt: null, settledAt: null, deletedAt: null },
+            },
+          },
+        ],
+      ]),
+      blobs: new Map(),
+    };
+    const analysis = analyzeThreadSyncV2State({
+      local,
+      remote,
+      state,
+    } as never);
+
+    expect(analysis.status.unlinkedProjects.map((entry) => entry.project.syncProjectId)).toEqual([
+      activeProject.syncProjectId,
+    ]);
+
+    const binding = {
+      syncProjectId: activeProject.syncProjectId,
+      projectId: "local-project" as ProjectId,
+      linkedAt: "2026-10-18T00:00:00.000Z",
+    };
+    const boundAnalysis = analyzeThreadSyncV2State({
+      local: { ...local, projectBindings: [binding] },
+      remote,
+      state: { ...state, projectBindings: [binding] },
+    } as never);
+
+    expect(boundAnalysis.status.unlinkedProjects).toEqual([]);
   });
 });
 
