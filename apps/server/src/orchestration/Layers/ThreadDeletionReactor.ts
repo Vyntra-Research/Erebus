@@ -62,23 +62,29 @@ const make = Effect.gen(function* () {
 
   const processThreadDeleted = Effect.fn("processThreadDeleted")(function* (threadId: ThreadId) {
     const coagent = yield* coagents.getByChild(threadId);
-    const pending = Option.isSome(coagent)
-      ? yield* coagents.isDeletedPendingHistoryCleanup(threadId)
-      : false;
-    if (!pending) {
+    if (Option.isNone(coagent)) {
       yield* stopProviderSession(threadId);
       yield* closeThreadTerminals(threadId);
       return;
     }
     yield* Effect.gen(function* () {
-      const deleted = yield* providerService.deletePersistedThreadHistory(threadId);
-      if (!deleted) {
-        yield* Effect.logWarning("co-agent provider does not support permanent history deletion", {
+      if (!(yield* coagents.isProviderHistoryDeleted(threadId))) {
+        const deleted = yield* providerService.deletePersistedThreadHistory(threadId);
+        if (!deleted) {
+          yield* Effect.logWarning(
+            "co-agent provider does not support permanent history deletion",
+            {
+              threadId,
+            },
+          );
+          return;
+        }
+        yield* coagents.markProviderHistoryDeleted(
           threadId,
-        });
-        return;
+          DateTime.formatIso(yield* DateTime.now),
+        );
       }
-      yield* coagents.markProviderHistoryDeleted(threadId, DateTime.formatIso(yield* DateTime.now));
+      yield* coagents.purgeDeleted(threadId);
     }).pipe(Effect.ensuring(Effect.ignore(closeThreadTerminals(threadId))));
   });
 
@@ -106,7 +112,7 @@ const make = Effect.gen(function* () {
         return worker.enqueue(event.payload.threadId);
       }),
     );
-    const pending = yield* coagents.listDeletedPendingHistoryCleanup().pipe(
+    const pending = yield* coagents.listDeletedForPermanentCleanup().pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("could not list deleted co-agents awaiting provider cleanup", {
           cause: Cause.pretty(cause),

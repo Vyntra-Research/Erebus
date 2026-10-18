@@ -35,12 +35,22 @@ export interface CoagentRegistryShape {
     ReadonlyArray<ThreadId>,
     ProjectionRepositoryError
   >;
+  readonly listDeletedForPermanentCleanup: () => Effect.Effect<
+    ReadonlyArray<ThreadId>,
+    ProjectionRepositoryError
+  >;
   readonly isDeletedPendingHistoryCleanup: (
     childThreadId: ThreadId,
   ) => Effect.Effect<boolean, ProjectionRepositoryError>;
   readonly markProviderHistoryDeleted: (
     childThreadId: ThreadId,
     deletedAt: string,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly isProviderHistoryDeleted: (
+    childThreadId: ThreadId,
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
+  readonly purgeDeleted: (
+    childThreadId: ThreadId,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 

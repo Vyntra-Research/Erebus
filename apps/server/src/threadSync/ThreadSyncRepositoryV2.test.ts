@@ -398,6 +398,7 @@ describe("ThreadSyncRepositoryV2", () => {
 
         const index = yield* readThreadSyncV2RepositoryIndex(mirrorPath);
         expect(index).not.toBeNull();
+        expect(index!.threadManifests.get(header.threadId)?.header).toEqual(header);
         const entry = index!.threads.get(header.threadId)!;
         const reader = yield* readThreadSyncV2Thread({ mirrorPath, entry });
         const restored = Array.from(yield* Stream.runCollect(reader.records));

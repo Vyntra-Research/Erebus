@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerConfig from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
@@ -304,8 +305,31 @@ layer("CoagentToolController", (it) => {
       );
       assert.isTrue(yield* registry.isDeletedPendingHistoryCleanup(child.id));
       assert.include(yield* registry.listDeletedPendingHistoryCleanup(), child.id);
+      assert.include(yield* registry.listDeletedForPermanentCleanup(), child.id);
       yield* registry.markProviderHistoryDeleted(child.id, now);
       assert.isFalse(yield* registry.isDeletedPendingHistoryCleanup(child.id));
+      yield* registry.purgeDeleted(child.id);
+      assert.isTrue(Option.isNone(yield* registry.getByChild(child.id)));
+      assert.notInclude(yield* registry.listDeletedForPermanentCleanup(), child.id);
+      const sql = yield* SqlClient.SqlClient;
+      assert.deepStrictEqual(
+        yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM projection_threads
+          WHERE thread_id = ${child.id}
+        `,
+        [{ count: 0 }],
+      );
+      assert.deepStrictEqual(
+        yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM orchestration_events
+          WHERE aggregate_kind = 'thread' AND stream_id = ${child.id}
+        `,
+        [{ count: 0 }],
+      );
+      const projections = yield* ProjectionSnapshotQuery;
+      assert.isTrue(Option.isNone(yield* projections.getThreadDetailById(child.id)));
 
       const replacement = yield* call(controller, context, "spawn", {
         mode: "blank",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.3 - 2026-10-17
+
+### Fixed
+
+- Sync only active primary threads, remove inactive history from the Git mirror, and permanently purge released co-agents from local storage.
+
 ## 0.8.2 - 2026-10-17
 
 ### Fixed
