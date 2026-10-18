@@ -187,6 +187,39 @@ export function isActivePrimaryThreadForSync(thread: ThreadSyncEligibilityCandid
   );
 }
 
+export function resolveRetiredSyncThreadIds(input: {
+  readonly threadBindings: ReadonlyArray<ThreadSyncLocalThreadBinding>;
+  readonly localThreads: ReadonlyArray<ThreadSyncEligibilityCandidate & { readonly id: ThreadId }>;
+  readonly remoteThreadIds: Iterable<ThreadId>;
+}): ReadonlySet<ThreadId> {
+  const localThreadsById = new Map(
+    input.localThreads.map((thread) => [thread.id, thread] as const),
+  );
+  const boundSyncThreadIds = new Set(input.threadBindings.map((binding) => binding.syncThreadId));
+  const retired = new Set<ThreadId>();
+
+  for (const binding of input.threadBindings) {
+    const localThread = localThreadsById.get(binding.localThreadId);
+    if (localThread === undefined || !isActivePrimaryThreadForSync(localThread)) {
+      retired.add(binding.syncThreadId);
+    }
+  }
+
+  // Older builds could drop a binding as soon as its same-id local thread was
+  // archived. Recover that local removal instead of presenting the surviving
+  // remote copy as a new download. An explicit binding always wins because an
+  // imported thread may intentionally use a different local identifier.
+  for (const syncThreadId of input.remoteThreadIds) {
+    if (boundSyncThreadIds.has(syncThreadId)) continue;
+    const sameIdLocalThread = localThreadsById.get(syncThreadId);
+    if (sameIdLocalThread !== undefined && !isActivePrimaryThreadForSync(sameIdLocalThread)) {
+      retired.add(syncThreadId);
+    }
+  }
+
+  return retired;
+}
+
 function activePrimaryRemoteThreads(
   repository: ThreadSyncV2RepositoryIndex,
 ): ReadonlyMap<ThreadId, ThreadSyncV2ThreadEntry> {
@@ -1667,17 +1700,11 @@ export const make = Effect.gen(function* () {
     const unfilteredIndex = yield* getIndex().pipe(
       Effect.mapError((cause) => syncError("export", "io-failed", String(cause))),
     );
-    const localThreadsById = new Map(
-      unfilteredIndex.threads.map((thread) => [thread.id, thread] as const),
-    );
-    const retiredSyncThreadIds = new Set(
-      state.threadBindings.flatMap((binding) => {
-        const localThread = localThreadsById.get(binding.localThreadId);
-        return localThread !== undefined && !isActivePrimaryThreadForSync(localThread)
-          ? [binding.syncThreadId]
-          : [];
-      }),
-    );
+    const retiredSyncThreadIds = resolveRetiredSyncThreadIds({
+      threadBindings: state.threadBindings,
+      localThreads: unfilteredIndex.threads,
+      remoteThreadIds: remote.threads.keys(),
+    });
     const eligibleThreads = unfilteredIndex.threads.filter(isActivePrimaryThreadForSync);
     const eligibleRemoteProjectIds = new Set(
       [...activePrimaryRemoteThreads(remote).values()].map((thread) => thread.syncProjectId),

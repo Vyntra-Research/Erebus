@@ -22,6 +22,7 @@ import {
   reconcileExportedThreadBindings,
   remapImportedSnapshot,
   replayThreadSyncBindingEvents,
+  resolveRetiredSyncThreadIds,
   resolveImportedCoagentParent,
   sanitizeThreadSyncRemoteUrl,
   selectRetainedRemoteThreads,
@@ -476,6 +477,85 @@ describe("ThreadSyncService state analysis", () => {
     expect(analysis.entries[0]?.decision).toBe("push");
     expect(analysis.status.pendingPullCount).toBe(0);
     expect(analysis.status.pendingPushCount).toBe(1);
+  });
+
+  it("recovers a same-id local removal after an older build dropped its binding", () => {
+    const syncThreadId = ThreadId.make("archived-thread");
+    const project = makeProject({ syncProjectId: "archive-project", title: "Archive" });
+    const archivedLocalThread = {
+      id: syncThreadId,
+      coagent: null,
+      lifecycle: {
+        archivedAt: "2026-10-18T04:51:35.979Z",
+        settledAt: null,
+        deletedAt: null,
+      },
+    };
+    const retiredSyncThreadIds = resolveRetiredSyncThreadIds({
+      threadBindings: [],
+      localThreads: [archivedLocalThread],
+      remoteThreadIds: [syncThreadId],
+    });
+    expect([...retiredSyncThreadIds]).toEqual([syncThreadId]);
+
+    const analysis = analyzeThreadSyncV2State({
+      local: {
+        index: { projects: [], threads: [archivedLocalThread] },
+        projects: new Map(),
+        descriptors: new Map(),
+        revisions: new Map(),
+        sources: new Map(),
+        blobs: new Map(),
+        activeLocalThreadIds: new Set(),
+        retiredSyncThreadIds,
+        projectBindings: [],
+        threadBindings: [],
+      },
+      remote: {
+        manifest: {},
+        projects: new Map([[project.syncProjectId, project]]),
+        threads: new Map([
+          [
+            syncThreadId,
+            {
+              threadId: syncThreadId,
+              syncProjectId: project.syncProjectId,
+              title: "Archived locally",
+              revision: "remote-revision",
+            },
+          ],
+        ]),
+        threadManifests: new Map([
+          [
+            syncThreadId,
+            {
+              header: {
+                coagent: null,
+                lifecycle: { archivedAt: null, settledAt: null, deletedAt: null },
+              },
+            },
+          ],
+        ]),
+        blobs: new Map(),
+      },
+      state: emptyThreadSyncLocalState(),
+    } as never);
+
+    expect(analysis.entries[0]?.decision).toBe("push");
+    expect(analysis.status.pendingPullCount).toBe(0);
+    expect(analysis.status.pendingPushCount).toBe(1);
+  });
+
+  it("does not retire an unbound remote thread that has no local history", () => {
+    const syncThreadId = ThreadId.make("remote-only-thread");
+
+    expect(
+      resolveRetiredSyncThreadIds({
+        threadBindings: [],
+        localThreads: [],
+        remoteThreadIds: [syncThreadId],
+      }).size,
+    ).toBe(0);
   });
 });
 
