@@ -413,7 +413,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   // so git status (and thus PR detection) queries the correct path.
   const threadProject = useProject(
     useMemo(
-      () => scopeProjectRef(thread.environmentId, thread.projectId),
+      () =>
+        thread.projectId === null ? null : scopeProjectRef(thread.environmentId, thread.projectId),
       [thread.environmentId, thread.projectId],
     ),
   );
@@ -1275,6 +1276,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       project.memberProjects.map((member) => [member.physicalProjectKey, 0] as const),
     );
     for (const thread of projectThreads) {
+      if (thread.projectId === null) continue;
       const member = memberProjectByScopedKey.get(
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
       );
@@ -2257,9 +2259,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const threadKey = scopedThreadKey(threadRef);
       const thread = sidebarThreadByKeyRef.current.get(threadKey) ?? null;
       if (!thread) return;
-      const threadProject = memberProjectByScopedKey.get(
-        scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
-      );
+      const threadProject =
+        thread.projectId === null
+          ? null
+          : memberProjectByScopedKey.get(
+              scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+            );
       const threadWorkspacePath =
         thread.worktreePath ?? threadProject?.workspaceRoot ?? project.workspaceRoot ?? null;
       const clicked = await api.contextMenu.show(
@@ -2277,10 +2282,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       );
 
       if (clicked === "new-thread-on-branch") {
+        const projectId = thread.projectId;
+        if (projectId === null) {
+          toastManager.add({
+            type: "warning",
+            title: "Link this thread to a project first",
+          });
+          return;
+        }
         // Explicit branch carry-over: reuse the thread's worktree when it
         // has one, otherwise its branch on the local checkout.
         const result = await settlePromise(() =>
-          handleNewThread(scopeProjectRef(thread.environmentId, thread.projectId), {
+          handleNewThread(scopeProjectRef(thread.environmentId, projectId), {
             branch: thread.branch,
             worktreePath: thread.worktreePath,
             envMode: thread.worktreePath ? "worktree" : "local",
@@ -3307,7 +3320,7 @@ export default function LegacySidebar() {
       return null;
     }
     const activeThread = sidebarThreadByKey.get(routeThreadKey);
-    if (!activeThread) return null;
+    if (!activeThread || activeThread.projectId === null) return null;
     const physicalKey =
       projectPhysicalKeyByScopedRef.get(
         scopedProjectKey(scopeProjectRef(activeThread.environmentId, activeThread.projectId)),
@@ -3320,6 +3333,7 @@ export default function LegacySidebar() {
   const threadsByProjectKey = useMemo(() => {
     const next = new Map<string, SidebarThreadSummary[]>();
     for (const thread of sidebarThreads) {
+      if (thread.projectId === null) continue;
       const physicalKey =
         projectPhysicalKeyByScopedRef.get(
           scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
@@ -3450,15 +3464,18 @@ export default function LegacySidebar() {
       ...project,
       id: project.projectKey,
     }));
-    const sortableThreads = visibleThreads.map((thread) => {
+    const sortableThreads = visibleThreads.flatMap((thread) => {
+      if (thread.projectId === null) return [];
       const physicalKey =
         projectPhysicalKeyByScopedRef.get(
           scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
         ) ?? scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId));
-      return {
-        ...thread,
-        projectId: (physicalToLogicalKey.get(physicalKey) ?? physicalKey) as ProjectId,
-      };
+      return [
+        {
+          ...thread,
+          projectId: (physicalToLogicalKey.get(physicalKey) ?? physicalKey) as ProjectId,
+        },
+      ];
     });
     return sortProjectsForSidebar(
       sortableProjects,

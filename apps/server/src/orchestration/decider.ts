@@ -175,12 +175,14 @@ const validateThreadSyncImportV2Descriptor = Effect.fn("validateThreadSyncImport
     readonly occurredAt: string;
   }) {
     const { descriptor } = input;
-    const project = input.readModel.projects.find((entry) => entry.id === descriptor.projectId);
-    if (project === undefined || project.deletedAt !== null) {
-      return yield* new OrchestrationCommandInvariantError({
-        commandType: input.commandType,
-        detail: `Project '${descriptor.projectId}' cannot receive imported threads.`,
-      });
+    if (descriptor.projectId !== null) {
+      const project = input.readModel.projects.find((entry) => entry.id === descriptor.projectId);
+      if (project === undefined || project.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: input.commandType,
+          detail: `Project '${descriptor.projectId}' cannot receive imported threads.`,
+        });
+      }
     }
 
     const targetBindings = descriptor.bindingUpdates.filter(
@@ -204,6 +206,7 @@ const validateThreadSyncImportV2Descriptor = Effect.fn("validateThreadSyncImport
     const localProjectBySyncProject = new Map<string, ProjectId>();
     const syncProjectByLocalProject = new Map<ProjectId, string>();
     for (const binding of descriptor.bindingUpdates) {
+      if (binding.syncProjectId === null || binding.localProjectId === null) continue;
       const mappedLocalProject = localProjectBySyncProject.get(binding.syncProjectId);
       const mappedSyncProject = syncProjectByLocalProject.get(binding.localProjectId);
       if (
@@ -478,11 +481,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.create": {
-      yield* requireProject({
-        readModel,
-        command,
-        projectId: command.projectId,
-      });
+      if (command.projectId !== null) {
+        yield* requireProject({
+          readModel,
+          command,
+          projectId: command.projectId,
+        });
+      }
       yield* requireThreadAbsent({
         readModel,
         command,
@@ -754,6 +759,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const localProjectBySyncProject = new Map<string, ProjectId>();
       const syncProjectByLocalProject = new Map<ProjectId, string>();
       for (const binding of bindingUpdates) {
+        if (binding.syncProjectId === null || binding.localProjectId === null) continue;
         const mappedLocalProject = localProjectBySyncProject.get(binding.syncProjectId);
         const mappedSyncProject = syncProjectByLocalProject.get(binding.localProjectId);
         if (
@@ -789,16 +795,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const plannedEvents: PlannedOrchestrationEvent[] = [];
 
       for (const imported of command.imports) {
-        const project = yield* requireProject({
-          readModel: nextReadModel,
-          command,
-          projectId: imported.projectId,
-        });
-        if (project.deletedAt !== null) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `Project '${imported.projectId}' is deleted and cannot receive imported threads.`,
+        if (imported.projectId !== null) {
+          const project = yield* requireProject({
+            readModel: nextReadModel,
+            command,
+            projectId: imported.projectId,
           });
+          if (project.deletedAt !== null) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Project '${imported.projectId}' is deleted and cannot receive imported threads.`,
+            });
+          }
         }
 
         const targetBindings = imported.bindingUpdates.filter(
@@ -1561,6 +1569,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (command.projectId !== undefined && command.projectId !== thread.projectId) {
+        if (thread.coagent != null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Co-agent thread '${command.threadId}' cannot be moved independently of its parent.`,
+          });
+        }
+        if (thread.latestTurn?.state === "running") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Thread '${command.threadId}' cannot be moved while a turn is active.`,
+          });
+        }
+        if (command.projectId !== null) {
+          yield* requireProject({
+            readModel,
+            command,
+            projectId: command.projectId,
+          });
+        }
+      }
       const branch =
         command.branch !== undefined &&
         command.expectedBranch !== undefined &&
@@ -1578,6 +1607,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.meta-updated",
         payload: {
           threadId: command.threadId,
+          ...(command.projectId !== undefined && command.projectId !== thread.projectId
+            ? {
+                projectId: command.projectId,
+                branch: null,
+                worktreePath: null,
+                linkedPullRequest: null,
+              }
+            : {}),
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.regenerateTitle === true
             ? {

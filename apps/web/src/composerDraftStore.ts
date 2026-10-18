@@ -208,7 +208,7 @@ type LegacyPersistedComposerDraftStoreState = PersistedComposerDraftStoreState &
 const PersistedDraftThreadState = Schema.Struct({
   threadId: ThreadId,
   environmentId: Schema.String,
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
   logicalProjectKey: Schema.optionalKey(Schema.String),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
@@ -312,7 +312,7 @@ export function composerDraftHasUserContent(
 export interface DraftSessionState {
   threadId: ThreadId;
   environmentId: EnvironmentId;
-  projectId: ProjectId;
+  projectId: ProjectId | null;
   logicalProjectKey: string;
   createdAt: string;
   runtimeMode: RuntimeMode;
@@ -325,6 +325,11 @@ export interface DraftSessionState {
 }
 
 export type DraftThreadState = DraftSessionState;
+
+export interface DraftProjectRef {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId | null;
+}
 
 /**
  * Draft session metadata paired with its stable draft-session identity.
@@ -375,7 +380,7 @@ interface ComposerDraftStoreState {
   /** Creates or updates the draft session tracked for a logical project. */
   setLogicalProjectDraftThreadId: (
     logicalProjectKey: string,
-    projectRef: ScopedProjectRef,
+    projectRef: DraftProjectRef,
     draftId: DraftId,
     options?: {
       threadId?: ThreadId;
@@ -409,7 +414,7 @@ interface ComposerDraftStoreState {
     options: {
       branch?: string | null;
       worktreePath?: string | null;
-      projectRef?: ScopedProjectRef;
+      projectRef?: DraftProjectRef;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
@@ -1361,7 +1366,7 @@ function toProjectDraftSession(
 }
 
 function createDraftThreadState(
-  projectRef: ScopedProjectRef,
+  projectRef: DraftProjectRef,
   threadId: ThreadId,
   logicalProjectKey: string,
   existingThread: DraftThreadState | undefined,
@@ -2225,12 +2230,14 @@ function toHydratedDraftThreadState(
     projectId: persistedDraftThread.projectId,
     logicalProjectKey:
       persistedDraftThread.logicalProjectKey ??
-      projectDraftKey(
-        scopeProjectRef(
-          persistedDraftThread.environmentId as EnvironmentId,
-          persistedDraftThread.projectId,
-        ),
-      ),
+      (persistedDraftThread.projectId === null
+        ? `standalone:${persistedDraftThread.environmentId}`
+        : projectDraftKey(
+            scopeProjectRef(
+              persistedDraftThread.environmentId as EnvironmentId,
+              persistedDraftThread.projectId,
+            ),
+          )),
     createdAt: persistedDraftThread.createdAt,
     runtimeMode: persistedDraftThread.runtimeMode,
     interactionMode: persistedDraftThread.interactionMode,
@@ -2430,7 +2437,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               projectId: existing.projectId,
             };
             if (
-              nextProjectRef.projectId.length === 0 ||
+              (nextProjectRef.projectId !== null && nextProjectRef.projectId.length === 0) ||
               nextProjectRef.environmentId.length === 0
             ) {
               return state;

@@ -18,6 +18,7 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   orderThreadsWithCoagents,
+  partitionThreadsByProjectGroup,
   resolveProjectStatusIndicator,
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
@@ -55,6 +56,31 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("partitionThreadsByProjectGroup", () => {
+  it("separates standalone and dangling threads from mapped project threads", () => {
+    const threads = [
+      { id: "standalone", environmentId: "local", projectId: null },
+      { id: "mapped", environmentId: "local", projectId: "project-a" },
+      { id: "dangling", environmentId: "local", projectId: "missing" },
+      { id: "remote-copy", environmentId: "remote", projectId: "project-a" },
+    ] as const;
+
+    const result = partitionThreadsByProjectGroup({
+      threads,
+      projectGroupKeyByMember: new Map([
+        ["local:project-a", "group-a"],
+        ["remote:project-a", "group-a"],
+      ]),
+    });
+
+    expect(result.standaloneThreads.map((thread) => thread.id)).toEqual(["standalone", "dangling"]);
+    expect(result.threadsByProjectGroup.get("group-a")?.map((thread) => thread.id)).toEqual([
+      "mapped",
+      "remote-copy",
+    ]);
+  });
+});
 
 describe("orderThreadsWithCoagents", () => {
   it("places managed children directly below their parent without hiding orphans", () => {

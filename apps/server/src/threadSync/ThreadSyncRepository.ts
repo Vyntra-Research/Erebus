@@ -700,7 +700,7 @@ export const readThreadSyncRepository = Effect.fn("ThreadSyncRepository.read")(f
   }
 
   for (const thread of threads.values()) {
-    if (!projects.has(thread.syncProjectId)) {
+    if (thread.syncProjectId !== null && !projects.has(thread.syncProjectId)) {
       return yield* repositoryError(
         "pull",
         "integrity-failed",
@@ -847,7 +847,7 @@ export const writeThreadSyncRepository = Effect.fn("ThreadSyncRepository.write")
         if (id !== thread.threadId) {
           throw new Error("A thread map key does not match its portable identifier.");
         }
-        if (!input.projects.has(thread.syncProjectId)) {
+        if (thread.syncProjectId !== null && !input.projects.has(thread.syncProjectId)) {
           throw new Error(`Thread ${thread.threadId} references a missing project.`);
         }
       }

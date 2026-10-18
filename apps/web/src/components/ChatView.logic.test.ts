@@ -24,6 +24,7 @@ import {
   hasEnvironmentReconnectWarningGraceElapsed,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
+  isThreadProjectUnavailable,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveBackgroundDraftWorkspaceOptions,
@@ -724,6 +725,35 @@ describe("startNewThreadForProject", () => {
       }),
     ).toBe(false);
     expect(called).toBe(false);
+  });
+});
+
+describe("isThreadProjectUnavailable", () => {
+  it("allows a standalone thread without a project", () => {
+    expect(
+      isThreadProjectUnavailable({
+        projectId: null,
+        hasResolvedProject: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("flags a thread that still references a missing project", () => {
+    expect(
+      isThreadProjectUnavailable({
+        projectId,
+        hasResolvedProject: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts a resolved project reference", () => {
+    expect(
+      isThreadProjectUnavailable({
+        projectId,
+        hasResolvedProject: true,
+      }),
+    ).toBe(false);
   });
 });
 

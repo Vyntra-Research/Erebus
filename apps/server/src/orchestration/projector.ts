@@ -36,7 +36,7 @@ import {
   ThreadTurnDiffCompletedPayload,
 } from "./Schemas.ts";
 
-type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
+type ThreadPatch = Partial<Omit<OrchestrationThread, "id">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
 
@@ -501,6 +501,7 @@ export function projectEvent(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
+            ...(payload.projectId !== undefined ? { projectId: payload.projectId } : {}),
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             ...(payload.titleRegeneration !== undefined
               ? { titleRegeneration: payload.titleRegeneration }

@@ -69,7 +69,7 @@ const makeResearchSupervisor = Effect.gen(function* () {
     threadId: ThreadId,
   ) {
     const thread = yield* snapshots.getThreadShellById(threadId).pipe(Effect.map(Option.getOrNull));
-    if (!thread) return null;
+    if (!thread || thread.projectId === null) return null;
     const project = yield* snapshots
       .getProjectShellById(thread.projectId)
       .pipe(Effect.map(Option.getOrNull));

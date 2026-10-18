@@ -41,7 +41,7 @@ const ATTACHMENT_RECOVERY_LIMIT = 32;
 
 export interface ThreadSyncV2ImportThreadReference {
   readonly localThreadId: ThreadId;
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectId | null;
   readonly deletedAt: IsoDateTime | null;
 }
 
@@ -64,7 +64,7 @@ export interface ThreadSyncV2ImportReferences {
 export interface ThreadSyncV2ImportSelection {
   readonly reader: ThreadSyncV2ThreadReader;
   readonly targetThreadId: ThreadId;
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectId | null;
   readonly mode: "create" | "replace";
   readonly expectedLocalUpdatedAt: IsoDateTime | null;
   readonly localState?: ThreadSyncImportLocalState;

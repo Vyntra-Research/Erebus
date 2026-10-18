@@ -15,7 +15,9 @@ export type ArchivedThreadSortOrder = "newest" | "oldest";
 
 export interface ArchivedThreadGroup {
   readonly key: string;
-  readonly project: EnvironmentProject;
+  readonly environmentId: EnvironmentId;
+  readonly project: EnvironmentProject | null;
+  readonly title: string;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
 }
 
@@ -45,8 +47,13 @@ export function buildArchivedThreadGroups(input: {
 
     const environmentLabel = input.environmentLabels[entry.environmentId] ?? null;
     const threadsByProjectId = new Map<string, EnvironmentThreadShell[]>();
+    const standaloneThreads: EnvironmentThreadShell[] = [];
     for (const thread of entry.snapshot.threads) {
       if (thread.archivedAt === null) {
+        continue;
+      }
+      if (thread.projectId === null) {
+        standaloneThreads.push(scopeThreadShell(entry.environmentId, thread));
         continue;
       }
       const threads = threadsByProjectId.get(thread.projectId) ?? [];
@@ -75,9 +82,39 @@ export function buildArchivedThreadGroups(input: {
       const timestampOrder = input.sortOrder === "newest" ? Order.flip(Order.Number) : Order.Number;
       groups.push({
         key: scopedProjectKey(project.environmentId, project.id),
+        environmentId: project.environmentId,
         project,
+        title: project.title,
         threads: Arr.sort(
           matchingThreads,
+          Order.mapInput(
+            Order.Struct({ timestamp: timestampOrder, title: Order.String, id: Order.String }),
+            (thread: EnvironmentThreadShell) => ({
+              timestamp: archiveTimestamp(thread),
+              title: thread.title,
+              id: thread.id,
+            }),
+          ),
+        ),
+      });
+    }
+
+    const standaloneGroupMatches =
+      query.length === 0 || matchesQuery("Threads", query) || matchesQuery(environmentLabel, query);
+    const matchingStandaloneThreads = standaloneGroupMatches
+      ? standaloneThreads
+      : standaloneThreads.filter(
+          (thread) => matchesQuery(thread.title, query) || matchesQuery(thread.branch, query),
+        );
+    if (matchingStandaloneThreads.length > 0) {
+      const timestampOrder = input.sortOrder === "newest" ? Order.flip(Order.Number) : Order.Number;
+      groups.push({
+        key: `${entry.environmentId}:standalone`,
+        environmentId: entry.environmentId,
+        project: null,
+        title: "Threads",
+        threads: Arr.sort(
+          matchingStandaloneThreads,
           Order.mapInput(
             Order.Struct({ timestamp: timestampOrder, title: Order.String, id: Order.String }),
             (thread: EnvironmentThreadShell) => ({
@@ -98,7 +135,7 @@ export function buildArchivedThreadGroups(input: {
       Order.Struct({ timestamp: timestampOrder, title: Order.String, key: Order.String }),
       (group: ArchivedThreadGroup) => ({
         timestamp: group.threads[0] ? archiveTimestamp(group.threads[0]) : 0,
-        title: group.project.title,
+        title: group.title,
         key: group.key,
       }),
     ),

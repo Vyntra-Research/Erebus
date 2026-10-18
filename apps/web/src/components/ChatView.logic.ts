@@ -120,6 +120,13 @@ export function startNewThreadForProject(
   return true;
 }
 
+export function isThreadProjectUnavailable(input: {
+  projectId: ProjectId | null;
+  hasResolvedProject: boolean;
+}): boolean {
+  return input.projectId !== null && !input.hasResolvedProject;
+}
+
 export function resolveThreadMetadataUpdateForNextTurn(input: {
   currentModelSelection: ModelSelection;
   nextModelSelection?: ModelSelection;

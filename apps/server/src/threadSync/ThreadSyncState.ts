@@ -27,7 +27,7 @@ export type ThreadSyncLocalProjectBinding = typeof ThreadSyncLocalProjectBinding
 export const ThreadSyncLocalThreadBinding = Schema.Struct({
   syncThreadId: ThreadId,
   localThreadId: ThreadId,
-  syncProjectId: ThreadSyncProjectId,
+  syncProjectId: Schema.NullOr(ThreadSyncProjectId),
   baseRevision: Schema.NullOr(ThreadSyncRevision),
   /** Cheap v2 projection generation cached for the corresponding base revision. */
   sourceKeyHash: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
@@ -101,7 +101,8 @@ export function applyThreadSyncBindingUpdates(
     next.splice(0, next.length, ...retained, {
       syncThreadId: update.syncThreadId,
       localThreadId: update.localThreadId,
-      syncProjectId: update.syncProjectId as ThreadSyncProjectId,
+      syncProjectId:
+        update.syncProjectId === null ? null : (update.syncProjectId as ThreadSyncProjectId),
       baseRevision: update.baseRevision as ThreadSyncRevision | null,
     });
   }

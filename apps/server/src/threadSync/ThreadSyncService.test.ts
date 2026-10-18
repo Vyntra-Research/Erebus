@@ -24,6 +24,7 @@ import {
   replayThreadSyncBindingEvents,
   resolveImportedCoagentParent,
   sanitizeThreadSyncRemoteUrl,
+  selectRetainedRemoteThreads,
   selectAutoLinkProject,
   selectPortableProjectDescriptor,
   threadSyncImportCommandId,
@@ -164,6 +165,20 @@ describe("thread sync eligibility", () => {
       ).toBe(false);
     },
   );
+
+  it("removes retired and replaced threads while preserving unrelated remote threads", () => {
+    const retired = ThreadId.make("retired");
+    const replaced = ThreadId.make("replaced");
+    const retained = ThreadId.make("retained");
+
+    expect(
+      selectRetainedRemoteThreads({
+        remoteThreads: [{ threadId: retired }, { threadId: replaced }, { threadId: retained }],
+        retiredSyncThreadIds: new Set([retired]),
+        replacedSyncThreadIds: new Set([replaced]),
+      }).map((thread) => thread.threadId),
+    ).toEqual([retained]);
+  });
 });
 
 describe("ThreadSyncService state analysis", () => {
@@ -344,6 +359,7 @@ describe("ThreadSyncService state analysis", () => {
       sources: new Map(),
       blobs: new Map(),
       activeLocalThreadIds: new Set<ThreadId>(),
+      retiredSyncThreadIds: new Set<ThreadId>(),
       projectBindings: [],
       threadBindings: [],
     };
@@ -399,6 +415,67 @@ describe("ThreadSyncService state analysis", () => {
     } as never);
 
     expect(boundAnalysis.status.unlinkedProjects).toEqual([]);
+  });
+
+  it("reports a locally archived bound thread only as a local removal", () => {
+    const syncThreadId = ThreadId.make("archived-thread");
+    const localThreadId = ThreadId.make("local-archived-thread");
+    const project = makeProject({ syncProjectId: "archive-project", title: "Archive" });
+    const binding = {
+      syncThreadId,
+      localThreadId,
+      syncProjectId: project.syncProjectId,
+      baseRevision: "remote-revision",
+    };
+    const state = {
+      ...emptyThreadSyncLocalState(),
+      threadBindings: [binding],
+    };
+    const local = {
+      index: { projects: [], threads: [] },
+      projects: new Map(),
+      descriptors: new Map(),
+      revisions: new Map(),
+      sources: new Map(),
+      blobs: new Map(),
+      activeLocalThreadIds: new Set<ThreadId>(),
+      retiredSyncThreadIds: new Set([syncThreadId]),
+      projectBindings: [],
+      threadBindings: [],
+    };
+    const remote = {
+      manifest: {},
+      projects: new Map([[project.syncProjectId, project]]),
+      threads: new Map([
+        [
+          syncThreadId,
+          {
+            threadId: syncThreadId,
+            syncProjectId: project.syncProjectId,
+            title: "Archived locally",
+            revision: "remote-revision",
+          },
+        ],
+      ]),
+      threadManifests: new Map([
+        [
+          syncThreadId,
+          {
+            header: {
+              coagent: null,
+              lifecycle: { archivedAt: null, settledAt: null, deletedAt: null },
+            },
+          },
+        ],
+      ]),
+      blobs: new Map(),
+    };
+
+    const analysis = analyzeThreadSyncV2State({ local, remote, state } as never);
+
+    expect(analysis.entries[0]?.decision).toBe("push");
+    expect(analysis.status.pendingPullCount).toBe(0);
+    expect(analysis.status.pendingPushCount).toBe(1);
   });
 });
 

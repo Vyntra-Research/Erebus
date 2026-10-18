@@ -71,7 +71,7 @@ const seedProject = projectEvent(
 function importCommand(
   mode: "create" | "replace",
   expectedLocalUpdatedAt: string | null,
-  targetProjectId: ProjectId = projectId,
+  targetProjectId: ProjectId | null = projectId,
   coagent: OrchestrationCoagentShell | null = null,
 ) {
   return {
@@ -365,6 +365,22 @@ it.layer(NodeServices.layer)("thread sync import decider", (it) => {
           sizeBytes: 12,
         },
       ]);
+    }),
+  );
+
+  it.effect("imports an unmapped remote thread as standalone", () =>
+    Effect.gen(function* () {
+      const command = importCommand("create", null, null);
+      const decided = yield* decideOrchestrationCommand({
+        command,
+        readModel: createEmptyReadModel(now),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+
+      expect(events[0]?.type).toBe("thread.sync-imported");
+      if (events[0]?.type !== "thread.sync-imported") return;
+      expect(events[0].payload.thread.projectId).toBeNull();
+      expect(events[0].payload.bindingUpdates[0]?.localProjectId).toBeNull();
     }),
   );
 

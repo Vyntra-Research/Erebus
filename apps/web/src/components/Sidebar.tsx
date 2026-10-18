@@ -30,7 +30,7 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import type { ContextMenuItem, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { ContextMenuItem, ProjectId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
@@ -44,6 +44,7 @@ import {
   ClockIcon,
   EllipsisIcon,
   FolderIcon,
+  FolderOpenIcon,
   FolderPlusIcon,
   GitBranchIcon,
   MessageSquareIcon,
@@ -65,6 +66,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
@@ -143,12 +145,12 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   orderThreadsWithCoagents,
+  partitionThreadsByProjectGroup,
   planPinnedReorder,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
-  shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
@@ -217,6 +219,7 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 // Keep the v2 key so existing preferences survive the v2-to-default rename.
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar-v2:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar-v2:snoozed-expanded";
+const SIDEBAR_THREAD_DRAG_TYPE = "application/x-erebus-thread";
 
 function projectMemberMenuLabel(
   member: SidebarProjectGroupMember,
@@ -763,6 +766,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   projectCwd: string | null;
   projectFaviconPath: string | null;
   projectTitle: string | null;
+  nestedInProject?: boolean;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -774,6 +778,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   isRenaming: boolean;
   renamingTitle: string;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
+  draggableToProject?: boolean;
+  onProjectDragStart?: (event: ReactDragEvent<HTMLLIElement>, threadRef: ScopedThreadRef) => void;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onSnooze: (threadRef: ScopedThreadRef, preset: SnoozePreset) => void;
@@ -1428,6 +1434,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   return (
     <li
       data-thread-item
+      draggable={props.draggableToProject || undefined}
+      onDragStart={
+        props.draggableToProject && props.onProjectDragStart
+          ? (event) => props.onProjectDragStart?.(event, threadRef)
+          : undefined
+      }
       ref={sortable?.setNodeRef}
       style={
         sortable
@@ -1439,7 +1451,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-px [content-visibility:auto] [contain-intrinsic-size:auto_42px]",
+        "list-none [content-visibility:auto] [contain-intrinsic-size:auto_32px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1459,7 +1471,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 flex h-10 items-center px-[var(--sidebar-row-content-inset)]">
+          <div
+            className={cn(
+              "relative z-10 flex h-8 items-center pr-[var(--sidebar-row-content-inset)]",
+              props.nestedInProject ? "pl-8" : "pl-[var(--sidebar-row-content-inset)]",
+            )}
+          >
             <div className="flex h-5 min-w-0 flex-1 items-center gap-1.5">
               {thread.coagent ? (
                 <Tooltip>
@@ -2011,6 +2028,25 @@ export default function Sidebar() {
     [navigateToProjectSettings],
   );
 
+  const startNewThreadInProject = useCallback(
+    (projectGroup: SidebarProjectSnapshot) => {
+      if (isMobile) setOpenMobile(false);
+      void newThreadContext.handleNewThread(
+        scopeProjectRef(projectGroup.environmentId, projectGroup.id),
+      );
+    },
+    [isMobile, newThreadContext.handleNewThread, setOpenMobile],
+  );
+
+  const handleProjectNewThread = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      startNewThreadInProject(projectGroup);
+    },
+    [startNewThreadInProject],
+  );
+
   const closeProjectRenameDialog = useCallback(() => {
     setProjectRenameTarget(null);
     setProjectRenameTitle("");
@@ -2216,6 +2252,7 @@ export default function Sidebar() {
           ),
       );
       const items: ContextMenuItem<string>[] = [
+        { id: "new-thread", label: "New thread" },
         { id: "settings", label: "Project settings" },
         groupedItem("rename", "Rename"),
         {
@@ -2235,6 +2272,10 @@ export default function Sidebar() {
         api.contextMenu.show(items, { x: rect.right, y: rect.bottom + 2 }),
       );
       if (clicked._tag === "Failure" || clicked.value === null) return;
+      if (clicked.value === "new-thread") {
+        startNewThreadInProject(projectGroup);
+        return;
+      }
       if (clicked.value === "settings") {
         navigateToProjectSettings(projectGroup);
         return;
@@ -2250,6 +2291,7 @@ export default function Sidebar() {
       copyPathToClipboard,
       navigateToProjectSettings,
       removeProjectMember,
+      startNewThreadInProject,
       threads,
     ],
   );
@@ -2359,7 +2401,7 @@ export default function Sidebar() {
     threads,
   ]);
 
-  const { activeProjectSections, ungroupedActiveThreads } = useMemo(() => {
+  const { activeProjectSections, standaloneActiveThreads } = useMemo(() => {
     const projectGroupKeyByMember = new Map<string, string>();
     for (const projectGroup of projectGroups) {
       for (const member of projectGroup.memberProjectRefs) {
@@ -2370,25 +2412,17 @@ export default function Sidebar() {
       }
     }
 
-    const threadsByProjectGroup = new Map<string, EnvironmentThreadShell[]>();
-    const ungrouped: EnvironmentThreadShell[] = [];
-    for (const thread of activeThreads) {
-      const groupKey = projectGroupKeyByMember.get(`${thread.environmentId}:${thread.projectId}`);
-      if (groupKey === undefined) {
-        ungrouped.push(thread);
-        continue;
-      }
-      const groupedThreads = threadsByProjectGroup.get(groupKey) ?? [];
-      groupedThreads.push(thread);
-      threadsByProjectGroup.set(groupKey, groupedThreads);
-    }
+    const { threadsByProjectGroup, standaloneThreads } = partitionThreadsByProjectGroup({
+      threads: activeThreads,
+      projectGroupKeyByMember,
+    });
 
     return {
       activeProjectSections: projectGroups.flatMap((project) => {
         const projectThreads = threadsByProjectGroup.get(project.projectKey) ?? [];
         return projectThreads.length > 0 ? [{ project, threads: projectThreads }] : [];
       }),
-      ungroupedActiveThreads: ungrouped,
+      standaloneActiveThreads: standaloneThreads,
     };
   }, [activeThreads, projectGroups]);
 
@@ -2547,6 +2581,101 @@ export default function Sidebar() {
   // event and defeat row memoization during streaming.
   const threadByKeyRef = useRef(threadByKey);
   threadByKeyRef.current = threadByKey;
+  const [dragOverProjectKey, setDragOverProjectKey] = useState<string | null>(null);
+  const moveThreadToProject = useCallback(
+    async (threadRef: ScopedThreadRef, projectId: ProjectId | null, projectTitle?: string) => {
+      const thread = threadByKeyRef.current.get(scopedThreadKey(threadRef));
+      if (!thread || thread.projectId === projectId) return;
+      if (thread.coagent) {
+        toastManager.add({
+          type: "warning",
+          title: "Co-agent threads follow their parent thread",
+        });
+        return;
+      }
+      if (thread.session?.status === "running" && thread.session.activeTurnId != null) {
+        toastManager.add({
+          type: "warning",
+          title: "Wait for the active turn to finish before moving this thread",
+        });
+        return;
+      }
+      const result = await updateThreadMetadata({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, projectId },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not move thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+        return;
+      }
+      toastManager.add({
+        type: "success",
+        title:
+          projectId === null
+            ? "Thread moved out of project"
+            : `Thread moved to ${projectTitle ?? "project"}`,
+      });
+    },
+    [updateThreadMetadata],
+  );
+  const handleProjectDragStart = useCallback(
+    (event: ReactDragEvent<HTMLLIElement>, threadRef: ScopedThreadRef) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData(SIDEBAR_THREAD_DRAG_TYPE, scopedThreadKey(threadRef));
+    },
+    [],
+  );
+  const handleProjectDragOver = useCallback(
+    (event: ReactDragEvent<HTMLElement>, projectKey: string) => {
+      if (!event.dataTransfer.types.includes(SIDEBAR_THREAD_DRAG_TYPE)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDragOverProjectKey(projectKey);
+    },
+    [],
+  );
+  const handleProjectDragLeave = useCallback(
+    (event: ReactDragEvent<HTMLElement>, projectKey: string) => {
+      const nextTarget = event.relatedTarget;
+      if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+      setDragOverProjectKey((current) => (current === projectKey ? null : current));
+    },
+    [],
+  );
+  const handleProjectDrop = useCallback(
+    (event: ReactDragEvent<HTMLElement>, project: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      setDragOverProjectKey(null);
+      const threadKey = event.dataTransfer.getData(SIDEBAR_THREAD_DRAG_TYPE);
+      const thread = threadByKeyRef.current.get(threadKey);
+      if (!thread || thread.projectId !== null) return;
+      const targetProject = project.memberProjects.find(
+        (member) => member.environmentId === thread.environmentId,
+      );
+      if (!targetProject) {
+        toastManager.add({
+          type: "warning",
+          title: "This project is not available on the thread's environment",
+        });
+        return;
+      }
+      void moveThreadToProject(
+        scopeThreadRef(thread.environmentId, thread.id),
+        targetProject.id,
+        project.displayName,
+      );
+    },
+    [moveThreadToProject],
+  );
   // handleNewThread is inherently unstable (depends on the projects list);
   // a ref keeps it out of attemptSettle's dependency array.
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
@@ -2754,11 +2883,13 @@ export default function Sidebar() {
               (key) => !settledKeys.has(key) && !snoozedKeys.has(key) && !coParkingKeys?.has(key),
             ) ?? null);
       const nextThread = nextCardKey ? threadByKeyRef.current.get(nextCardKey) : null;
+      const shellProjectId = shell?.projectId ?? null;
+      const shellEnvironmentId = shell?.environmentId ?? null;
       return nextThread
         ? () => navigateToThread(scopeThreadRef(nextThread.environmentId, nextThread.id))
-        : shell
+        : shellProjectId !== null && shellEnvironmentId !== null
           ? () =>
-              void handleNewThreadRef.current(scopeProjectRef(shell.environmentId, shell.projectId))
+              void handleNewThreadRef.current(scopeProjectRef(shellEnvironmentId, shellProjectId))
           : () => void router.navigate({ to: "/" });
     },
     [navigateToThread, router],
@@ -3349,28 +3480,58 @@ export default function Sidebar() {
         const isPinned = thread.pinnedAt != null;
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
-        const clicked = await settlePromise(() =>
-          api.contextMenu.show(
-            buildThreadActionMenuItems({
-              branch: thread.branch ?? null,
-              isPinned,
-              isSettled,
-              isSnoozed,
-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle,
-              isRunning:
-                thread.session?.status === "running" && thread.session.activeTurnId != null,
-              supports: {
-                settlement: supportsSettlement,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: supportsTitleRegeneration,
-              },
-              snoozePresets,
-            }),
-            position,
-          ),
+        const threadProjectTargets = projects.filter(
+          (project) =>
+            project.environmentId === thread.environmentId && project.id !== thread.projectId,
         );
+        const actionItems: ContextMenuItem<string>[] = [
+          ...buildThreadActionMenuItems({
+            branch: thread.branch ?? null,
+            isPinned,
+            isSettled,
+            isSnoozed,
+            canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+            isRegeneratingTitle,
+            isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
+            supports: {
+              settlement: supportsSettlement,
+              snooze: supportsSnooze,
+              pinning: supportsPinning,
+              titleRegeneration: supportsTitleRegeneration,
+            },
+            snoozePresets,
+          }),
+          ...(threadProjectTargets.length > 0
+            ? [
+                {
+                  id: "move-to-project",
+                  label: thread.projectId === null ? "Add to project" : "Move to project",
+                  disabled:
+                    thread.session?.status === "running" && thread.session.activeTurnId != null,
+                  children: threadProjectTargets.map((project) => ({
+                    id: `move-to-project:${project.id}`,
+                    label: project.title,
+                  })),
+                } satisfies ContextMenuItem<string>,
+              ]
+            : []),
+          ...(thread.projectId !== null
+            ? [
+                {
+                  id: "remove-from-project",
+                  label: "Remove from project",
+                  disabled:
+                    thread.session?.status === "running" && thread.session.activeTurnId != null,
+                } satisfies ContextMenuItem<string>,
+              ]
+            : []),
+          {
+            id: "new-project",
+            label: "New project…",
+            separatorBefore: threadProjectTargets.length > 0 || thread.projectId !== null,
+          },
+        ];
+        const clicked = await settlePromise(() => api.contextMenu.show(actionItems, position));
         if (clicked._tag === "Failure") return;
         if (clicked.value?.startsWith("snooze:")) {
           const preset = snoozePresets.find(
@@ -3379,12 +3540,34 @@ export default function Sidebar() {
           if (preset) attemptSnooze(threadRef, preset);
           return;
         }
+        if (clicked.value?.startsWith("move-to-project:")) {
+          const projectId = clicked.value.slice("move-to-project:".length) as ProjectId;
+          const project = threadProjectTargets.find((candidate) => candidate.id === projectId);
+          if (project) await moveThreadToProject(threadRef, project.id, project.title);
+          return;
+        }
+        if (clicked.value === "new-project") {
+          openAddProjectCommandPalette();
+          return;
+        }
+        if (clicked.value === "remove-from-project") {
+          await moveThreadToProject(threadRef, null);
+          return;
+        }
         switch (clicked.value) {
           case "new-thread-on-branch": {
+            const projectId = thread.projectId;
+            if (projectId === null) {
+              toastManager.add({
+                type: "warning",
+                title: "Link this thread to a project first",
+              });
+              return;
+            }
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.
             const result = await settlePromise(() =>
-              handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId), {
+              handleNewThreadRef.current(scopeProjectRef(thread.environmentId, projectId), {
                 branch: thread.branch,
                 worktreePath: thread.worktreePath,
                 envMode: thread.worktreePath ? "worktree" : "local",
@@ -3539,7 +3722,10 @@ export default function Sidebar() {
       deleteThread,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      moveThreadToProject,
+      openAddProjectCommandPalette,
       projectCwdByKey,
+      projects,
       serverConfigs,
       startThreadRename,
       updateThreadMetadata,
@@ -3626,16 +3812,11 @@ export default function Sidebar() {
     autoAnimate(node, { duration: 150, easing: "ease-out" });
   }, []);
 
-  // New thread defaults to the project you're in (active thread's project,
-  // falling back to the top project) — same resolution the command palette
-  // uses. The command palette already offers a "New thread in..." submenu
-  // for multi-project setups.
+  // A plain click creates a standalone thread. Shift keeps the current
+  // project's context for the fast "new thread here" path.
   const handleNewThreadClick = useCallback(
     (event?: ReactMouseEvent) => {
-      // One project: nothing to pick, create immediately. Shift+click creates
-      // directly in the current project even with several projects, skipping
-      // the palette picker.
-      if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
+      if (event?.shiftKey) {
         if (isMobile) setOpenMobile(false);
         void startNewThreadFromContext({
           activeDraftThread: newThreadContext.activeDraftThread,
@@ -3646,9 +3827,16 @@ export default function Sidebar() {
         return;
       }
       if (isMobile) setOpenMobile(false);
-      openCommandPalette({ open: "new-thread-in" });
+      const environmentId =
+        newThreadContext.activeThread?.environmentId ??
+        newThreadContext.activeDraftThread?.environmentId ??
+        primaryEnvironmentId ??
+        newThreadContext.defaultProjectRef?.environmentId ??
+        null;
+      if (environmentId === null) return;
+      void newThreadContext.handleNewThread({ environmentId, projectId: null });
     },
-    [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
+    [isMobile, newThreadContext, primaryEnvironmentId, setOpenMobile],
   );
 
   // The button mirrors chat.new: in multi-project setups both route through
@@ -3728,7 +3916,6 @@ export default function Sidebar() {
                         type="button"
                         className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={handleNewThreadClick}
-                        disabled={projects.length === 0}
                         aria-label="New thread"
                       />
                     }
@@ -3896,9 +4083,11 @@ export default function Sidebar() {
                           ) ?? null
                         }
                         projectTitle={
-                          projectDisplayNameByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
+                          thread.projectId === null
+                            ? null
+                            : (projectDisplayNameByKey.get(
+                                `${thread.environmentId}:${thread.projectId}`,
+                              ) ?? null)
                         }
                         environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
                         providerEntryByInstanceId={
@@ -3937,6 +4126,7 @@ export default function Sidebar() {
                     thread: EnvironmentThreadShell,
                     section: "pinned" | "active" | "snoozed" | "settled",
                     sortable?: SortablePinnedRowBag,
+                    nestedInProject = false,
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
@@ -4010,10 +4200,13 @@ export default function Sidebar() {
                           ) ?? null
                         }
                         projectTitle={
-                          projectDisplayNameByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
+                          thread.projectId === null
+                            ? null
+                            : (projectDisplayNameByKey.get(
+                                `${thread.environmentId}:${thread.projectId}`,
+                              ) ?? null)
                         }
+                        nestedInProject={nestedInProject}
                         providerEntryByInstanceId={
                           providerEntriesByEnvironment.get(thread.environmentId) ??
                           EMPTY_PROVIDER_ENTRIES
@@ -4028,6 +4221,16 @@ export default function Sidebar() {
                         isRenaming={renamingThreadKey === threadKey}
                         renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
                         onContextMenu={handleThreadContextMenu}
+                        draggableToProject={
+                          section === "active" &&
+                          thread.projectId === null &&
+                          !thread.coagent &&
+                          !(
+                            thread.session?.status === "running" &&
+                            thread.session.activeTurnId != null
+                          )
+                        }
+                        onProjectDragStart={handleProjectDragStart}
                         onSettle={attemptSettle}
                         onUnsettle={attemptUnsettle}
                         onSnooze={attemptSnooze}
@@ -4106,6 +4309,32 @@ export default function Sidebar() {
                       />,
                     );
                   }
+                  if (standaloneActiveThreads.length > 0) {
+                    items.push(
+                      <li
+                        key="standalone-heading"
+                        className="mt-1 flex list-none items-center px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-sidebar-muted-foreground"
+                      >
+                        <span>Threads</span>
+                        <span className="ml-auto tabular-nums opacity-60">
+                          {standaloneActiveThreads.length}
+                        </span>
+                      </li>,
+                    );
+                    for (const thread of standaloneActiveThreads) {
+                      items.push(renderThreadRow(thread, "active"));
+                    }
+                  }
+                  if (activeProjectSections.length > 0) {
+                    items.push(
+                      <li
+                        key="projects-heading"
+                        className="mt-2 flex list-none items-center px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-sidebar-muted-foreground"
+                      >
+                        <span>Projects</span>
+                      </li>,
+                    );
+                  }
                   for (const { project, threads: projectThreads } of activeProjectSections) {
                     const preferenceKeys = projectExpansionPreferenceKeys(project);
                     const projectExpanded = resolveProjectExpanded(
@@ -4117,7 +4346,14 @@ export default function Sidebar() {
                       <li
                         key={`project-folder:${project.projectKey}`}
                         data-thread-selection-safe
-                        className="list-none"
+                        onDragOver={(event) => handleProjectDragOver(event, project.projectKey)}
+                        onDragLeave={(event) => handleProjectDragLeave(event, project.projectKey)}
+                        onDrop={(event) => handleProjectDrop(event, project)}
+                        className={cn(
+                          "list-none rounded-md transition-colors",
+                          dragOverProjectKey === project.projectKey &&
+                            "bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/40",
+                        )}
                       >
                         <div className="relative mb-0.5 flex h-8 w-full items-center">
                           <button
@@ -4125,57 +4361,65 @@ export default function Sidebar() {
                             aria-expanded={projectExpanded}
                             aria-controls={projectThreadListId}
                             onClick={() => setProjectExpanded(preferenceKeys, !projectExpanded)}
-                            className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 pr-14 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                            className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 pr-20 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                           >
-                            <ChevronDownIcon
-                              aria-hidden
-                              className={cn(
-                                "size-3.5 shrink-0 transition-transform",
-                                !projectExpanded && "-rotate-90",
-                              )}
-                            />
-                            <ProjectFavicon
-                              environmentId={project.environmentId}
-                              cwd={project.workspaceRoot}
-                              faviconPath={project.faviconPath}
-                              className="size-4 shrink-0"
-                            />
+                            {projectExpanded ? (
+                              <FolderOpenIcon aria-hidden className="size-4 shrink-0" />
+                            ) : (
+                              <FolderIcon aria-hidden className="size-4 shrink-0" />
+                            )}
                             <span className="min-w-0 flex-1 truncate">{project.displayName}</span>
                           </button>
-                          <span className="pointer-events-none absolute right-8 shrink-0 text-[10px] font-normal tabular-nums text-sidebar-muted-foreground/60">
+                          <span className="pointer-events-none absolute right-14 shrink-0 text-[10px] font-normal tabular-nums text-sidebar-muted-foreground/60">
                             {projectThreads.length}
                           </span>
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <button
-                                  type="button"
-                                  aria-label={`Project actions for ${project.displayName}`}
-                                  onClick={(event) => void showProjectFolderMenu(event, project)}
-                                  className="absolute right-1 inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                                >
-                                  <EllipsisIcon aria-hidden className="size-4" />
-                                </button>
-                              }
-                            />
-                            <TooltipPopup side="right">Project actions</TooltipPopup>
-                          </Tooltip>
+                          <div className="absolute right-1 flex items-center">
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    aria-label={`New thread in ${project.displayName}`}
+                                    onClick={(event) => handleProjectNewThread(event, project)}
+                                    className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                                  >
+                                    <SquarePenIcon aria-hidden className="size-3.5" />
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup side="right">New thread</TooltipPopup>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    aria-label={`Project actions for ${project.displayName}`}
+                                    onClick={(event) => void showProjectFolderMenu(event, project)}
+                                    className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                                  >
+                                    <EllipsisIcon aria-hidden className="size-4" />
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup side="right">Project actions</TooltipPopup>
+                            </Tooltip>
+                          </div>
                         </div>
                         {projectExpanded ? (
                           <ul
                             id={projectThreadListId}
                             role="list"
                             aria-label={`${project.displayName} threads`}
-                            className="ml-2 flex flex-col gap-px border-l border-sidebar-border/60 pl-1.5"
+                            className="flex flex-col gap-px"
                           >
-                            {projectThreads.map((thread) => renderThreadRow(thread, "active"))}
+                            {projectThreads.map((thread) =>
+                              renderThreadRow(thread, "active", undefined, true),
+                            )}
                           </ul>
                         ) : null}
                       </li>,
                     );
-                  }
-                  for (const thread of ungroupedActiveThreads) {
-                    items.push(renderThreadRow(thread, "active"));
                   }
                   // Snoozed shelf: between the inbox and Settled — out of the
                   // way, never gone. The header always renders while anything

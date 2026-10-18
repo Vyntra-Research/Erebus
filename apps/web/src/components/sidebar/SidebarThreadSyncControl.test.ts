@@ -93,7 +93,17 @@ describe("thread sync sidebar presentation", () => {
         { ...initialPush, unlinkedProjects: [{}] } as unknown as ThreadSyncStatus,
         false,
       ),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("allows remote threads to pull without a local project mapping", () => {
+    const unlinkedPull = {
+      ...BASE_STATUS,
+      pendingPullCount: 1,
+      unlinkedProjects: [{}],
+    } as unknown as ThreadSyncStatus;
+
+    expect(canPullThreadSync(unlinkedPull, false)).toBe(true);
   });
 
   it("keeps both conflict resolution paths available without simple pending changes", () => {

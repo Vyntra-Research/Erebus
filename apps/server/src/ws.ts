@@ -2148,6 +2148,11 @@ const makeWsRpcLayer = (
                   resource: input.resource,
                 });
               }
+              if (thread.value.projectId === null) {
+                return yield* new AssetWorkspaceContextNotFoundError({
+                  resource: input.resource,
+                });
+              }
               const project = yield* projectionSnapshotQuery
                 .getProjectShellById(thread.value.projectId)
                 .pipe(

@@ -399,11 +399,12 @@ export const BranchToolbar = memo(function BranchToolbar({
   );
   const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
-  const activeProjectRef = serverThread
-    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
-    : draftThread
-      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-      : null;
+  const activeProjectRef =
+    serverThread?.projectId != null
+      ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
+      : draftThread?.projectId != null
+        ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+        : null;
   const activeProject = useProject(activeProjectRef);
   const hasActiveThread = serverThread !== null || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;

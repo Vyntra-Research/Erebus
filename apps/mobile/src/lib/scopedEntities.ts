@@ -1,7 +1,10 @@
 import { ApprovalRequestId, EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 
-export function scopedProjectKey(environmentId: EnvironmentId, projectId: ProjectId): string {
-  return `${environmentId}:${projectId}`;
+export function scopedProjectKey(
+  environmentId: EnvironmentId,
+  projectId: ProjectId | null,
+): string {
+  return `${environmentId}:${projectId ?? "standalone"}`;
 }
 
 export function scopedThreadKey(environmentId: EnvironmentId, threadId: ThreadId): string {

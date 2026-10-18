@@ -206,7 +206,8 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
     input.limit === undefined ? sortedThreads : sortedThreads.slice(0, input.limit);
 
   return visibleThreads.map((thread) => {
-    const projectTitle = input.projectTitleById.get(thread.projectId);
+    const projectTitle =
+      thread.projectId === null ? undefined : input.projectTitleById.get(thread.projectId);
     const descriptionParts: string[] = [];
 
     if (projectTitle) {

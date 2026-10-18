@@ -188,10 +188,18 @@ export function useThreadActionMenu(input: {
         };
         switch (action) {
           case "new-thread-on-branch": {
+            const projectId = thread.projectId;
+            if (projectId === null) {
+              toastManager.add({
+                type: "warning",
+                title: "Link this thread to a project first",
+              });
+              return;
+            }
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.
             const result = await settlePromise(() =>
-              handleNewThread(scopeProjectRef(threadRef.environmentId, thread.projectId), {
+              handleNewThread(scopeProjectRef(threadRef.environmentId, projectId), {
                 branch: thread.branch,
                 worktreePath: thread.worktreePath,
                 envMode: thread.worktreePath ? "worktree" : "local",

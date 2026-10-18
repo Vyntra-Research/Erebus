@@ -344,6 +344,7 @@ import {
   scheduleEnvironmentReconnectWarning,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
+  isThreadProjectUnavailable,
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
   shouldShowBranchMismatchBanner,
@@ -734,11 +735,12 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
   const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
-  const projectRef = serverThread
-    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
-    : draftThread
-      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-      : null;
+  const projectRef =
+    serverThread?.projectId != null
+      ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
+      : draftThread?.projectId != null
+        ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+        : null;
   const project = useProject(projectRef);
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, threadRef),
@@ -1103,11 +1105,12 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
 }: PersistentThreadTerminalPanelProps) {
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
   const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
-  const projectRef = serverThread
-    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
-    : draftThread
-      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-      : null;
+  const projectRef =
+    serverThread?.projectId != null
+      ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
+      : draftThread?.projectId != null
+        ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+        : null;
   const project = useProject(projectRef);
   const knownTerminalSessions = useKnownTerminalSessions({
     environmentId: threadRef.environmentId,
@@ -1558,9 +1561,10 @@ function ChatViewContent(props: ChatViewProps) {
     [mountedTerminalThreadKeys],
   );
 
-  const fallbackDraftProjectRef = draftThread
-    ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-    : null;
+  const fallbackDraftProjectRef =
+    draftThread?.projectId != null
+      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+      : null;
   const fallbackDraftProject = useProject(fallbackDraftProjectRef);
   const localDraftError = activeServerThread
     ? null
@@ -1829,10 +1833,16 @@ function ChatViewContent(props: ChatViewProps) {
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProjectRef = useMemo(
     () =>
-      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
+      activeThread?.projectId != null
+        ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
+        : null,
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
+  const projectSelectionRequired = isThreadProjectUnavailable({
+    projectId: activeThread?.projectId ?? null,
+    hasResolvedProject: activeProject !== null,
+  });
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -5645,7 +5655,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       return;
     }
-    if (!activeProject) {
+    if (projectSelectionRequired) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
@@ -5841,7 +5851,7 @@ function ChatViewContent(props: ChatViewProps) {
     const title = truncate(titleSeed);
     const threadCreateModelSelection = createModelSelection(
       ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
+      ctxSelectedModel || activeProject?.defaultModelSelection?.model || DEFAULT_MODEL,
       ctxSelectedModelSelection.options,
     );
 
@@ -5889,7 +5899,7 @@ function ChatViewContent(props: ChatViewProps) {
               ...(isLocalDraftThread
                 ? {
                     createThread: {
-                      projectId: activeProject.id,
+                      projectId: activeThread.projectId,
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
@@ -5900,7 +5910,7 @@ function ChatViewContent(props: ChatViewProps) {
                     },
                   }
                 : {}),
-              ...(baseBranchForWorktree
+              ...(baseBranchForWorktree && activeProject
                 ? {
                     prepareWorktree: {
                       projectCwd: activeProject.workspaceRoot,
@@ -5954,7 +5964,10 @@ function ChatViewContent(props: ChatViewProps) {
           markPromotedDraftThreadByRef(backgroundThreadRef);
           try {
             const nextDraft = await handleNewThread(
-              scopeProjectRef(activeProject.environmentId, activeProject.id),
+              {
+                environmentId: activeThread.environmentId,
+                projectId: activeThread.projectId,
+              },
               resolveBackgroundDraftWorkspaceOptions({
                 envMode: sendEnvMode,
                 branch: activeThreadBranch,
@@ -6043,7 +6056,10 @@ function ChatViewContent(props: ChatViewProps) {
           if (failedDraftSession?.threadId === threadIdForSend) {
             setLogicalProjectDraftThreadId(
               failedDraftSession.logicalProjectKey,
-              scopeProjectRef(failedDraftSession.environmentId, failedDraftSession.projectId),
+              {
+                environmentId: failedDraftSession.environmentId,
+                projectId: failedDraftSession.projectId,
+              },
               draftId,
               {
                 threadId: newThreadId(),
@@ -7107,7 +7123,7 @@ function ChatViewContent(props: ChatViewProps) {
                             isServerThread={isServerThread}
                             isLocalDraftThread={isLocalDraftThread}
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
-                            projectSelectionRequired={isLocalDraftThread && activeProject === null}
+                            projectSelectionRequired={projectSelectionRequired}
                             phase={phase}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}

@@ -32,7 +32,7 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
     const resolveToolContext = Effect.fn("ResearchFallbackMcpHttpServer.resolveToolContext")(
       function* (threadId: ThreadIdType) {
         const thread = Option.getOrUndefined(yield* projectionQuery.getThreadShellById(threadId));
-        if (!thread) {
+        if (!thread || thread.projectId === null) {
           return Option.none<{
             readonly projectId: ProjectIdType;
             readonly cwd: string;

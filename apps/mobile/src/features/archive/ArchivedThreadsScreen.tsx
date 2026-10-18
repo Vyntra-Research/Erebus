@@ -45,7 +45,8 @@ type ArchivedThreadListItem =
       readonly kind: "project";
       readonly key: string;
       readonly environmentLabel: string | null;
-      readonly project: EnvironmentProject;
+      readonly project: EnvironmentProject | null;
+      readonly title: string;
     }
   | {
       readonly kind: "thread";
@@ -362,22 +363,28 @@ function ArchivedThreadsHeader(props: {
 
 function ProjectGroupLabel(props: {
   readonly environmentLabel: string | null;
-  readonly project: EnvironmentProject;
+  readonly project: EnvironmentProject | null;
+  readonly title: string;
 }) {
+  const iconColor = useThemeColor("--color-icon-subtle");
   return (
     <View className="flex-row items-center gap-2.5 px-1 pb-2">
-      <ProjectFavicon
-        environmentId={props.project.environmentId}
-        faviconPath={props.project.faviconPath}
-        projectTitle={props.project.title}
-        size={18}
-        workspaceRoot={props.project.workspaceRoot}
-      />
+      {props.project === null ? (
+        <SymbolView name="bubble.left" size={16} tintColor={iconColor} type="monochrome" />
+      ) : (
+        <ProjectFavicon
+          environmentId={props.project.environmentId}
+          faviconPath={props.project.faviconPath}
+          projectTitle={props.project.title}
+          size={18}
+          workspaceRoot={props.project.workspaceRoot}
+        />
+      )}
       <Text
         className="flex-1 text-xs font-t3-medium tracking-[0.5px] uppercase text-foreground-muted"
         numberOfLines={1}
       >
-        {props.project.title}
+        {props.title}
       </Text>
       {props.environmentLabel ? (
         <Text className="max-w-[42%] text-2xs text-foreground-tertiary" numberOfLines={1}>
@@ -524,12 +531,13 @@ export function ArchivedThreadsScreen(props: {
   const listItems = useMemo<ReadonlyArray<ArchivedThreadListItem>>(() => {
     const items: ArchivedThreadListItem[] = [];
     for (const group of props.groups) {
-      const environmentLabel = environmentLabelsById.get(group.project.environmentId) ?? null;
+      const environmentLabel = environmentLabelsById.get(group.environmentId) ?? null;
       items.push({
         kind: "project",
         key: `${group.key}:project`,
         environmentLabel,
         project: group.project,
+        title: group.title,
       });
 
       group.threads.forEach((thread, index) => {
@@ -563,7 +571,11 @@ export function ArchivedThreadsScreen(props: {
       if (item.kind === "project") {
         return (
           <View className="pt-4">
-            <ProjectGroupLabel environmentLabel={item.environmentLabel} project={item.project} />
+            <ProjectGroupLabel
+              environmentLabel={item.environmentLabel}
+              project={item.project}
+              title={item.title}
+            />
           </View>
         );
       }
