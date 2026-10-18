@@ -1608,6 +1608,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         thread.branch !== command.expectedBranch
           ? thread.branch
           : command.branch;
+      const projectChanged =
+        command.projectId !== undefined && command.projectId !== thread.projectId;
+      const projectMoveOnly =
+        projectChanged &&
+        command.title === undefined &&
+        command.regenerateTitle !== true &&
+        command.modelSelection === undefined &&
+        command.branch === undefined &&
+        command.worktreePath === undefined &&
+        command.linkedPullRequest === undefined;
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -1649,7 +1659,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.linkedPullRequest !== undefined
             ? { linkedPullRequest: command.linkedPullRequest }
             : {}),
-          updatedAt: occurredAt,
+          updatedAt: projectMoveOnly ? thread.updatedAt : occurredAt,
         },
       };
     }

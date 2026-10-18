@@ -151,6 +151,7 @@ const ThreadSyncActiveThreadRowSchema = Schema.Struct({ threadId: ThreadId });
 const ThreadSyncWatermarkRowSchema = Schema.Struct({
   threadId: ThreadId,
   threadSequence: Schema.Number,
+  portableUpdatedAt: IsoDateTime,
 });
 const ThreadSyncImportWatermarkRowSchema = Schema.Struct({
   threadId: ThreadId,
@@ -1115,11 +1116,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () => sql`
       SELECT
         threads.thread_id AS "threadId",
-        COALESCE(MAX(events.sequence), 0) AS "threadSequence"
+        COALESCE(MAX(events.sequence), 0) AS "threadSequence",
+        COALESCE(MAX(events.occurred_at), threads.created_at) AS "portableUpdatedAt"
       FROM projection_threads AS threads
       LEFT JOIN orchestration_events AS events
         ON events.aggregate_kind = 'thread'
         AND events.stream_id = threads.thread_id
+        AND NOT (
+          events.event_type = 'thread.meta-updated'
+          AND json_type(events.payload_json, '$.projectId') IS NOT NULL
+          AND json_type(events.payload_json, '$.title') IS NULL
+          AND json_type(events.payload_json, '$.regenerateTitle') IS NULL
+          AND json_type(events.payload_json, '$.modelSelection') IS NULL
+          AND json_type(events.payload_json, '$.branch') IS NULL
+          AND json_type(events.payload_json, '$.worktreePath') IS NULL
+          AND json_type(events.payload_json, '$.linkedPullRequest') IS NULL
+        )
       GROUP BY threads.thread_id
       ORDER BY threads.thread_id ASC
     `,
@@ -4666,7 +4678,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               );
               const activeThreadIds = new Set(activeRows.map((row) => row.threadId));
               const watermarkByThread = new Map(
-                watermarkRows.map((row) => [row.threadId, row.threadSequence] as const),
+                watermarkRows.map((row) => [row.threadId, row] as const),
               );
               const latestTurnByThread = new Map(
                 latestTurnRows.map((row) => [row.threadId, row.latestTurnId] as const),
@@ -4707,7 +4719,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                             status: coagent.status,
                           },
                     latestTurnId: latestTurnByThread.get(row.threadId) ?? null,
-                    threadSequence: watermarkByThread.get(row.threadId) ?? 0,
+                    threadSequence: watermarkByThread.get(row.threadId)?.threadSequence ?? 0,
                     lifecycle: {
                       archivedAt: row.archivedAt,
                       settledOverride: row.settledOverride,
@@ -4715,7 +4727,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       deletedAt: row.deletedAt,
                     },
                     createdAt: row.createdAt,
-                    updatedAt: row.updatedAt,
+                    updatedAt:
+                      watermarkByThread.get(row.threadId)?.portableUpdatedAt ?? row.updatedAt,
                     active: activeThreadIds.has(row.threadId),
                   };
                 }),

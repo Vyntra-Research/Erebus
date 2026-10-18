@@ -119,6 +119,7 @@ it.layer(NodeServices.layer)("standalone thread decider", (it) => {
           branch: null,
           worktreePath: null,
           linkedPullRequest: null,
+          updatedAt: NOW,
         });
       }
     }),
@@ -140,6 +141,7 @@ it.layer(NodeServices.layer)("standalone thread decider", (it) => {
       expect(events[0]?.type).toBe("thread.meta-updated");
       if (events[0]?.type === "thread.meta-updated") {
         expect(events[0].payload.projectId).toBe(projectId);
+        expect(events[0].payload.updatedAt).toBe(NOW);
       }
     }),
   );

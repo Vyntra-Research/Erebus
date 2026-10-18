@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.6 - 2026-10-18
+
+### Fixed
+
+- Keep local project links on their own device without creating thread changes for other hosts.
+- Repair project identities changed by older clients when the synchronized base is still current.
+
 ## 0.9.5 - 2026-10-18
 
 ### Fixed
