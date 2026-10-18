@@ -52,6 +52,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -295,6 +296,7 @@ interface ExportedThreadSyncV2State {
       readonly localThreadId: ThreadId;
       readonly header: ThreadSyncV2ThreadSource["header"];
       readonly sourceKeyHash: string;
+      readonly threadSequence: number;
     }
   >;
   readonly revisions: ReadonlyMap<ThreadId, ThreadSyncRevision>;
@@ -304,6 +306,42 @@ interface ExportedThreadSyncV2State {
   readonly retiredSyncThreadIds: ReadonlySet<ThreadId>;
   readonly projectBindings: ReadonlyArray<ThreadSyncLocalProjectBinding>;
   readonly threadBindings: ReadonlyArray<ThreadSyncLocalThreadBinding>;
+}
+
+export function resolveThreadSyncV2LocalRevision(input: {
+  readonly binding: ThreadSyncLocalThreadBinding | undefined;
+  readonly descriptor: {
+    readonly localThreadId: ThreadId;
+    readonly sourceKeyHash: string;
+    readonly threadSequence: number;
+  };
+  readonly remote: ThreadSyncV2ThreadEntry | undefined;
+  readonly importWatermark: ProjectionSnapshotQuery.ProjectionThreadSyncImportWatermark | undefined;
+}): ThreadSyncRevision {
+  const { binding, descriptor, remote, importWatermark } = input;
+  if (binding?.sourceKeyHash === descriptor.sourceKeyHash && binding.baseRevision !== null) {
+    return binding.baseRevision;
+  }
+  if (remote?.sourceKeyHash === descriptor.sourceKeyHash) return remote.revision;
+  if (
+    binding?.baseRevision !== null &&
+    binding?.baseRevision !== undefined &&
+    importWatermark?.threadSequence === descriptor.threadSequence &&
+    importWatermark.sourceRevision === binding.baseRevision
+  ) {
+    return binding.baseRevision;
+  }
+  return threadSyncRevision({ formatVersion: 2, sourceKeyHash: descriptor.sourceKeyHash });
+}
+
+/** Keep a durable sync mutation running if its WebSocket caller reconnects. */
+export function keepThreadSyncOperationAlive<A, E, R>(
+  operation: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> {
+  return Effect.gen(function* () {
+    const fiber = yield* Effect.forkDetach(operation);
+    return yield* Fiber.join(fiber);
+  });
 }
 
 interface ThreadSyncV2AnalysisEntry {
@@ -1817,6 +1855,7 @@ export const make = Effect.gen(function* () {
         readonly localThreadId: ThreadId;
         readonly header: ThreadSyncV2ThreadSource["header"];
         readonly sourceKeyHash: string;
+        readonly threadSequence: number;
       }
     >();
     yield* Effect.try({
@@ -1841,6 +1880,7 @@ export const make = Effect.gen(function* () {
                 threadSequence: local.threadSequence,
               }),
             ),
+            threadSequence: local.threadSequence,
           });
         }
       },
@@ -2009,22 +2049,30 @@ export const make = Effect.gen(function* () {
     });
     const sources = new Map(prepared.sources.map((source) => [source.header.threadId, source]));
     const revisions = new Map<ThreadId, ThreadSyncRevision>();
+    const importWatermarks =
+      snapshotQuery.listThreadSyncImportWatermarks === undefined
+        ? []
+        : yield* snapshotQuery
+            .listThreadSyncImportWatermarks()
+            .pipe(Effect.mapError((cause) => syncError("export", "io-failed", String(cause))));
+    const importWatermarksByThread = new Map(
+      importWatermarks.map((watermark) => [watermark.threadId, watermark] as const),
+    );
     const bindingsBySyncId = new Map(
       threadBindings.map((binding) => [binding.syncThreadId, binding] as const),
     );
     for (const [threadId, descriptor] of descriptors) {
       const binding = bindingsBySyncId.get(threadId);
       const remoteEntry = remote.threads.get(threadId);
-      if (binding?.sourceKeyHash === descriptor.sourceKeyHash && binding.baseRevision !== null) {
-        revisions.set(threadId, binding.baseRevision);
-      } else if (remoteEntry?.sourceKeyHash === descriptor.sourceKeyHash) {
-        revisions.set(threadId, remoteEntry.revision);
-      } else {
-        revisions.set(
-          threadId,
-          threadSyncRevision({ formatVersion: 2, sourceKeyHash: descriptor.sourceKeyHash }),
-        );
-      }
+      revisions.set(
+        threadId,
+        resolveThreadSyncV2LocalRevision({
+          binding,
+          descriptor,
+          remote: remoteEntry,
+          importWatermark: importWatermarksByThread.get(descriptor.localThreadId),
+        }),
+      );
     }
     return {
       index,
@@ -3754,55 +3802,79 @@ export const make = Effect.gen(function* () {
   });
 
   const pull: ThreadSyncServiceShape["pull"] = (input) =>
-    runLocked(
-      "pulling",
-      "pull",
-      Effect.gen(function* () {
-        const state = yield* Ref.get(stateRef);
-        const configuration = state.configuration;
-        if (configuration === null) {
-          return yield* syncError("pull", "not-configured", "Thread sync is not configured.");
-        }
-        const checkedOut = yield* git.checkoutRemote(configuration, input.expectedRemoteRevision);
-        if (checkedOut.remoteRevision === null) {
-          return yield* syncError(
-            "pull",
-            "invalid-snapshot",
-            "The sync remote has no history yet.",
+    keepThreadSyncOperationAlive(
+      runLocked(
+        "pulling",
+        "pull",
+        Effect.gen(function* () {
+          const state = yield* Ref.get(stateRef);
+          const configuration = state.configuration;
+          if (configuration === null) {
+            return yield* syncError("pull", "not-configured", "Thread sync is not configured.");
+          }
+          const checkedOut = yield* git.checkoutRemote(configuration, input.expectedRemoteRevision);
+          if (checkedOut.remoteRevision === null) {
+            return yield* syncError(
+              "pull",
+              "invalid-snapshot",
+              "The sync remote has no history yet.",
+            );
+          }
+          const now = DateTime.formatIso(yield* DateTime.now);
+          const fetchedState = {
+            ...state,
+            remoteRevision: checkedOut.remoteRevision,
+            lastFetchedAt: now,
+          };
+          const strategies = new Map(
+            input.strategies.map((strategy) => [strategy.threadId, strategy.resolution]),
           );
-        }
-        const now = DateTime.formatIso(yield* DateTime.now);
-        const fetchedState = {
-          ...state,
-          remoteRevision: checkedOut.remoteRevision,
-          lastFetchedAt: now,
-        };
-        const strategies = new Map(
-          input.strategies.map((strategy) => [strategy.threadId, strategy.resolution]),
-        );
-        const remoteV2 = yield* readThreadSyncV2RepositoryIndex(checkedOut.mirrorPath);
-        if (remoteV2 !== null) {
-          const analysis = yield* analyzeV2(fetchedState, remoteV2, "pulling");
-          const resolved = yield* applyRemoteV2Changes({
-            mirrorPath: checkedOut.mirrorPath,
+          const remoteV2 = yield* readThreadSyncV2RepositoryIndex(checkedOut.mirrorPath);
+          if (remoteV2 !== null) {
+            const analysis = yield* analyzeV2(fetchedState, remoteV2, "pulling");
+            const resolved = yield* applyRemoteV2Changes({
+              mirrorPath: checkedOut.mirrorPath,
+              analysis,
+              remote: remoteV2,
+              strategies,
+              pushMode: false,
+            });
+            const importedLocal = yield* exportLocalV2(resolved.state, remoteV2);
+            const cachedState = cacheV2SourceKeys(
+              resolved.state,
+              importedLocal,
+              new Set(resolved.appliedThreadIds),
+            );
+            const finalAnalysis = yield* analyzeV2(cachedState, remoteV2);
+            yield* Ref.set(remoteV2Ref, remoteV2);
+            yield* Ref.set(remoteRef, {
+              projects: remoteV2.projects,
+              threads: new Map(),
+              blobs: new Map(),
+            });
+            yield* saveState(finalAnalysis.state);
+            yield* publish(finalAnalysis.status);
+            return {
+              remoteRevision: checkedOut.remoteRevision,
+              appliedThreadIds: resolved.appliedThreadIds,
+              keptBoth: resolved.keptBoth,
+              skippedActiveThreadIds: resolved.skippedActiveThreadIds,
+              status: finalAnalysis.status,
+            };
+          }
+
+          const remote = yield* readRepository(checkedOut.mirrorPath);
+          const analysis = yield* analyze(fetchedState, remote, "pulling");
+          const resolved = yield* applyRemoteChanges({
             analysis,
-            remote: remoteV2,
+            remote,
+            sourceRevision: checkedOut.remoteRevision,
             strategies,
             pushMode: false,
           });
-          const importedLocal = yield* exportLocalV2(resolved.state, remoteV2);
-          const cachedState = cacheV2SourceKeys(
-            resolved.state,
-            importedLocal,
-            new Set(resolved.appliedThreadIds),
-          );
-          const finalAnalysis = yield* analyzeV2(cachedState, remoteV2);
-          yield* Ref.set(remoteV2Ref, remoteV2);
-          yield* Ref.set(remoteRef, {
-            projects: remoteV2.projects,
-            threads: new Map(),
-            blobs: new Map(),
-          });
+          yield* Ref.set(remoteV2Ref, null);
+          yield* Ref.set(remoteRef, remote);
+          const finalAnalysis = yield* analyze(resolved.state, remote);
           yield* saveState(finalAnalysis.state);
           yield* publish(finalAnalysis.status);
           return {
@@ -3812,31 +3884,9 @@ export const make = Effect.gen(function* () {
             skippedActiveThreadIds: resolved.skippedActiveThreadIds,
             status: finalAnalysis.status,
           };
-        }
-
-        const remote = yield* readRepository(checkedOut.mirrorPath);
-        const analysis = yield* analyze(fetchedState, remote, "pulling");
-        const resolved = yield* applyRemoteChanges({
-          analysis,
-          remote,
-          sourceRevision: checkedOut.remoteRevision,
-          strategies,
-          pushMode: false,
-        });
-        yield* Ref.set(remoteV2Ref, null);
-        yield* Ref.set(remoteRef, remote);
-        const finalAnalysis = yield* analyze(resolved.state, remote);
-        yield* saveState(finalAnalysis.state);
-        yield* publish(finalAnalysis.status);
-        return {
-          remoteRevision: checkedOut.remoteRevision,
-          appliedThreadIds: resolved.appliedThreadIds,
-          keptBoth: resolved.keptBoth,
-          skippedActiveThreadIds: resolved.skippedActiveThreadIds,
-          status: finalAnalysis.status,
-        };
-      }),
-      { skipStatusAnalysis: true },
+        }),
+        { skipStatusAnalysis: true },
+      ),
     );
 
   const pushV2 = Effect.fn("ThreadSyncService.pushV2")(function* (input: {
@@ -4068,61 +4118,63 @@ export const make = Effect.gen(function* () {
   });
 
   const push: ThreadSyncServiceShape["push"] = (input) =>
-    runLocked(
-      "pushing",
-      "push",
-      Effect.gen(function* () {
-        const state = yield* Ref.get(stateRef);
-        const configuration = state.configuration;
-        if (configuration === null) {
-          return yield* syncError("push", "not-configured", "Thread sync is not configured.");
-        }
-        const checkedOut = yield* git.checkoutRemote(configuration, input.expectedRemoteRevision);
-        const now = DateTime.formatIso(yield* DateTime.now);
-        const fetchedState = {
-          ...state,
-          remoteRevision: checkedOut.remoteRevision,
-          lastFetchedAt: now,
-        };
-        const strategyMap = new Map(
-          input.strategies.map((strategy) => [strategy.threadId, strategy.resolution]),
-        );
-        const existingV2 =
-          checkedOut.remoteRevision === null
-            ? null
-            : yield* readThreadSyncV2RepositoryIndex(checkedOut.mirrorPath);
+    keepThreadSyncOperationAlive(
+      runLocked(
+        "pushing",
+        "push",
+        Effect.gen(function* () {
+          const state = yield* Ref.get(stateRef);
+          const configuration = state.configuration;
+          if (configuration === null) {
+            return yield* syncError("push", "not-configured", "Thread sync is not configured.");
+          }
+          const checkedOut = yield* git.checkoutRemote(configuration, input.expectedRemoteRevision);
+          const now = DateTime.formatIso(yield* DateTime.now);
+          const fetchedState = {
+            ...state,
+            remoteRevision: checkedOut.remoteRevision,
+            lastFetchedAt: now,
+          };
+          const strategyMap = new Map(
+            input.strategies.map((strategy) => [strategy.threadId, strategy.resolution]),
+          );
+          const existingV2 =
+            checkedOut.remoteRevision === null
+              ? null
+              : yield* readThreadSyncV2RepositoryIndex(checkedOut.mirrorPath);
 
-        if (checkedOut.remoteRevision === null || existingV2 !== null) {
-          const remoteV2 = existingV2 ?? emptyThreadSyncV2RepositoryIndex(now);
+          if (checkedOut.remoteRevision === null || existingV2 !== null) {
+            const remoteV2 = existingV2 ?? emptyThreadSyncV2RepositoryIndex(now);
+            return yield* pushV2({
+              configuration,
+              checkedOut,
+              now,
+              state: fetchedState,
+              remote: remoteV2,
+              strategies: strategyMap,
+              retireV1: false,
+            });
+          }
+
+          const remote = yield* readRepository(checkedOut.mirrorPath);
+          const migrated = yield* migrateV1RepositoryToV2({
+            mirrorPath: checkedOut.mirrorPath,
+            state: fetchedState,
+            remote,
+            updatedAt: now,
+          });
           return yield* pushV2({
             configuration,
             checkedOut,
             now,
-            state: fetchedState,
-            remote: remoteV2,
+            state: migrated.state,
+            remote: migrated.remoteV2,
             strategies: strategyMap,
-            retireV1: false,
+            retireV1: true,
           });
-        }
-
-        const remote = yield* readRepository(checkedOut.mirrorPath);
-        const migrated = yield* migrateV1RepositoryToV2({
-          mirrorPath: checkedOut.mirrorPath,
-          state: fetchedState,
-          remote,
-          updatedAt: now,
-        });
-        return yield* pushV2({
-          configuration,
-          checkedOut,
-          now,
-          state: migrated.state,
-          remote: migrated.remoteV2,
-          strategies: strategyMap,
-          retireV1: true,
-        });
-      }),
-      { skipStatusAnalysis: true },
+        }),
+        { skipStatusAnalysis: true },
+      ),
     );
 
   const disconnect: ThreadSyncServiceShape["disconnect"] = (input) =>

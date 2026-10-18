@@ -137,6 +137,16 @@ export interface ProjectionThreadSyncExportIndex {
 }
 
 /**
+ * Last durable sync import for a thread. If its sequence is still the thread
+ * watermark, the local projection has not changed since that import.
+ */
+export interface ProjectionThreadSyncImportWatermark {
+  readonly threadId: ThreadId;
+  readonly threadSequence: number;
+  readonly sourceRevision: string;
+}
+
+/**
  * Conservative metadata-only estimate used to decide whether the legacy v1
  * exporter may safely hydrate the full projection snapshot.
  */
@@ -392,6 +402,12 @@ export interface ProjectionSnapshotQueryShape {
   /** Metadata-only sync index. No message, plan, or activity body is read. */
   readonly getThreadSyncExportIndex?: () => Effect.Effect<
     ProjectionThreadSyncExportIndex,
+    ProjectionRepositoryError
+  >;
+
+  /** Metadata-only import watermarks used to recover interrupted sync state. */
+  readonly listThreadSyncImportWatermarks?: () => Effect.Effect<
+    ReadonlyArray<ProjectionThreadSyncImportWatermark>,
     ProjectionRepositoryError
   >;
 
