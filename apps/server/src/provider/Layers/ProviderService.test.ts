@@ -1111,6 +1111,27 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("removes an idle binding without a cursor even when its provider account is gone", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const threadId = asThreadId("thread-delete-empty-provider-history");
+      routing.codex.stopSession.mockClear();
+      routing.codex.deletePersistedThread.mockClear();
+      yield* directory.upsert({
+        provider: CODEX_DRIVER,
+        providerInstanceId: ProviderInstanceId.make("removed-codex-account"),
+        threadId,
+        runtimeMode: "full-access",
+        status: "error",
+      });
+
+      assert.equal(yield* provider.deletePersistedThreadHistory(threadId), true);
+      assert.equal(routing.codex.stopSession.mock.calls.length, 0);
+      assert.equal(routing.codex.deletePersistedThread.mock.calls.length, 0);
+    }),
+  );
+
   it.effect("clears a replaced imported thread binding without deleting provider history", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;

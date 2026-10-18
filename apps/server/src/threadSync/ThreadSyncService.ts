@@ -1095,7 +1095,7 @@ export function analyzeThreadSyncState(input: {
   return { entries, status, state: input.state };
 }
 
-function analyzeThreadSyncV2State(input: {
+export function analyzeThreadSyncV2State(input: {
   readonly local: ExportedThreadSyncV2State;
   readonly remote: ThreadSyncV2RepositoryIndex;
   readonly state: ThreadSyncLocalState;
@@ -1141,6 +1141,9 @@ function analyzeThreadSyncV2State(input: {
   const projectBindings = new Map(
     input.local.projectBindings.map((binding) => [binding.syncProjectId, binding] as const),
   );
+  const eligibleRemoteProjectIds = new Set(
+    [...eligibleRemoteThreads.values()].map((thread) => thread.syncProjectId),
+  );
   const localProjectBindings = new Map(
     input.local.projectBindings.map(
       (binding) => [binding.syncProjectId, binding.projectId] as const,
@@ -1148,7 +1151,12 @@ function analyzeThreadSyncV2State(input: {
   );
   const unlinkedProjects: ThreadSyncUnlinkedProject[] = [];
   for (const project of input.remote.projects.values()) {
-    if (project.deletedAt !== null || projectBindings.has(project.syncProjectId)) continue;
+    if (
+      project.deletedAt !== null ||
+      !eligibleRemoteProjectIds.has(project.syncProjectId) ||
+      projectBindings.has(project.syncProjectId)
+    )
+      continue;
     const repositoryMatches = [...input.local.projects.values()].filter(
       (candidate) =>
         project.repositoryIdentity !== null &&
@@ -1640,7 +1648,15 @@ export const make = Effect.gen(function* () {
       Effect.mapError((cause) => syncError("export", "io-failed", String(cause))),
     );
     const eligibleThreads = unfilteredIndex.threads.filter(isActivePrimaryThreadForSync);
-    const eligibleProjectIds = new Set(eligibleThreads.map((thread) => thread.projectId));
+    const eligibleRemoteProjectIds = new Set(
+      [...activePrimaryRemoteThreads(remote).values()].map((thread) => thread.syncProjectId),
+    );
+    const eligibleProjectIds = new Set([
+      ...eligibleThreads.map((thread) => thread.projectId),
+      ...state.projectBindings
+        .filter((binding) => eligibleRemoteProjectIds.has(binding.syncProjectId))
+        .map((binding) => binding.projectId),
+    ]);
     const index: ProjectionSnapshotQuery.ProjectionThreadSyncExportIndex = {
       ...unfilteredIndex,
       projects: unfilteredIndex.projects.filter(

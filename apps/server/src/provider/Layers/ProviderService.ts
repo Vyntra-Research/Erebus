@@ -1202,7 +1202,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     sessionLifecycleLock.withPermits(1)(
       Effect.gen(function* () {
         const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
-        if (!binding || (!binding.resumeCursor && binding.status === "stopped")) return true;
+        if (
+          !binding ||
+          (!binding.resumeCursor && binding.status !== "starting" && binding.status !== "running")
+        )
+          return true;
         const instanceId = yield* requireBindingInstanceId(
           "ProviderService.deletePersistedThreadHistory",
           binding,

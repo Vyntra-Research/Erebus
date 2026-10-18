@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.4 - 2026-10-18
+
+### Fixed
+
+- Ignore stale remote projects with no active threads during relinking and finish removing old co-agent records that have no provider history.
+
 ## 0.8.3 - 2026-10-17
 
 ### Fixed
