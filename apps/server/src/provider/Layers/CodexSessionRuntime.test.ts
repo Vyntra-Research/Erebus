@@ -96,7 +96,7 @@ it("builds native steering for the exact expected turn", () => {
   );
 });
 
-it("attaches a client id to hidden Erebus context steering", () => {
+it("attaches a client id to transient Erebus context steering", () => {
   NodeAssert.deepStrictEqual(
     buildTurnSteerParams(
       "provider-thread-1",
@@ -681,7 +681,8 @@ describe("buildCodexDeveloperInstructions", () => {
     NodeAssert.match(instructions, /Erebus/);
     NodeAssert.match(instructions, /Codex harness/);
     NodeAssert.match(instructions, /Erebus live steering and co-agent context/);
-    NodeAssert.match(instructions, /stale_context_id/);
+    NodeAssert.match(instructions, /codex_internal_context source="erebus"/);
+    NodeAssert.match(instructions, /omits the original delivery from the replacement history/);
     NodeAssert.match(instructions, /as gpt-5\.3-codex with high reasoning effort/);
   });
 

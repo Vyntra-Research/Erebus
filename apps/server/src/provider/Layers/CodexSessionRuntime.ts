@@ -52,19 +52,13 @@ import {
 } from "../../commandSafety.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import {
-  buildCodexCompactionContextInstruction,
-  buildCodexPostCompactionContextMarker,
+  buildCodexCompactionBoundaryMarker,
   buildCodexLiveCoagentMessagePrompt,
   buildCodexLiveUserSteerPrompt,
   contextCompactionSignal,
-  type CodexTrackedLiveUserSteer,
-  deliveredLiveContext,
-  erebusCoagentSteerClientId,
   erebusContextClientId,
-  erebusUserSteerClientId,
   isErebusCoagentMessage,
   isHiddenErebusContextItem,
-  markTrackedUserSteerHistorical,
 } from "../codexUserSteering.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
 
@@ -1356,7 +1350,6 @@ export const makeCodexSessionRuntime = (
     } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
     const historyRebaseGateRef = yield* Ref.make<Deferred.Deferred<void> | null>(null);
-    const lastLiveUserSteerRef = yield* Ref.make<CodexTrackedLiveUserSteer | null>(null);
     const lastCompactionSignalRef = yield* Ref.make<string | null>(null);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
@@ -1379,12 +1372,8 @@ export const makeCodexSessionRuntime = (
         message,
       });
 
-    const markLastLiveUserSteerHistorical = (compactedTurnId: TurnId, compactionIdentity: string) =>
+    const deliverCompactionBoundary = (compactedTurnId: TurnId, compactionIdentity: string) =>
       Effect.gen(function* () {
-        const trackedContext = yield* Ref.modify(lastLiveUserSteerRef, (current) => {
-          const marked = markTrackedUserSteerHistorical(current, compactedTurnId);
-          return [marked.next, marked.next] as const;
-        });
         const isNewBoundary = yield* Ref.modify(lastCompactionSignalRef, (current) =>
           current === compactionIdentity
             ? ([false, current] as const)
@@ -1403,7 +1392,7 @@ export const makeCodexSessionRuntime = (
             buildTurnSteerParams(
               providerThreadId,
               compactedTurnId,
-              buildCodexPostCompactionContextMarker(trackedContext, compactedTurnId),
+              buildCodexCompactionBoundaryMarker(compactedTurnId),
               clientUserMessageId,
             ),
           )
@@ -1804,17 +1793,6 @@ export const makeCodexSessionRuntime = (
           return;
         }
 
-        if (notification.method === "item/started" && route.turnId !== undefined) {
-          const deliveredContext = deliveredLiveContext(notification.params.item);
-          if (deliveredContext !== undefined) {
-            yield* Ref.set(lastLiveUserSteerRef, {
-              ...deliveredContext,
-              turnId: route.turnId,
-              state: "fresh" as const,
-            });
-          }
-        }
-
         if (
           (notification.method === "item/started" || notification.method === "item/completed") &&
           isHiddenErebusContextItem(notification.params.item)
@@ -1828,7 +1806,7 @@ export const makeCodexSessionRuntime = (
           compaction !== undefined &&
           (notificationThreadId === undefined || notificationThreadId === suppressRootId)
         ) {
-          yield* markLastLiveUserSteerHistorical(compaction.turnId, compaction.identity);
+          yield* deliverCompactionBoundary(compaction.turnId, compaction.identity);
         }
 
         let requestId: ApprovalRequestId | undefined;
@@ -1894,25 +1872,10 @@ export const makeCodexSessionRuntime = (
           if (providerThreadId && payload.threadId !== providerThreadId) {
             return Effect.void;
           }
-          const turnId = TurnId.make(payload.turn.id);
-          const deliveredContext = payload.turn.items
-            .map(deliveredLiveContext)
-            .findLast((candidate) => candidate !== undefined);
-          const rememberSteer = deliveredContext
-            ? Ref.set(lastLiveUserSteerRef, {
-                ...deliveredContext,
-                turnId,
-                state: "fresh" as const,
-              })
-            : Effect.void;
-          return rememberSteer.pipe(
-            Effect.andThen(
-              updateSession(sessionRef, {
-                status: "running",
-                activeTurnId: turnId,
-              }),
-            ),
-          );
+          return updateSession(sessionRef, {
+            status: "running",
+            activeTurnId: TurnId.make(payload.turn.id),
+          });
         }),
       ),
     );
@@ -2532,15 +2495,7 @@ export const makeCodexSessionRuntime = (
           const additionalDeveloperInstructions = options.getAdditionalDeveloperInstructions
             ? yield* options.getAdditionalDeveloperInstructions()
             : "";
-          const compactionContextInstruction = buildCodexCompactionContextInstruction(
-            yield* Ref.get(lastLiveUserSteerRef),
-          );
-          const turnDeveloperInstructions = [
-            additionalDeveloperInstructions,
-            compactionContextInstruction,
-          ]
-            .filter((value) => value.length > 0)
-            .join("\n\n");
+          const turnDeveloperInstructions = additionalDeveloperInstructions;
           const isLiveUserSteer =
             input.delivery === "live-user-steer" &&
             input.clientUserMessageId !== undefined &&
@@ -2558,8 +2513,8 @@ export const makeCodexSessionRuntime = (
               ? {
                   clientUserMessageId: isLiveUserSteer
                     ? isLiveCoagentMessage
-                      ? erebusCoagentSteerClientId(input.clientUserMessageId)
-                      : erebusUserSteerClientId(input.clientUserMessageId)
+                      ? erebusContextClientId(`live-coagent:${input.clientUserMessageId}`)
+                      : erebusContextClientId(`live-user-steer:${input.clientUserMessageId}`)
                     : input.clientUserMessageId,
                 }
               : {}),
