@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.8 - 2026-10-19
+
+### Fixed
+
+- Keep live user steering and co-agent handbacks transient across automatic Codex compaction instead of retaining them as fresh user requests.
+- Deliver a non-persistent chronology boundary after each compaction so legacy steering from older threads cannot become the latest actionable instruction again.
+
 ## 0.9.7 - 2026-10-18
 
 ### Fixed
