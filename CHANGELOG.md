@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.7 - 2026-10-18
+
+### Fixed
+
+- Ignore device-local thread metadata when checking for portable history changes, including the reset fields emitted while linking a thread to a local project.
+
 ## 0.9.6 - 2026-10-18
 
 ### Fixed

@@ -3486,7 +3486,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
     }),
   );
 
-  it.effect("keeps a project-only thread move out of the portable sync watermark", () =>
+  it.effect("keeps local thread metadata out while preserving portable title updates", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const snapshotQuery = yield* ProjectionSnapshotQuery;
@@ -3535,7 +3535,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
             ${"thread.meta-updated"}, ${linkedAt},
             ${CommandId.make("command-thread-sync-local-link-moved")},
             ${null}, ${null}, ${"server"},
-            ${'{"projectId":"thread-sync-local-project","updatedAt":"2026-10-18T01:00:00.000Z"}'},
+            ${'{"projectId":"thread-sync-local-project","branch":null,"worktreePath":null,"linkedPullRequest":null,"updatedAt":"2026-10-18T01:00:00.000Z"}'},
             ${"{}"}
           )
       `;
@@ -3550,6 +3550,69 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
 
       assert.equal(thread?.threadSequence, createdSequence[0]?.sequence);
       assert.equal(thread?.updatedAt, createdAt);
+
+      const pageAfterLocalMove = yield* snapshotQuery.listThreadSyncExportTurnsPage!({
+        threadId,
+        threadSequence: createdSequence[0]?.sequence ?? 0,
+        after: null,
+        limit: 1,
+      });
+      assert.deepEqual(pageAfterLocalMove, { rows: [], next: null });
+
+      const renamedAt = "2026-10-18T01:02:00.000Z";
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id, aggregate_kind, stream_id, stream_version, event_type,
+          occurred_at, command_id, causation_event_id, correlation_id,
+          actor_kind, payload_json, metadata_json
+        ) VALUES (
+          ${EventId.make("event-thread-sync-local-link-renamed")}, ${"thread"}, ${threadId}, 2,
+          ${"thread.meta-updated"}, ${renamedAt},
+          ${CommandId.make("command-thread-sync-local-link-renamed")},
+          ${null}, ${null}, ${"server"},
+          ${'{"title":"Renamed thread","updatedAt":"2026-10-18T01:02:00.000Z"}'},
+          ${"{}"}
+        )
+      `;
+      const renamedSequence = yield* sql<{ readonly sequence: number }>`
+        SELECT sequence AS "sequence"
+        FROM orchestration_events
+        WHERE event_id = ${EventId.make("event-thread-sync-local-link-renamed")}
+      `;
+      const renamedIndex = yield* snapshotQuery.getThreadSyncExportIndex!();
+      const renamedThread = renamedIndex.threads.find((candidate) => candidate.id === threadId);
+
+      assert.equal(renamedThread?.threadSequence, renamedSequence[0]?.sequence);
+      assert.equal(renamedThread?.updatedAt, renamedAt);
+
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id, aggregate_kind, stream_id, stream_version, event_type,
+          occurred_at, command_id, causation_event_id, correlation_id,
+          actor_kind, payload_json, metadata_json
+        ) VALUES (
+          ${EventId.make("event-thread-sync-local-link-cleared")}, ${"thread"}, ${threadId}, 3,
+          ${"thread.meta-updated"}, ${"2026-10-18T01:03:00.000Z"},
+          ${CommandId.make("command-thread-sync-local-link-cleared")},
+          ${null}, ${null}, ${"server"},
+          ${'{"projectId":null,"branch":null,"worktreePath":null,"linkedPullRequest":null,"updatedAt":"2026-10-18T01:03:00.000Z"}'},
+          ${"{}"}
+        )
+      `;
+      const indexAfterLocalMove = yield* snapshotQuery.getThreadSyncExportIndex!();
+      const threadAfterLocalMove = indexAfterLocalMove.threads.find(
+        (candidate) => candidate.id === threadId,
+      );
+      const pageAfterRenameAndLocalMove = yield* snapshotQuery.listThreadSyncExportTurnsPage!({
+        threadId,
+        threadSequence: renamedSequence[0]?.sequence ?? 0,
+        after: null,
+        limit: 1,
+      });
+
+      assert.equal(threadAfterLocalMove?.threadSequence, renamedSequence[0]?.sequence);
+      assert.equal(threadAfterLocalMove?.updatedAt, renamedAt);
+      assert.deepEqual(pageAfterRenameAndLocalMove, { rows: [], next: null });
     }),
   );
 });

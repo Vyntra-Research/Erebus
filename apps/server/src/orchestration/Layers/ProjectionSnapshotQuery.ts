@@ -1110,6 +1110,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     `,
   });
 
+  // V2 exports only the title from thread.meta-updated. Project links, model
+  // selection, checkout metadata, and their reset fields stay on this device.
   const listThreadSyncWatermarkRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ThreadSyncWatermarkRowSchema,
@@ -1124,13 +1126,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         AND events.stream_id = threads.thread_id
         AND NOT (
           events.event_type = 'thread.meta-updated'
-          AND json_type(events.payload_json, '$.projectId') IS NOT NULL
           AND json_type(events.payload_json, '$.title') IS NULL
-          AND json_type(events.payload_json, '$.regenerateTitle') IS NULL
-          AND json_type(events.payload_json, '$.modelSelection') IS NULL
-          AND json_type(events.payload_json, '$.branch') IS NULL
-          AND json_type(events.payload_json, '$.worktreePath') IS NULL
-          AND json_type(events.payload_json, '$.linkedPullRequest') IS NULL
         )
       GROUP BY threads.thread_id
       ORDER BY threads.thread_id ASC
@@ -4619,11 +4615,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     expected: number,
     operation: string,
   ): Effect.Effect<void, ProjectionRepositoryError> =>
+    // Keep this predicate identical to listThreadSyncWatermarkRows so ignored
+    // device-local metadata cannot invalidate a portable export mid-read.
     sql<{ readonly threadSequence: number }>`
       SELECT COALESCE(MAX(sequence), 0) AS "threadSequence"
       FROM orchestration_events
       WHERE aggregate_kind = 'thread'
         AND stream_id = ${threadId}
+        AND NOT (
+          event_type = 'thread.meta-updated'
+          AND json_type(payload_json, '$.title') IS NULL
+        )
     `.pipe(
       Effect.flatMap((rows) => {
         const actual = rows[0]?.threadSequence ?? 0;
