@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.9 - 2026-10-24
+
+### Fixed
+
+- Keep local-only standalone threads eligible for Git sync instead of failing while resolving their optional project link.
+
 ## 0.9.8 - 2026-10-19
 
 ### Fixed
