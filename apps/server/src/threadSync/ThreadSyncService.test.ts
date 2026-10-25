@@ -473,6 +473,62 @@ describe("ThreadSyncService state analysis", () => {
     expect(boundAnalysis.status.unlinkedProjects).toEqual([]);
   });
 
+  it("keeps a local-only standalone thread eligible for push", () => {
+    const syncThreadId = ThreadId.make("standalone-local-only");
+    const localThreadId = ThreadId.make("local-standalone");
+    const state = emptyThreadSyncLocalState();
+    const analysis = analyzeThreadSyncV2State({
+      local: {
+        index: { projects: [], threads: [{ id: localThreadId }] },
+        projects: new Map(),
+        descriptors: new Map([
+          [
+            syncThreadId,
+            {
+              header: {
+                syncProjectId: null,
+                title: "Standalone thread",
+              },
+            },
+          ],
+        ]),
+        revisions: new Map([[syncThreadId, "local-revision"]]),
+        sources: new Map(),
+        blobs: new Map(),
+        activeLocalThreadIds: new Set<ThreadId>(),
+        retiredSyncThreadIds: new Set<ThreadId>(),
+        projectBindings: [],
+        threadBindings: [
+          {
+            syncThreadId,
+            localThreadId,
+            syncProjectId: null,
+            baseRevision: null,
+          },
+        ],
+      },
+      remote: {
+        manifest: {},
+        projects: new Map(),
+        threads: new Map(),
+        threadManifests: new Map(),
+        blobs: new Map(),
+      },
+      state,
+    } as never);
+
+    expect(analysis.entries).toHaveLength(1);
+    expect(analysis.entries[0]).toMatchObject({
+      syncThreadId,
+      localThreadId,
+      syncProjectId: null,
+      title: "Standalone thread",
+      decision: "push",
+      remote: null,
+    });
+    expect(analysis.status.pendingPushCount).toBe(1);
+  });
+
   it("reports a locally archived bound thread only as a local removal", () => {
     const syncThreadId = ThreadId.make("archived-thread");
     const localThreadId = ThreadId.make("local-archived-thread");

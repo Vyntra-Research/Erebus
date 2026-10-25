@@ -1240,6 +1240,8 @@ export function analyzeThreadSyncV2State(input: {
   for (const syncThreadId of [...allIds].toSorted()) {
     const binding = bindingsBySyncId.get(syncThreadId);
     const localDescriptor = input.local.descriptors.get(syncThreadId);
+    const metadata = localDescriptor?.header ?? eligibleRemoteThreads.get(syncThreadId) ?? null;
+    if (metadata === null) continue;
     const local =
       localDescriptor === undefined || binding === undefined
         ? null
@@ -1251,8 +1253,8 @@ export function analyzeThreadSyncV2State(input: {
     entries.push({
       syncThreadId,
       localThreadId: binding?.localThreadId ?? null,
-      syncProjectId: localDescriptor?.header.syncProjectId ?? remote!.syncProjectId,
-      title: localDescriptor?.header.title ?? remote!.title,
+      syncProjectId: metadata.syncProjectId,
+      title: metadata.title,
       decision: input.local.retiredSyncThreadIds.has(syncThreadId)
         ? remoteRevision === null
           ? "unchanged"
