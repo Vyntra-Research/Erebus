@@ -37,6 +37,7 @@ function renderPendingActions(isRunning: boolean) {
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: false,
+      onSubmit: () => {},
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
@@ -58,6 +59,7 @@ function renderStandaloneStop() {
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: false,
+      onSubmit: () => {},
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
@@ -79,6 +81,7 @@ function renderRunningActions(hasSendableContent: boolean) {
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent,
+      onSubmit: () => {},
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
@@ -100,6 +103,7 @@ function renderSendButton(sendDisabledReason: string | null = null) {
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: true,
+      onSubmit: () => {},
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
@@ -249,7 +253,8 @@ describe("ComposerPrimaryActions", () => {
 
     expect(markup).not.toContain('aria-label="Stop generation"');
     expect(markup).toContain('aria-label="Send steering"');
-    expect(markup).toContain('type="submit"');
+    expect(markup).toContain('type="button"');
+    expect(markup).not.toContain('type="submit"');
   });
 
   it("keeps stop as the only action while running with an empty composer", () => {

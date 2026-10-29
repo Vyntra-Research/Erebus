@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.11 - 2026-10-29
+
+### Fixed
+
+- Keep active-turn drafts local while provider activity updates the timeline.
+- Keep the floating browser preview dismissible without closing the agent's browser session.
+
 ## 0.9.10 - 2026-10-29
 
 ### Added
