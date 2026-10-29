@@ -38,6 +38,12 @@ Select **GPT-6 Sol** as the model. If the signed-in account has Daybreak access 
 
 Older tasks that already use the Daybreak Blue model alias keep that selection. The alias stays out of the model picker when GPT-6 Sol offers the Daybreak option, unless it is the model selected in the open task.
 
+## Agent persona
+
+Choose an agent persona under **Settings → General**. **Standard** keeps the usual Erebus behavior. **Capri** uses a stronger, more direct operating style: it favors high-value work, challenges weak premises, cuts repeated work, and keeps conclusions tied to evidence.
+
+The choice applies to the next Codex request, including requests in an open thread or co-agent thread. It does not change the thread history, model, reasoning effort, permission mode, or hard safety limits.
+
 ## Proteus integration
 
 Erebus manages Proteus inside this isolated profile. It ships a tested fallback, checks official stable releases once per day when the Codex environment starts, and accepts an update only after its package digest and runtime layout pass validation. Erebus retains the active and one previous managed runtime and plugin copy. It writes only its owned Codex configuration sections and removes only version directories marked as Erebus-managed. A global Proteus install is not required and does not control the Erebus runtime.

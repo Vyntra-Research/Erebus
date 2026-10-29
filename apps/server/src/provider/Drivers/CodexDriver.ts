@@ -42,6 +42,7 @@ import { installManagedArgosForCodex } from "../../argosRuntime.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { resolveAgentPersonaDeveloperInstructions } from "../AgentPersona.ts";
 import { CoagentToolController } from "../../coagents/Services/CoagentToolController.ts";
 import { ResearchToolController } from "../../research/Services/ResearchToolController.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -272,6 +273,13 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         ...(researchToolController ? { researchToolController } : {}),
         ...(coagentToolController ? { coagentToolController } : {}),
+        getAgentPersonaDeveloperInstructions: () =>
+          serverSettings.getSettings.pipe(
+            Effect.map((settings) =>
+              resolveAgentPersonaDeveloperInstructions(settings.agentPersonaPreset),
+            ),
+            Effect.orDie,
+          ),
       });
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);
 
