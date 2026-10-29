@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.10 - 2026-10-29
+
+### Added
+
+- Add a Beta desktop update track for prereleases while keeping Stable and Nightly feeds separate.
+- Label beta builds in the desktop shell and publish channel-specific Windows and Linux update manifests.
+
 ## 0.9.9 - 2026-10-24
 
 ### Fixed

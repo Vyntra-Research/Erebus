@@ -161,13 +161,19 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
 });
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
-  it("resolves the dedicated nightly updater channel from nightly versions", () => {
+  it("resolves stable, beta, and nightly updater channels from versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
+    assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42+linux-x64"), "nightly");
+    assert.equal(resolveDesktopUpdateChannel("1.0.0-beta"), "beta");
+    assert.equal(resolveDesktopUpdateChannel("1.0.0-beta.2"), "beta");
+    assert.equal(resolveDesktopUpdateChannel("1.0.0-rc.1"), "beta");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
+    assert.equal(resolveDesktopUpdateChannel("0.0.17+windows-x64"), "latest");
   });
 
-  it("switches desktop packaging product names to nightly for nightly builds", () => {
+  it("labels beta and nightly desktop packages", () => {
     assert.equal(resolveDesktopProductName("0.0.17"), "Erebus");
+    assert.equal(resolveDesktopProductName("1.0.0-beta"), "Erebus (Beta)");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Erebus (Nightly)");
   });
 
@@ -214,6 +220,17 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ),
         ),
       );
+      const betaConfig = yield* resolveGitHubPublishConfig("beta").pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                GITHUB_REPOSITORY: "pingdotgg/t3code",
+              },
+            }),
+          ),
+        ),
+      );
 
       assert.deepStrictEqual(latestConfig, {
         provider: "github",
@@ -227,6 +244,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         repo: "t3code",
         releaseType: "prerelease",
         channel: "nightly",
+      });
+      assert.deepStrictEqual(betaConfig, {
+        provider: "github",
+        owner: "pingdotgg",
+        repo: "t3code",
+        releaseType: "prerelease",
+        channel: "beta",
       });
     }),
   );
@@ -1246,6 +1270,25 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(
         (config.dmg as Record<string, unknown>).background,
         "dmg/dmg-background-nightly.png",
+      );
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("keeps production artwork for beta macOS builds", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.0.0-beta",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.equal(
+        (config.dmg as Record<string, unknown>).background,
+        "dmg/dmg-background-latest.png",
       );
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
