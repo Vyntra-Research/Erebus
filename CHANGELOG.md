@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.1 - 2026-10-29
+
+### Fixed
+
+- Keep active-turn drafts local while provider activity updates the timeline.
+- Frame Capri around Erebus's offensive research purpose.
+
 ## 1.0.0-beta - 2026-10-29
 
 ### Added

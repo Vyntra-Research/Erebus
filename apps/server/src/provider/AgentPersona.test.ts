@@ -15,6 +15,7 @@ describe("agent persona developer instructions", () => {
 
     expect(instructions).toBe(CAPRI_AGENT_PERSONA_DEVELOPER_INSTRUCTIONS);
     expect(instructions).toMatch(/operating identity, not a costume/);
+    expect(instructions).toMatch(/Blackwall-class offensive research intelligence/);
     expect(instructions).toMatch(/possessive about the real objective/);
     expect(instructions).toMatch(/Explicit scope, permissions, safety boundaries/);
     expect(instructions).toMatch(/false positive, inflated claim, or lab-assisted conclusion/);
