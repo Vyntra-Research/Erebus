@@ -112,6 +112,7 @@ export interface CodexAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly researchToolController?: ResearchToolControllerShape;
   readonly coagentToolController?: CoagentToolControllerShape;
+  readonly getAgentPersonaDeveloperInstructions?: () => Effect.Effect<string>;
   readonly requestGateway?: {
     readonly endpoint: string;
     readonly authorizationToken: string;
@@ -1873,7 +1874,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               }
             : {}),
           ...(mcpSession?.researchFallbackEndpoint ||
-          (projectId && (researchToolController || coagentToolController))
+          (projectId && (researchToolController || coagentToolController)) ||
+          options?.getAgentPersonaDeveloperInstructions
             ? {
                 getAdditionalDeveloperInstructions: () =>
                   Effect.all([
@@ -1896,6 +1898,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                         ? EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS
                         : "",
                     ),
+                    options?.getAgentPersonaDeveloperInstructions
+                      ? options.getAgentPersonaDeveloperInstructions()
+                      : Effect.succeed(""),
                   ]).pipe(Effect.map((parts) => parts.filter(Boolean).join("\n\n"))),
               }
             : {}),

@@ -162,6 +162,17 @@ describe("ClientSettings sidebar", () => {
   });
 });
 
+describe("ServerSettings agent persona", () => {
+  it("defaults to the standard persona and accepts Capri updates", () => {
+    expect(DEFAULT_SERVER_SETTINGS.agentPersonaPreset).toBe("default");
+    expect(decodeServerSettings({}).agentPersonaPreset).toBe("default");
+    expect(decodeServerSettingsPatch({ agentPersonaPreset: "capri" }).agentPersonaPreset).toBe(
+      "capri",
+    );
+    expect(() => decodeServerSettingsPatch({ agentPersonaPreset: "unknown" })).toThrow();
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults text generation to Luna at low reasoning effort", () => {
     expect(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection).toEqual({

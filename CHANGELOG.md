@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta - 2026-10-29
+
+### Added
+
+- Add the selectable Capri agent persona for a direct, high-leverage working style without weakening evidence or safety rules.
+- Apply persona changes on the next Codex request in both principal and co-agent threads without restarting the session.
+
 ## 0.9.10 - 2026-10-29
 
 ### Added

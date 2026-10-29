@@ -630,6 +630,45 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("reads the active persona instructions for every turn", () => {
+    const runtimeFactory = makeRuntimeFactory();
+    let instructions = "persona:first";
+    const layer = Layer.effect(
+      CodexAdapter,
+      makeCodexAdapter(decodeCodexSettings({}), {
+        makeRuntime: runtimeFactory.factory,
+        getAgentPersonaDeveloperInstructions: () => Effect.sync(() => instructions),
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-persona"),
+        runtimeMode: "full-access",
+      });
+
+      const runtime = runtimeFactory.lastRuntime;
+      NodeAssert.ok(runtime?.options.getAdditionalDeveloperInstructions);
+      NodeAssert.equal(
+        yield* runtime.options.getAdditionalDeveloperInstructions(),
+        "persona:first",
+      );
+
+      instructions = "persona:capri";
+      NodeAssert.equal(
+        yield* runtime.options.getAdditionalDeveloperInstructions(),
+        "persona:capri",
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect(
     "configures current Judge fallback and injects transport guidance on every recovered turn",
     () => {

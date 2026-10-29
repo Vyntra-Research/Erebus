@@ -2156,6 +2156,46 @@ export function GeneralSettingsPanel() {
       <SettingsSection title="General">
         <CloseToTraySetting />
         <SettingsRow
+          {...searchableSetting("agent-persona")}
+          description="Choose the behavior Erebus adds to every Codex turn. Changes apply to the next request in open threads and co-agent threads."
+          resetAction={
+            settings.agentPersonaPreset !== DEFAULT_UNIFIED_SETTINGS.agentPersonaPreset ? (
+              <SettingResetButton
+                label="agent persona"
+                onClick={() =>
+                  updateSettings({
+                    agentPersonaPreset: DEFAULT_UNIFIED_SETTINGS.agentPersonaPreset,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.agentPersonaPreset}
+              onValueChange={(value) => {
+                if (value === "default" || value === "capri") {
+                  updateSettings({ agentPersonaPreset: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Agent persona">
+                <SelectValue>
+                  {settings.agentPersonaPreset === "capri" ? "Capri" : "Standard"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="default">
+                  Standard
+                </SelectItem>
+                <SelectItem hideIndicator value="capri">
+                  Capri
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
           {...searchableSetting("project-grouping")}
           description="Combine matching repositories across environments."
           resetAction={
