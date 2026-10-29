@@ -6,6 +6,7 @@
 
 - Keep active-turn drafts local while provider activity updates the timeline.
 - Frame Capri around Erebus's offensive research purpose.
+- Keep the floating browser preview dismissible without closing the agent's browser session.
 
 ## 1.0.0-beta - 2026-10-29
 
