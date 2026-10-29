@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-beta.2 - 2026-10-29
+
+### Changed
+
+- Make Capri prioritize high-value offensive paths, treat misses as strategy feedback, and cut low-value checklist work.
+
 ## 1.0.0-beta.1 - 2026-10-29
 
 ### Fixed
