@@ -1,7 +1,7 @@
 "use client";
 
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { PanelRightIcon, PictureInPicture2, XIcon } from "lucide-react";
+import { MinusIcon, PanelRightIcon, PictureInPicture2 } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
@@ -62,7 +62,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
     miniPlayer?.tabId === tabId && miniPlayer.size
       ? miniPlayer.size
       : PREVIEW_MINI_PLAYER_DEFAULT_SIZE;
-  const close = () => {
+  const minimize = () => {
     usePreviewMiniPlayerStore.getState().close(threadRef);
   };
 
@@ -243,13 +243,9 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
             }
       }
     >
-      <div className="group pointer-events-auto absolute right-2 top-2 z-[34] size-3">
+      <div className="group pointer-events-auto absolute right-2 top-2 z-[34] h-8 w-[4.875rem]">
         <div
-          aria-hidden="true"
-          className="absolute right-0 top-0 size-2 rounded-full bg-foreground/25 shadow-sm ring-1 ring-background/70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
-        />
-        <div
-          className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover/92 p-0.5 opacity-0 shadow-lg/20 backdrop-blur-xl transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 active:cursor-grabbing"
+          className="absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover/92 p-0.5 shadow-lg/20 backdrop-blur-xl active:cursor-grabbing"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={endDrag}
@@ -302,15 +298,15 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Close floating preview"
+                  aria-label="Minimize floating browser preview"
                   onPointerDown={(event) => event.stopPropagation()}
-                  onClick={close}
+                  onClick={minimize}
                 />
               }
             >
-              <XIcon />
+              <MinusIcon />
             </TooltipTrigger>
-            <TooltipPopup side="top">Close floating preview</TooltipPopup>
+            <TooltipPopup side="top">Minimize browser preview</TooltipPopup>
           </Tooltip>
         </div>
       </div>
