@@ -6,6 +6,7 @@ on:
       - CI
     branches:
       - main
+      - stable
     types:
       - completed
   workflow_dispatch:
@@ -44,15 +45,15 @@ jobs:
             echo "should_release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [[ "$CI_CONCLUSION" != "success" || "$CI_BRANCH" != "main" ]]; then
+          if [[ "$CI_CONCLUSION" != "success" || ("$CI_BRANCH" != "main" && "$CI_BRANCH" != "stable") ]]; then
             echo "should_release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          merged_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TESTED_SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')"
+          merged_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TESTED_SHA/pulls" --jq "[.[] | select(.merged_at != null and .base.ref == \"$CI_BRANCH\")] | length")"
           if [[ "$merged_count" -gt 0 ]]; then
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No pull request merged into main is associated with $TESTED_SHA."
+            echo "No pull request merged into $CI_BRANCH is associated with $TESTED_SHA."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
           fi
 
