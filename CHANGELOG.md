@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.11 - 2026-10-29
+
+### Fixed
+
+- Keep active-turn drafts local while provider activity updates the timeline.
+
 ## 0.9.10 - 2026-10-29
 
 ### Added
