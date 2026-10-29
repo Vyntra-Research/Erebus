@@ -29,7 +29,7 @@ const DesktopSettingsPatch = Schema.Struct({
   serverExposureMode: Schema.optionalKey(Schema.Literals(["local-only", "network-accessible"])),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   tailscaleServePort: Schema.optionalKey(Schema.Number),
-  updateChannel: Schema.optionalKey(Schema.Literals(["latest", "nightly"])),
+  updateChannel: Schema.optionalKey(Schema.Literals(["latest", "beta", "nightly"])),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
   wslBackendEnabled: Schema.optionalKey(Schema.Boolean),
   wslMode: Schema.optionalKey(Schema.Literals(["local", "wsl"])),
@@ -119,6 +119,17 @@ describe("DesktopSettings", () => {
         wslOnly: false,
         wslDistro: null,
       } satisfies DesktopAppSettings.DesktopSettings,
+    );
+  });
+
+  it("defaults packaged prerelease builds to the beta update channel", () => {
+    assert.equal(
+      DesktopAppSettings.resolveDefaultDesktopSettings("1.0.0-beta").updateChannel,
+      "beta",
+    );
+    assert.equal(
+      DesktopAppSettings.resolveDefaultDesktopSettings("1.0.0-rc.1").updateChannel,
+      "beta",
     );
   });
 

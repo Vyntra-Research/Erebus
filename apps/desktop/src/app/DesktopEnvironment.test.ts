@@ -41,6 +41,30 @@ const makeEnvironment = (
   DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(makeEnvironmentLayer(overrides, env)));
 
 describe("DesktopEnvironment", () => {
+  it("labels beta builds without changing stable or nightly identities", () => {
+    assert.equal(
+      DesktopEnvironment.resolveDesktopAppBranding({
+        isDevelopment: false,
+        appVersion: "1.0.0-beta",
+      }).displayName,
+      "Erebus (Beta)",
+    );
+    assert.equal(
+      DesktopEnvironment.resolveDesktopAppBranding({
+        isDevelopment: false,
+        appVersion: "0.9.10",
+      }).displayName,
+      "Erebus",
+    );
+    assert.equal(
+      DesktopEnvironment.resolveDesktopAppBranding({
+        isDevelopment: false,
+        appVersion: "1.0.0-nightly.20261029.1",
+      }).displayName,
+      "Erebus (Nightly)",
+    );
+  });
+
   it.effect("derives state paths and development identity inside Effect", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(

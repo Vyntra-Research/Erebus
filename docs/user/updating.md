@@ -2,6 +2,14 @@
 
 Erebus checks GitHub Releases when it starts and at regular intervals. It does not silently download or install an Erebus update while a research task is running.
 
+Choose an update track under **Settings → About**:
+
+- **Stable** receives full releases only.
+- **Beta** receives prereleases for testing features before they reach Stable.
+- **Nightly** receives automated development builds.
+
+Changing the track checks its feed immediately. You can return to Stable from Beta or Nightly through the same setting.
+
 Before updating:
 
 1. Let active agent work and terminal commands finish.

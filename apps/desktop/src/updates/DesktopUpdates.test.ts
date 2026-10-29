@@ -40,6 +40,7 @@ const flushCallbacks = Effect.yieldNow;
 function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
   let allowDowngrade = false;
+  let allowPrerelease = false;
   let fullChangelog = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
@@ -71,7 +72,10 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     setAutoDownload: () => Effect.void,
     setAutoInstallOnAppQuit: () => Effect.void,
     setChannel: () => Effect.void,
-    setAllowPrerelease: () => Effect.void,
+    setAllowPrerelease: (value) =>
+      Effect.sync(() => {
+        allowPrerelease = value;
+      }),
     allowDowngrade: Effect.sync(() => allowDowngrade),
     setAllowDowngrade: (value) =>
       Effect.sync(() => {
@@ -246,6 +250,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     layer,
     checkCount: () => checkCount,
     feedUrls: () => feedUrls,
+    allowPrerelease: () => allowPrerelease,
     fullChangelog: () => fullChangelog,
     installEvents: () => installEvents,
     listenerCount: () =>
@@ -388,6 +393,31 @@ describe("DesktopUpdates", () => {
           },
         ]);
         assert.deepEqual(harness.sentStates.at(-1)?.releaseNotes, state.releaseNotes);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("enables prerelease updates on the beta channel", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const state = yield* updates.setChannel("beta");
+        assert.equal(state.channel, "beta");
+        assert.equal(harness.allowPrerelease(), true);
+
+        harness.emit("update-available", {
+          version: "1.0.0-beta.2",
+          releaseNotes: "- Capri beta preset",
+        });
+        yield* flushCallbacks;
+
+        const available = yield* updates.getState;
+        assert.equal(available.status, "available");
+        assert.equal(available.availableVersion, "1.0.0-beta.2");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

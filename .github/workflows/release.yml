@@ -65,6 +65,9 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.value }}
       tag: ${{ steps.version.outputs.tag }}
+      channel: ${{ steps.version.outputs.channel }}
+      windows_manifest: ${{ steps.version.outputs.windows_manifest }}
+      linux_manifest: ${{ steps.version.outputs.linux_manifest }}
       release_exists: ${{ steps.existing.outputs.release }}
     steps:
       - name: Checkout tested revision
@@ -92,8 +95,20 @@ jobs:
           if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
             throw "Invalid release version: $version"
           }
+          $channel = if ($version -match '-nightly\.\d{8}\.\d+(?:\+[0-9A-Za-z.-]+)?$') {
+            'nightly'
+          } elseif ($version -match '^\d+\.\d+\.\d+-') {
+            'beta'
+          } else {
+            'latest'
+          }
+          $windowsManifest = if ($channel -eq 'latest') { 'latest.yml' } else { "$channel.yml" }
+          $linuxManifest = if ($channel -eq 'latest') { 'latest-linux.yml' } else { "$channel-linux.yml" }
           "value=$version" >> $env:GITHUB_OUTPUT
           "tag=v$version" >> $env:GITHUB_OUTPUT
+          "channel=$channel" >> $env:GITHUB_OUTPUT
+          "windows_manifest=$windowsManifest" >> $env:GITHUB_OUTPUT
+          "linux_manifest=$linuxManifest" >> $env:GITHUB_OUTPUT
 
       - name: Check existing release
         id: existing
@@ -155,12 +170,13 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
+          UPDATE_MANIFEST: ${{ needs.metadata.outputs.windows_manifest }}
         run: |
           $installerName = "Erebus-$env:VERSION-x64.exe"
           $required = @(
             "release/$installerName",
             "release/$installerName.blockmap",
-            "release/latest.yml",
+            "release/$env:UPDATE_MANIFEST",
             "release/CHANGELOG.md"
           )
           foreach ($path in $required) {
@@ -168,8 +184,8 @@ jobs:
               throw "Missing Windows release file: $path"
             }
           }
-          if (-not (Select-String -LiteralPath "release/latest.yml" -SimpleMatch $installerName -Quiet)) {
-            throw "latest.yml does not reference $installerName"
+          if (-not (Select-String -LiteralPath "release/$env:UPDATE_MANIFEST" -SimpleMatch $installerName -Quiet)) {
+            throw "$env:UPDATE_MANIFEST does not reference $installerName"
           }
 
       - name: Upload workflow artifact
@@ -179,7 +195,7 @@ jobs:
           path: |
             release/Erebus-${{ needs.metadata.outputs.version }}-x64.exe
             release/Erebus-${{ needs.metadata.outputs.version }}-x64.exe.blockmap
-            release/latest.yml
+            release/${{ needs.metadata.outputs.windows_manifest }}
             release/CHANGELOG.md
           if-no-files-found: error
 
@@ -227,6 +243,8 @@ jobs:
 
       - name: Validate Linux AppImage payload
         shell: bash
+        env:
+          UPDATE_MANIFEST: ${{ needs.metadata.outputs.linux_manifest }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -242,8 +260,8 @@ jobs:
           monitor_path="$(find squashfs-root -type f -name t3-resource-monitor -print -quit)"
           test -n "$monitor_path"
           test -x "$monitor_path"
-          test -f release/latest-linux.yml
-          grep -F -- "$(basename "${appimages[0]}")" release/latest-linux.yml >/dev/null
+          test -f "release/$UPDATE_MANIFEST"
+          grep -F -- "$(basename "${appimages[0]}")" "release/$UPDATE_MANIFEST" >/dev/null
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
@@ -251,7 +269,7 @@ jobs:
           name: erebus-linux-x64-${{ needs.metadata.outputs.version }}
           path: |
             release/*.AppImage
-            release/latest-linux.yml
+            release/${{ needs.metadata.outputs.linux_manifest }}
           if-no-files-found: error
 
   publish:
@@ -290,6 +308,8 @@ jobs:
           TAG: ${{ needs.metadata.outputs.tag }}
           VERSION: ${{ needs.metadata.outputs.version }}
           TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          WINDOWS_MANIFEST: ${{ needs.metadata.outputs.windows_manifest }}
+          LINUX_MANIFEST: ${{ needs.metadata.outputs.linux_manifest }}
         run: |
           git show-ref --verify --quiet "refs/tags/$env:TAG"
           if ($LASTEXITCODE -eq 0) {
@@ -316,8 +336,8 @@ jobs:
           $required = @(
             "release/$windowsInstaller",
             "release/$windowsInstaller.blockmap",
-            "release/latest.yml",
-            "release/latest-linux.yml",
+            "release/$env:WINDOWS_MANIFEST",
+            "release/$env:LINUX_MANIFEST",
             "release/CHANGELOG.md"
           )
           foreach ($path in $required) {
@@ -329,11 +349,11 @@ jobs:
           if ($appImages.Count -ne 1) {
             throw "Expected one Linux AppImage, found $($appImages.Count)."
           }
-          if (-not (Select-String -LiteralPath "release/latest.yml" -SimpleMatch $windowsInstaller -Quiet)) {
-            throw "latest.yml does not reference $windowsInstaller"
+          if (-not (Select-String -LiteralPath "release/$env:WINDOWS_MANIFEST" -SimpleMatch $windowsInstaller -Quiet)) {
+            throw "$env:WINDOWS_MANIFEST does not reference $windowsInstaller"
           }
-          if (-not (Select-String -LiteralPath "release/latest-linux.yml" -SimpleMatch $appImages[0].Name -Quiet)) {
-            throw "latest-linux.yml does not reference $($appImages[0].Name)"
+          if (-not (Select-String -LiteralPath "release/$env:LINUX_MANIFEST" -SimpleMatch $appImages[0].Name -Quiet)) {
+            throw "$env:LINUX_MANIFEST does not reference $($appImages[0].Name)"
           }
           $assets = @(Get-ChildItem release -File |
             Where-Object { $_.Name -ne "CHANGELOG.md" } |
@@ -355,7 +375,7 @@ jobs:
             "--notes-file",
             "release/CHANGELOG.md"
           )
-          if ($env:VERSION.Contains("-")) {
+          if ($env:VERSION -match '^\d+\.\d+\.\d+-') {
             $releaseArgs += "--prerelease"
           }
           & gh @releaseArgs
