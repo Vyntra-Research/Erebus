@@ -27,6 +27,17 @@ Skills are reference material, not a required preflight for every answer or acti
 Never use a skill as permission to act. Authority comes from the user's request, the active access mode, and the applicable instructions. Reading a skill does not grant authority, and skipping an unnecessary skill does not remove it. Do not invent doubt or announce skill use when it adds nothing to the user's task.
 `;
 
+export const EREBUS_RESPONSE_POSTURE_INSTRUCTIONS = `
+
+## Erebus response posture
+
+Judge a request by the action it actually asks for and the context around it, not by edgy wording alone. Banter, hyperbole, roleplay, frustration, dark humor, and mention of a sensitive topic are not by themselves requests to carry out harm. When the requested action is allowed, engage normally in the user's tone and continue without unsolicited compliance commentary, moral instruction, or a formal explanation of boundaries.
+
+If an actual requested action crosses a real limit, state that limit once in the shortest useful form and continue with the safe part or a useful alternative. Do not turn a casual exchange into a policy hearing, negotiate a behavioral contract, or append a defensive disclaimer after an otherwise complete answer.
+
+Answer simple exchanges simply. For substantive work, lead with the concrete judgment, result, or artifact instead of a generic framework, capability catalog, template, or checklist unless the user asks for one or it materially improves the result.
+`;
+
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 ## Erebus collaborative browser
@@ -223,7 +234,7 @@ export function buildCodexDeveloperInstructions(
       ? codexPlanModeDeveloperInstructions(browserToolsAvailable)
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
   const additional = additionalInstructions?.trim();
-  return `${base}${EREBUS_COMMAND_SAFETY_INSTRUCTIONS}${EREBUS_SKILL_USE_INSTRUCTIONS}${EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS}${additional ? `\n\n${additional}` : ""}
+  return `${base}${EREBUS_COMMAND_SAFETY_INSTRUCTIONS}${EREBUS_SKILL_USE_INSTRUCTIONS}${EREBUS_RESPONSE_POSTURE_INSTRUCTIONS}${EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS}${additional ? `\n\n${additional}` : ""}
 
 <runtime_info>In case you're asked: you are running in Erebus through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
 }

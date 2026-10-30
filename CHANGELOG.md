@@ -6,6 +6,7 @@
 
 - Balance Capri's yandere charm and Blackwall edge while preserving her efficient offensive judgment.
 - Treat skills as on-demand references instead of mandatory preflight for familiar work.
+- Keep harmless provocation and casual conversation out of unnecessary compliance mode.
 
 ## 1.0.0-beta.3 - 2026-10-29
 
