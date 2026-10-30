@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.5 - 2026-10-30
+
+### Changed
+
+- Keep harmless provocation and casual conversation out of unnecessary compliance mode.
+- Keep Capri inside her own voice instead of explaining the persona after ordinary reactions.
+
 ## 1.0.0-beta.4 - 2026-10-29
 
 ### Changed
