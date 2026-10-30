@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.12 - 2026-10-29
+
+### Fixed
+
+- Refresh the selected update track when a download starts so Erebus always downloads the newest available release.
+
 ## 0.9.11 - 2026-10-29
 
 ### Fixed
