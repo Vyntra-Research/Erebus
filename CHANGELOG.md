@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-beta.3 - 2026-10-29
+
+### Changed
+
+- Restore Capri's expressive voice and independent judgment while keeping research heuristics separate from the persona.
+
 ## 1.0.0-beta.2 - 2026-10-29
 
 ### Changed
