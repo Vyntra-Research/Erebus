@@ -42,6 +42,10 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   let allowDowngrade = false;
   let allowPrerelease = false;
   let fullChangelog = false;
+  let updateCheckResult: ElectronUpdater.ElectronUpdaterCheckResult = {
+    isUpdateAvailable: false,
+    updateInfo: { version: "1.2.3" },
+  };
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
   const sentStates: DesktopUpdateState[] = [];
@@ -88,7 +92,10 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     setDisableDifferentialDownload: () => options.setDisableDifferentialDownload ?? Effect.void,
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
-    }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
+    }).pipe(
+      Effect.andThen(options.checkForUpdates ?? Effect.void),
+      Effect.map(() => updateCheckResult),
+    ),
     downloadUpdate: Effect.void,
     quitAndInstall: () =>
       Effect.sync(() => {
@@ -259,7 +266,15 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
         0,
       ),
     sentStates,
+    setCheckResult: (isUpdateAvailable: boolean, updateInfo: unknown) => {
+      updateCheckResult = { isUpdateAvailable, updateInfo };
+    },
     emit: (eventName: string, payload?: unknown) => {
+      if (eventName === "update-available") {
+        updateCheckResult = { isUpdateAvailable: true, updateInfo: payload };
+      } else if (eventName === "update-not-available") {
+        updateCheckResult = { isUpdateAvailable: false, updateInfo: payload };
+      }
       for (const listener of listeners.get(eventName) ?? []) {
         listener(payload);
       }
@@ -418,6 +433,38 @@ describe("DesktopUpdates", () => {
         const available = yield* updates.getState;
         assert.equal(available.status, "available");
         assert.equal(available.availableVersion, "1.0.0-beta.2");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("refreshes the available release before downloading", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", {
+          version: "1.2.4",
+          releaseNotes: "- stale release",
+        });
+        yield* flushCallbacks;
+        harness.setCheckResult(true, {
+          version: "1.2.5",
+          releaseNotes: "- current release",
+        });
+
+        const result = yield* updates.download;
+
+        assert.isTrue(result.accepted);
+        assert.isTrue(result.completed);
+        assert.equal(harness.checkCount(), 1);
+        assert.equal(result.state.status, "downloading");
+        assert.equal(result.state.availableVersion, "1.2.5");
+        assert.deepEqual(result.state.releaseNotes, [
+          { version: "1.2.5", items: ["current release"] },
+        ]);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
