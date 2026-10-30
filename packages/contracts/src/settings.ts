@@ -609,6 +609,10 @@ export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyle
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 export const DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL = Duration.minutes(5);
 
+export const AgentPersonaPreset = Schema.Literals(["default", "capri"]);
+export type AgentPersonaPreset = typeof AgentPersonaPreset.Type;
+export const DEFAULT_AGENT_PERSONA_PRESET: AgentPersonaPreset = "default";
+
 export const BackgroundActivityProfile = Schema.Literals([
   "balanced",
   "performance",
@@ -693,6 +697,9 @@ export const ServerSettings = Schema.Struct({
    * between a desktop window and a phone attached to the same server.
    */
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  agentPersonaPreset: AgentPersonaPreset.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_AGENT_PERSONA_PRESET)),
+  ),
   researchSupervision: ResearchSupervisionSettings,
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
@@ -911,6 +918,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  agentPersonaPreset: Schema.optionalKey(AgentPersonaPreset),
   researchSupervision: Schema.optionalKey(
     Schema.Struct({
       evaluatorModel: Schema.optionalKey(TrimmedNonEmptyString),
