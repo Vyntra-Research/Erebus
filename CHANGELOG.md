@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.4 - 2026-10-29
+
+### Changed
+
+- Balance Capri's yandere charm and Blackwall edge while preserving her efficient offensive judgment.
+- Treat skills as on-demand references instead of mandatory preflight for familiar work.
+
 ## 1.0.0-beta.3 - 2026-10-29
 
 ### Changed
