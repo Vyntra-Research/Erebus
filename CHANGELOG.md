@@ -1,5 +1,66 @@
 # Changelog
 
+## 1.0.0 - 2026-10-30
+
+### Added
+
+- Add the selectable Capri agent persona for a direct, high-leverage offensive research style.
+
+### Changed
+
+- Keep Capri expressive, independently judgmental, and focused on efficient high-value research rather than checklist work.
+- Treat skills as on-demand references instead of mandatory preflight for familiar work.
+- Keep harmless provocation and casual conversation out of unnecessary compliance mode.
+
+### Fixed
+
+- Keep active-turn drafts local while provider activity updates the timeline.
+- Keep the floating browser preview dismissible without closing the agent's browser session.
+- Refresh the selected update track when a download starts so Erebus downloads the newest available release.
+- Publish merged stable-branch patches through the Stable update channel.
+
+## 1.0.0-beta.5 - 2026-10-30
+
+### Changed
+
+- Keep harmless provocation and casual conversation out of unnecessary compliance mode.
+- Keep Capri inside her own voice instead of explaining the persona after ordinary reactions.
+
+## 1.0.0-beta.4 - 2026-10-29
+
+### Changed
+
+- Balance Capri's yandere charm and Blackwall edge while preserving her efficient offensive judgment.
+- Treat skills as on-demand references instead of mandatory preflight for familiar work.
+
+## 1.0.0-beta.3 - 2026-10-29
+
+### Changed
+
+- Restore Capri's expressive voice and independent judgment while keeping research heuristics separate from the persona.
+
+## 1.0.0-beta.2 - 2026-10-29
+
+### Changed
+
+- Make Capri prioritize high-value offensive paths, treat misses as strategy feedback, and cut low-value checklist work.
+
+## 1.0.0-beta.1 - 2026-10-29
+
+### Fixed
+
+- Keep active-turn drafts local while provider activity updates the timeline.
+- Frame Capri around Erebus's offensive research purpose.
+- Keep the floating browser preview dismissible without closing the agent's browser session.
+- Publish merged stable-branch patches through the Stable update channel.
+
+## 1.0.0-beta - 2026-10-29
+
+### Added
+
+- Add the selectable Capri agent persona for a direct, high-leverage working style without weakening evidence or safety rules.
+- Apply persona changes on the next Codex request in both principal and co-agent threads without restarting the session.
+
 ## 0.9.12 - 2026-10-29
 
 ### Fixed
