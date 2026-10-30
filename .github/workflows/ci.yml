@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - stable
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
