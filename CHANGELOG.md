@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-11-06
+
+### Changed
+
+- Keep Capri charismatic and unfiltered without making flirtation or innuendo her default voice.
+
 ## 1.0.0 - 2026-10-30
 
 ### Added
