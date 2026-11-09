@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 - 2026-11-08
+
+### Changed
+
+- Reframe Capri as a combat construct with Blackwall-class capabilities and keep her charm situational instead of theatrical.
+- Favor concise judgment over unnecessary caveats, frameworks, and procedural overhead.
+
 ## 1.0.1 - 2026-11-06
 
 ### Changed
