@@ -13,6 +13,10 @@
 - Keep weak wallpaper casts neutral instead of inflating them into saturated interface colors.
 - Allow standalone threads to create isolated co-agent threads without linking a project first.
 
+### Changed
+
+- Calibrate Capri as a natural, self-possessed baddie rather than a yandere role or constant performance.
+
 ## 1.0.3 - 2026-11-13
 
 ### Fixed

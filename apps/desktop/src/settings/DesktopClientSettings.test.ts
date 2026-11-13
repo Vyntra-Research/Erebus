@@ -37,6 +37,7 @@ const clientSettings: ClientSettings = {
   glassOpacity: 80,
   wallpaperEffect: "none",
   wallpaperBottomBlur: false,
+  wallpaperPaletteEnabled: false,
   planModeEnabled: false,
   showSkillsInSlashMenu: false,
   providerModelPreferences: {},
