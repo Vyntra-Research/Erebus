@@ -2022,6 +2022,7 @@ body {
   position: fixed;
   z-index: -1;
   inset: 0;
+  right: calc(0px - var(--desktop-window-right-resize-inset));
   overflow: hidden;
   pointer-events: none;
   background: #000;
@@ -2037,9 +2038,21 @@ body {
 
 .app-wallpaper__bottom-blur {
   inset: -4%;
-  filter: blur(30px);
-  mask-image: linear-gradient(to bottom, transparent 44%, rgb(0 0 0 / 20%) 56%, black 84%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 44%, rgb(0 0 0 / 20%) 56%, black 84%);
+  filter: blur(36px);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 28%,
+    rgb(0 0 0 / 18%) 40%,
+    rgb(0 0 0 / 55%) 58%,
+    black 80%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 28%,
+    rgb(0 0 0 / 18%) 40%,
+    rgb(0 0 0 / 55%) 58%,
+    black 80%
+  );
 }
 
 .app-wallpaper__dither {
