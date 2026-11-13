@@ -14,6 +14,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -34,6 +35,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as StorageMaintenance from "./diagnostics/StorageMaintenance.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReaper.ts";
@@ -445,6 +447,25 @@ export const make = (options?: StartupOptions) =>
       );
 
       yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
+      yield* forkParked(
+        Effect.repeat(
+          StorageMaintenance.pruneExpiredInactiveSubagents({
+            stateDir: serverConfig.stateDir,
+            databasePath: serverConfig.dbPath,
+          }).pipe(
+            Effect.tap((result) =>
+              result.deletedCount > 0
+                ? Effect.logInfo("pruned expired Codex sub-agent sessions", {
+                    deletedCount: result.deletedCount,
+                    deletedBytes: result.deletedBytes,
+                  })
+                : Effect.void,
+            ),
+            Effect.ignoreCause({ log: true }),
+          ),
+          Schedule.spaced("24 hours"),
+        ),
+      );
 
       const welcomeBase = yield* resolveWelcomeBase;
       const environment = yield* serverEnvironment.getDescriptor;

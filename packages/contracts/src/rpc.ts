@@ -190,6 +190,8 @@ import {
   ServerDeleteInactiveSubagentsResult,
   ServerDeleteRecoverySnapshotsInput,
   ServerDeleteRecoverySnapshotsResult,
+  ServerCompactStorageInput,
+  ServerCompactStorageResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
   ServerSignalProcessInput,
@@ -318,6 +320,7 @@ export const WS_METHODS = {
   serverGetStorageDiagnostics: "server.getStorageDiagnostics",
   serverDeleteInactiveSubagents: "server.deleteInactiveSubagents",
   serverDeleteRecoverySnapshots: "server.deleteRecoverySnapshots",
+  serverCompactStorage: "server.compactStorage",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverGetResourceTelemetryHistory: "server.getResourceTelemetryHistory",
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
@@ -550,6 +553,12 @@ export const WsServerDeleteRecoverySnapshotsRpc = Rpc.make(
     error: EnvironmentAuthorizationError,
   },
 );
+
+export const WsServerCompactStorageRpc = Rpc.make(WS_METHODS.serverCompactStorage, {
+  payload: ServerCompactStorageInput,
+  success: ServerCompactStorageResult,
+  error: EnvironmentAuthorizationError,
+});
 
 export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
   WS_METHODS.serverGetProcessResourceHistory,
@@ -1216,6 +1225,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetStorageDiagnosticsRpc,
   WsServerDeleteInactiveSubagentsRpc,
   WsServerDeleteRecoverySnapshotsRpc,
+  WsServerCompactStorageRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,

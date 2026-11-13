@@ -50,6 +50,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetStorageDiagnostics]: AuthOrchestrationReadScope,
   [WS_METHODS.serverDeleteInactiveSubagents]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverDeleteRecoverySnapshots]: AuthOrchestrationOperateScope,
+  [WS_METHODS.serverCompactStorage]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverGetProcessResourceHistory]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetResourceTelemetryHistory]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRetryResourceTelemetry]: AuthOrchestrationOperateScope,
