@@ -4,7 +4,7 @@ import type * as Effect from "effect/Effect";
 import type * as CodexSchema from "effect-codex-app-server/schema";
 
 export interface CoagentToolContext {
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectId | null;
   readonly threadId: ThreadId;
   readonly cwd: string;
 }

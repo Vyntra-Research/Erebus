@@ -60,7 +60,11 @@ const parseResponse = (value: { readonly contentItems: ReadonlyArray<unknown> })
 
 const call = (
   controller: CoagentToolControllerShape,
-  context: { readonly threadId: ThreadId; readonly projectId: ProjectId; readonly cwd: string },
+  context: {
+    readonly threadId: ThreadId;
+    readonly projectId: ProjectId | null;
+    readonly cwd: string;
+  },
   tool: string,
   args: unknown,
 ) =>
@@ -132,7 +136,72 @@ const seedParent = (suffix: string) =>
     } as const;
   });
 
+const seedStandaloneParent = (suffix: string) =>
+  Effect.gen(function* () {
+    const parentThreadId = ThreadId.make(`coagent-standalone-parent-${suffix}`);
+    const engine = yield* OrchestrationEngineService;
+    yield* engine.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make(`create-coagent-standalone-parent-${suffix}`),
+      threadId: parentThreadId,
+      projectId: null,
+      title: "Standalone parent task",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: now,
+    });
+    yield* awaitThread(parentThreadId);
+    return {
+      projectId: null,
+      parentThreadId,
+      threadId: parentThreadId,
+      cwd: process.cwd(),
+    } as const;
+  });
+
 layer("CoagentToolController", (it) => {
+  it.effect("creates isolated co-agents from a standalone parent", () =>
+    Effect.gen(function* () {
+      const context = yield* seedStandaloneParent("inheritance");
+      const unrelated = yield* seedStandaloneParent("unrelated");
+      const controller = yield* CoagentToolController;
+      assert(controller);
+
+      const spawned = yield* call(controller, context, "spawn", {
+        mode: "blank",
+        title: "Standalone child",
+        task: "Return one bounded standalone result.",
+      });
+      assert.isTrue(spawned.success);
+      const childThreadId = ThreadId.make(String(parseResponse(spawned).threadId));
+      const child = yield* awaitThread(childThreadId);
+      assert.isNull(child.projectId);
+      assert.isNull(child.worktreePath);
+
+      const registry = yield* CoagentRegistry;
+      const link = Option.getOrThrow(yield* registry.getByChild(childThreadId));
+      assert.isNull(link.projectId);
+      assert.strictEqual(link.parentThreadId, context.parentThreadId);
+
+      const listed = yield* call(controller, context, "list", { scope: "project" });
+      assert.isTrue(listed.success);
+      const taskIds = (
+        parseResponse(listed).tasks as ReadonlyArray<{ readonly threadId: string }>
+      ).map((task) => task.threadId);
+      assert.include(taskIds, context.threadId);
+      assert.include(taskIds, childThreadId);
+      assert.notInclude(taskIds, unrelated.threadId);
+
+      const unrelatedRead = yield* call(controller, context, "read", {
+        threadId: unrelated.threadId,
+      });
+      assert.isFalse(unrelatedRead.success);
+    }),
+  );
+
   it.effect("creates one durable child with inherited execution settings", () =>
     Effect.gen(function* () {
       const context = yield* seedParent("inheritance");

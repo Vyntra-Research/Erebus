@@ -18,6 +18,8 @@ Proteus is legacy history in current Erebus releases. The managed plugin exposes
 
 Native provider subagents help with parallel work inside one bounded task. Erebus co-agent tasks cover separate horizontal sinks or surfaces. The principal assigns a distinct surface, checks progress, collects the handback, and releases the task when it is done.
 
+Linked threads keep co-agents in the same project. Standalone threads can also create co-agents; those children remain isolated from other standalone threads.
+
 A co-agent receives the same research rules, but it does not own the principal's goal and cannot submit a finding to the Judge. It returns evidence and artifact paths to the principal.
 
 ## Judge handoff

@@ -1,0 +1,60 @@
+import { useEffect } from "react";
+import { createPortal } from "react-dom";
+
+import { useClientSettings } from "~/hooks/useSettings";
+import { syncBrowserChromeTheme, useTheme } from "~/hooks/useTheme";
+import { applyWallpaperThemeColors, clearWallpaperThemeColors } from "~/themePalette";
+import { useWallpaperPalette } from "~/wallpaperPalette";
+import { useWallpaperAsset } from "~/wallpaperStore";
+import { DitheredWallpaperCanvas } from "./DitheredWallpaperCanvas";
+
+export function WallpaperBackdrop() {
+  const wallpaper = useWallpaperAsset();
+  const effect = useClientSettings((settings) => settings.wallpaperEffect);
+  const bottomBlur = useClientSettings((settings) => settings.wallpaperBottomBlur);
+  const paletteEnabled = useClientSettings((settings) => settings.wallpaperPaletteEnabled);
+  const { refreshTheme, resolvedTheme } = useTheme();
+  const generatedPalette = useWallpaperPalette(wallpaper.url, resolvedTheme);
+  const active = wallpaper.url !== null;
+
+  useEffect(() => {
+    clearWallpaperThemeColors();
+    if (!active || !paletteEnabled || generatedPalette.status !== "ready") {
+      refreshTheme();
+      return;
+    }
+
+    applyWallpaperThemeColors(generatedPalette.palette.colors, resolvedTheme);
+    syncBrowserChromeTheme();
+    return clearWallpaperThemeColors;
+  }, [active, generatedPalette, paletteEnabled, refreshTheme, resolvedTheme]);
+
+  useEffect(() => {
+    if (active) {
+      document.documentElement.dataset.wallpaper = "true";
+      document.documentElement.dataset.wallpaperEffect = effect;
+    } else {
+      delete document.documentElement.dataset.wallpaper;
+      delete document.documentElement.dataset.wallpaperEffect;
+    }
+    return () => {
+      delete document.documentElement.dataset.wallpaper;
+      delete document.documentElement.dataset.wallpaperEffect;
+    };
+  }, [active, effect]);
+
+  if (!wallpaper.url) return null;
+  const imageStyle = { backgroundImage: `url(${JSON.stringify(wallpaper.url)})` };
+
+  return createPortal(
+    <div aria-hidden className="app-wallpaper" data-effect={effect}>
+      <div className="app-wallpaper__image" style={imageStyle} />
+      {effect === "dither" ? <DitheredWallpaperCanvas url={wallpaper.url} /> : null}
+      {bottomBlur ? (
+        <div className="app-wallpaper__image app-wallpaper__bottom-blur" style={imageStyle} />
+      ) : null}
+      {effect === "dots" ? <div className="app-wallpaper__effect" /> : null}
+    </div>,
+    document.body,
+  );
+}

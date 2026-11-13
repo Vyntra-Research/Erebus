@@ -76,6 +76,10 @@ export const GlassOpacity = Schema.Int.check(
 export type GlassOpacity = typeof GlassOpacity.Type;
 export const DEFAULT_GLASS_OPACITY: GlassOpacity = 80;
 
+export const WallpaperEffect = Schema.Literals(["none", "dither", "dots"]);
+export type WallpaperEffect = typeof WallpaperEffect.Type;
+export const DEFAULT_WALLPAPER_EFFECT: WallpaperEffect = "none";
+
 export const MIN_APPEARANCE_CONTRAST = 50;
 export const MAX_APPEARANCE_CONTRAST = 200;
 export const AppearanceContrast = Schema.Int.check(
@@ -177,6 +181,11 @@ export const ClientSettingsSchema = Schema.Struct({
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
   ),
+  wallpaperEffect: WallpaperEffect.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_WALLPAPER_EFFECT)),
+  ),
+  wallpaperBottomBlur: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  wallpaperPaletteEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   fontSizeInterface: InterfaceFontSize.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_INTERFACE_FONT_SIZE)),
   ),
@@ -991,6 +1000,9 @@ export const ClientSettingsPatch = Schema.Struct({
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),
   glassOpacity: Schema.optionalKey(GlassOpacity),
+  wallpaperEffect: Schema.optionalKey(WallpaperEffect),
+  wallpaperBottomBlur: Schema.optionalKey(Schema.Boolean),
+  wallpaperPaletteEnabled: Schema.optionalKey(Schema.Boolean),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
   fontSizePrompt: Schema.optionalKey(PromptFontSize),
   fontSizeCode: Schema.optionalKey(CodeFontSize),

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.0 - 2026-11-13
+
+### Added
+
+- Choose a device-local wallpaper and apply dither, dot-screen, or progressive bottom-blur effects.
+- Generate a readable interface palette from the active wallpaper.
+- Keep the existing glass opacity control active across the interface when a wallpaper is visible.
+
+### Fixed
+
+- Keep weak wallpaper casts neutral instead of inflating them into saturated interface colors.
+- Allow standalone threads to create isolated co-agent threads without linking a project first.
+
+### Changed
+
+- Calibrate Capri as a natural, self-possessed baddie rather than a yandere role or constant performance.
+
 ## 1.0.3 - 2026-11-13
 
 ### Fixed

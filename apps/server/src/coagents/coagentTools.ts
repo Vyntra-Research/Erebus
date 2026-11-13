@@ -23,12 +23,13 @@ export const EREBUS_THREADS_DYNAMIC_TOOL = {
       type: "function",
       name: "list",
       description:
-        "List either this task's direct co-agents or the active tasks in the same Erebus project.",
+        "List either this task's direct co-agents or its active coordination scope. Linked tasks use their Erebus project; standalone tasks expose only themselves and their direct co-agents.",
       inputSchema: objectSchema(
         {
           scope: {
             enum: ["children", "project"],
-            description: "children lists managed co-agents; project lists active peer tasks.",
+            description:
+              "children lists managed co-agents; project lists active project peers for a linked task or only the standalone task and its direct children.",
           },
         },
         ["scope"],
@@ -38,7 +39,7 @@ export const EREBUS_THREADS_DYNAMIC_TOOL = {
       type: "function",
       name: "read",
       description:
-        "Read a bounded recent transcript from an active task in the same project. Use this for coordination, not bulk context copying.",
+        "Read a bounded recent transcript from an allowed task in the same coordination scope. Use this for coordination, not bulk context copying.",
       inputSchema: objectSchema(
         {
           threadId,
@@ -56,7 +57,7 @@ export const EREBUS_THREADS_DYNAMIC_TOOL = {
       type: "function",
       name: "spawn",
       description:
-        "Create one direct co-agent task and start its bounded assignment. blank starts with only the assignment and coordination contract; fork also includes a bounded copy of recent completed parent context. The child inherits project, workspace, model, effort/runtime, interaction mode, and Erebus integrations. At most four direct co-agents may exist for one parent.",
+        "Create one direct co-agent task and start its bounded assignment. blank starts with only the assignment and coordination contract; fork also includes a bounded copy of recent completed parent context. The child inherits the parent's linked project when present, standalone state otherwise, plus workspace, model, effort/runtime, interaction mode, and Erebus integrations. At most four direct co-agents may exist for one parent.",
       inputSchema: objectSchema(
         {
           mode: {
@@ -82,7 +83,7 @@ export const EREBUS_THREADS_DYNAMIC_TOOL = {
       type: "function",
       name: "send",
       description:
-        "Send an explicit follow-up to another active task in the same project. A co-agent may send only to its parent; a principal may send to project peers or its children.",
+        "Send an explicit follow-up to another active task in the same coordination scope. A co-agent may send only to its parent; a linked principal may send to project peers or its children, while a standalone principal may send only to its children.",
       inputSchema: objectSchema(
         {
           threadId,

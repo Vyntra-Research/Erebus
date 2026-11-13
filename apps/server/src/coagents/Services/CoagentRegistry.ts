@@ -9,7 +9,7 @@ import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 export const CoagentThreadLink = Schema.Struct({
   childThreadId: ThreadId,
   parentThreadId: ThreadId,
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
   assignment: Schema.String,
   creationMode: Schema.Literals(["blank", "fork"]),
   status: Schema.Literals(["preparing", "ready", "failed", "released"]),
