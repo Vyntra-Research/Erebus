@@ -38,6 +38,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
+import type { CoagentToolControllerShape } from "../../coagents/Services/CoagentToolController.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
@@ -370,6 +371,56 @@ validationLayer("CodexAdapterLive validation", (it) => {
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
       });
+    }),
+  );
+});
+
+const standaloneCoagentRuntimeFactory = makeRuntimeFactory();
+const standaloneCoagentController: CoagentToolControllerShape = {
+  instructions: () => Effect.succeed("Standalone co-agent coordination is available."),
+  handle: () =>
+    Effect.succeed({
+      success: true,
+      contentItems: [{ type: "inputText", text: "ok" }],
+    }),
+};
+const standaloneCoagentLayer = it.layer(
+  Layer.effect(
+    CodexAdapter,
+    makeCodexAdapter(decodeCodexSettings({}), {
+      makeRuntime: standaloneCoagentRuntimeFactory.factory,
+      coagentToolController: standaloneCoagentController,
+    }),
+  ).pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ServerSettingsService.layerTest()),
+    Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(NodeServices.layer),
+  ),
+);
+
+standaloneCoagentLayer("CodexAdapterLive standalone co-agents", (it) => {
+  it.effect("exposes co-agent tools without a project", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("standalone-coagent-thread"),
+        runtimeMode: "full-access",
+      });
+
+      const runtime = standaloneCoagentRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      NodeAssert.deepStrictEqual(
+        runtime.options.dynamicTools?.map((tool) => tool.name),
+        ["threads"],
+      );
+      const getAdditionalDeveloperInstructions = runtime.options.getAdditionalDeveloperInstructions;
+      NodeAssert.ok(getAdditionalDeveloperInstructions);
+      NodeAssert.match(
+        yield* getAdditionalDeveloperInstructions(),
+        /standalone co-agent coordination/i,
+      );
     }),
   );
 });

@@ -32,21 +32,21 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
     const resolveToolContext = Effect.fn("ResearchFallbackMcpHttpServer.resolveToolContext")(
       function* (threadId: ThreadIdType) {
         const thread = Option.getOrUndefined(yield* projectionQuery.getThreadShellById(threadId));
-        if (!thread || thread.projectId === null) {
+        if (!thread) {
           return Option.none<{
-            readonly projectId: ProjectIdType;
+            readonly projectId: ProjectIdType | null;
             readonly cwd: string;
           }>();
         }
-        const project = Option.getOrUndefined(
-          yield* projectionQuery.getProjectShellById(thread.projectId),
-        );
-        return project
-          ? Option.some({
-              projectId: thread.projectId,
-              cwd: thread.worktreePath ?? project.workspaceRoot,
-            })
-          : Option.none();
+        const project =
+          thread.projectId === null
+            ? undefined
+            : Option.getOrUndefined(yield* projectionQuery.getProjectShellById(thread.projectId));
+        if (thread.projectId !== null && !project) return Option.none();
+        return Option.some({
+          projectId: thread.projectId,
+          cwd: thread.worktreePath ?? project?.workspaceRoot ?? process.cwd(),
+        });
       },
     );
 
@@ -75,7 +75,7 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
             return resolveToolContext(invocation.threadId).pipe(
               Effect.flatMap((contextOption) => {
                 const threadContext = Option.getOrUndefined(contextOption);
-                if (!threadContext) {
+                if (!threadContext || threadContext.projectId === null) {
                   return Effect.succeed(
                     failureResult(
                       "The Erebus project context for this task could not be resolved.",
@@ -155,9 +155,7 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
                 const threadContext = Option.getOrUndefined(contextOption);
                 if (!threadContext) {
                   return Effect.succeed(
-                    failureResult(
-                      "The Erebus project context for this task could not be resolved.",
-                    ),
+                    failureResult("The Erebus task context for this task could not be resolved."),
                   );
                 }
                 return coagentToolController
