@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.3 - 2026-11-13
+
+### Fixed
+
+- Remove deleted thread history, standalone workspaces, and released co-agent data instead of leaving them on disk.
+- Allow completed Codex subagent sessions to expire even while their main thread remains active.
+- Reclaim deleted rows from Codex history indexes and clear stale internal-browser caches without removing site data.
+
+### Added
+
+- Show reclaimable database space in Diagnostics and compact it safely when no turn is active.
+
 ## 1.0.2 - 2026-11-08
 
 ### Changed

@@ -9,6 +9,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   AuthAccessStreamError,
@@ -437,6 +438,7 @@ const makeWsRpcLayer = (
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const crypto = yield* Crypto.Crypto;
+      const sql = yield* SqlClient.SqlClient;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
       const analytics = yield* AnalyticsService.AnalyticsService;
@@ -1788,6 +1790,16 @@ const makeWsRpcLayer = (
             StorageMaintenance.deleteRecoverySnapshots({
               stateDir: config.stateDir,
               request: input,
+            }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverCompactStorage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverCompactStorage,
+            StorageMaintenance.compactDatabaseStorage({
+              databasePath: config.dbPath,
+              request: input,
+              sql,
             }),
             { "rpc.aggregate": "server" },
           ),

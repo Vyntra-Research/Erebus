@@ -824,6 +824,9 @@ export function DiagnosticsSettingsPanel() {
   const deleteRecoverySnapshots = useAtomCommand(serverEnvironment.deleteRecoverySnapshots, {
     reportFailure: false,
   });
+  const compactStorage = useAtomCommand(serverEnvironment.compactStorage, {
+    reportFailure: false,
+  });
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
   });
@@ -877,6 +880,7 @@ export function DiagnosticsSettingsPanel() {
   const [signalingPid, setSignalingPid] = useState<number | null>(null);
   const [isDeletingSubagents, setIsDeletingSubagents] = useState(false);
   const [isDeletingRecovery, setIsDeletingRecovery] = useState(false);
+  const [isCompactingStorage, setIsCompactingStorage] = useState(false);
   const signalingPidRef = useRef<number | null>(null);
   const environmentIdRef = useRef(environmentId);
   const processDataRef = useRef(processData);
@@ -1092,6 +1096,50 @@ export function DiagnosticsSettingsPanel() {
     }
   }, [deleteRecoverySnapshots, environmentId, isDeletingRecovery, refreshStorage, storageData]);
 
+  const handleCompactStorage = useCallback(async () => {
+    if (
+      environmentId === null ||
+      !storageData ||
+      storageData.reclaimableDatabaseBytes === 0 ||
+      isCompactingStorage
+    ) {
+      return;
+    }
+    const confirmed = await ensureLocalApi().dialogs.confirm(
+      `Compact the local database and reclaim about ${formatBytes(storageData.reclaimableDatabaseBytes)}? Erebus rebuilds the database file, so active turns must finish first.`,
+      { variant: "default" },
+    );
+    if (!confirmed) return;
+    setIsCompactingStorage(true);
+    try {
+      const result = await compactStorage({
+        environmentId,
+        input: { snapshotDigest: storageData.databaseSnapshotDigest },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: "Could not compact storage",
+            description: error instanceof Error ? error.message : "Database compaction failed.",
+          });
+        }
+        return;
+      }
+      toastManager.add({
+        type: result.value.accepted ? "success" : "info",
+        title: result.value.accepted ? "Storage compacted" : "Compaction skipped",
+        description: result.value.accepted
+          ? `${formatBytes(result.value.freedBytes)} returned to disk.`
+          : result.value.message,
+      });
+      refreshStorage();
+    } finally {
+      setIsCompactingStorage(false);
+    }
+  }, [compactStorage, environmentId, isCompactingStorage, refreshStorage, storageData]);
+
   const processDiagnosticsError = processData ? Option.getOrNull(processData.error) : null;
   const processResourceError = resourceData ? Option.getOrNull(resourceData.error) : null;
   const traceDiagnosticsError = data ? Option.getOrNull(data.error) : null;
@@ -1136,7 +1184,8 @@ export function DiagnosticsSettingsPanel() {
             <HardDriveIcon className="mt-0.5 size-3.5 shrink-0" />
             <span>
               Finished sub-agent transcripts stay on disk so a parent task can reuse them. Cleanup
-              excludes active task trees and sessions used in the last ten minutes.
+              excludes active task trees and sessions used in the last ten minutes. Erebus removes
+              finished sessions after seven days.
             </span>
           </div>
           <Button
@@ -1151,6 +1200,38 @@ export function DiagnosticsSettingsPanel() {
           >
             <Trash2Icon className="size-3.5" />
             {isDeletingSubagents ? "Deleting…" : "Delete inactive agents"}
+          </Button>
+        </div>
+        <StatsGrid>
+          <StatBlock
+            label="Local Database"
+            value={storageData ? formatBytes(storageData.databaseBytes) : "..."}
+          />
+          <StatBlock
+            label="Reclaimable"
+            value={storageData ? formatBytes(storageData.reclaimableDatabaseBytes) : "..."}
+          />
+        </StatsGrid>
+        <div className="flex flex-col gap-3 border-t border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex min-w-0 items-start gap-2 text-xs text-muted-foreground">
+            <HardDriveIcon className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              Deleted thread data is removed automatically. Compact storage to return freed database
+              pages to the operating system.
+            </span>
+          </div>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            className="shrink-0"
+            disabled={
+              !storageData || storageData.reclaimableDatabaseBytes === 0 || isCompactingStorage
+            }
+            onClick={() => void handleCompactStorage()}
+          >
+            <HardDriveIcon className="size-3.5" />
+            {isCompactingStorage ? "Compacting…" : "Compact database"}
           </Button>
         </div>
         <StatsGrid>

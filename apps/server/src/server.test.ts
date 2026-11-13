@@ -1021,6 +1021,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(ServerSecretStore.layer),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),

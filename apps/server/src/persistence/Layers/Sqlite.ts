@@ -35,6 +35,9 @@ const setup = Layer.effectDiscard(
     const sql = yield* SqlClient.SqlClient;
     // CLI and server write from separate processes; wait rather than fail with SQLITE_BUSY.
     yield* sql`PRAGMA busy_timeout = 5000;`;
+    // New databases reclaim deleted thread pages incrementally. Existing databases
+    // adopt this setting the next time the user compacts storage.
+    yield* sql`PRAGMA auto_vacuum = INCREMENTAL;`;
     yield* sql`PRAGMA foreign_keys = ON;`;
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* runMigrations();
