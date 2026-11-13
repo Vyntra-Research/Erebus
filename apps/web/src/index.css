@@ -2006,6 +2006,7 @@ body {
 
 #root {
   position: relative;
+  z-index: 1;
   isolation: isolate;
   height: 100%;
   width: 100%;
@@ -2020,9 +2021,8 @@ body {
 
 .app-wallpaper {
   position: fixed;
-  z-index: -1;
+  z-index: 0;
   inset: 0;
-  right: calc(0px - var(--desktop-window-right-resize-inset));
   overflow: hidden;
   pointer-events: none;
   background: #000;

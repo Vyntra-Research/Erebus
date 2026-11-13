@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 import { useClientSettings } from "~/hooks/useSettings";
 import { useWallpaperAsset } from "~/wallpaperStore";
@@ -27,7 +28,7 @@ export function WallpaperBackdrop() {
   if (!wallpaper.url) return null;
   const imageStyle = { backgroundImage: `url(${JSON.stringify(wallpaper.url)})` };
 
-  return (
+  return createPortal(
     <div aria-hidden className="app-wallpaper" data-effect={effect}>
       <div className="app-wallpaper__image" style={imageStyle} />
       {effect === "dither" ? <DitheredWallpaperCanvas url={wallpaper.url} /> : null}
@@ -35,6 +36,7 @@ export function WallpaperBackdrop() {
         <div className="app-wallpaper__image app-wallpaper__bottom-blur" style={imageStyle} />
       ) : null}
       {effect === "dots" ? <div className="app-wallpaper__effect" /> : null}
-    </div>
+    </div>,
+    document.body,
   );
 }
