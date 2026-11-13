@@ -2036,26 +2036,22 @@ body {
 }
 
 .app-wallpaper__bottom-blur {
-  inset: -3%;
-  filter: blur(18px);
-  mask-image: linear-gradient(to bottom, transparent 55%, rgb(0 0 0 / 18%) 68%, black 90%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 55%, rgb(0 0 0 / 18%) 68%, black 90%);
+  inset: -4%;
+  filter: blur(30px);
+  mask-image: linear-gradient(to bottom, transparent 44%, rgb(0 0 0 / 20%) 56%, black 84%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 44%, rgb(0 0 0 / 20%) 56%, black 84%);
+}
+
+.app-wallpaper__dither {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .app-wallpaper__effect {
   position: absolute;
   inset: 0;
-}
-
-.app-wallpaper[data-effect="dither"] .app-wallpaper__image:not(.app-wallpaper__bottom-blur) {
-  filter: contrast(1.08) saturate(0.92);
-}
-
-.app-wallpaper[data-effect="dither"] .app-wallpaper__effect {
-  background-image: repeating-conic-gradient(from 45deg, rgb(0 0 0 / 52%) 0 25%, transparent 0 50%);
-  background-size: 4px 4px;
-  mix-blend-mode: multiply;
-  opacity: 0.58;
 }
 
 .app-wallpaper[data-effect="dots"] .app-wallpaper__effect {

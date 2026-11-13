@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { useClientSettings } from "~/hooks/useSettings";
 import { useWallpaperAsset } from "~/wallpaperStore";
+import { DitheredWallpaperCanvas } from "./DitheredWallpaperCanvas";
 
 export function WallpaperBackdrop() {
   const wallpaper = useWallpaperAsset();
@@ -29,10 +30,11 @@ export function WallpaperBackdrop() {
   return (
     <div aria-hidden className="app-wallpaper" data-effect={effect}>
       <div className="app-wallpaper__image" style={imageStyle} />
+      {effect === "dither" ? <DitheredWallpaperCanvas url={wallpaper.url} /> : null}
       {bottomBlur ? (
         <div className="app-wallpaper__image app-wallpaper__bottom-blur" style={imageStyle} />
       ) : null}
-      {effect === "none" ? null : <div className="app-wallpaper__effect" />}
+      {effect === "dots" ? <div className="app-wallpaper__effect" /> : null}
     </div>
   );
 }
