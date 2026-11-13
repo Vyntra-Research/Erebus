@@ -2038,8 +2038,8 @@ body {
 .app-wallpaper__bottom-blur {
   inset: -3%;
   filter: blur(18px);
-  mask-image: linear-gradient(to bottom, transparent 32%, rgb(0 0 0 / 18%) 52%, black 84%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 32%, rgb(0 0 0 / 18%) 52%, black 84%);
+  mask-image: linear-gradient(to bottom, transparent 55%, rgb(0 0 0 / 18%) 68%, black 90%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 55%, rgb(0 0 0 / 18%) 68%, black 90%);
 }
 
 .app-wallpaper__effect {
@@ -2108,8 +2108,7 @@ html[data-wallpaper="true"] [data-slot="workspace-page-header"] {
   background-color: transparent;
 }
 
-html[data-wallpaper="true"] [data-slot="sidebar-inner"],
-html[data-wallpaper="true"] [data-slot="sidebar-inset"] {
+html[data-wallpaper="true"] [data-slot="sidebar-inner"] {
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
 }
@@ -2147,6 +2146,14 @@ html.electron-translucent [data-slot="sidebar-inner"],
 html.electron-translucent [data-slot="sidebar-inset"] {
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+}
+
+/* The main inset spans the whole workspace. Blurring it would pre-blur the
+   wallpaper before its selected texture is drawn, making every effect look
+   alike. Individual glass surfaces still own their backdrop filters. */
+html[data-wallpaper="true"] [data-slot="sidebar-inset"] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 /* App-chrome grain. Baked into each surface's own background (behind
