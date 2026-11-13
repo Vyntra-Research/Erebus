@@ -4,6 +4,8 @@ import { useCallback, useRef, useState } from "react";
 import { DEFAULT_WALLPAPER_EFFECT, type WallpaperEffect } from "@t3tools/contracts/settings";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
+import { useTheme } from "~/hooks/useTheme";
+import { useWallpaperPalette } from "~/wallpaperPalette";
 import { clearWallpaperAsset, setWallpaperAsset, useWallpaperAsset } from "~/wallpaperStore";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -32,6 +34,8 @@ export function WallpaperSettingsRows() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const wallpaper = useWallpaperAsset();
+  const { resolvedTheme } = useTheme();
+  const generatedPalette = useWallpaperPalette(wallpaper.url, resolvedTheme);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
   const hasWallpaper = wallpaper.url !== null;
@@ -109,6 +113,45 @@ export function WallpaperSettingsRows() {
                 <Trash2Icon />
               </Button>
             ) : null}
+          </div>
+        }
+      />
+
+      <SettingsRow
+        {...searchableSetting("wallpaper-palette")}
+        description="Tint the interface with colors extracted from the current wallpaper."
+        status={
+          settings.wallpaperPaletteEnabled && generatedPalette.status === "loading"
+            ? "Generating colors…"
+            : generatedPalette.status === "error"
+              ? generatedPalette.error
+              : undefined
+        }
+        control={
+          <div className="flex items-center gap-3">
+            {generatedPalette.status === "ready" ? (
+              <div
+                aria-label="Generated wallpaper colors"
+                className="flex overflow-hidden rounded-full border"
+              >
+                {generatedPalette.palette.swatches.map((color) => (
+                  <span
+                    aria-hidden
+                    className="h-4 w-4"
+                    key={color}
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            ) : null}
+            <Switch
+              aria-label="Use wallpaper colors"
+              checked={settings.wallpaperPaletteEnabled}
+              disabled={!hasWallpaper}
+              onCheckedChange={(checked) =>
+                updateSettings({ wallpaperPaletteEnabled: Boolean(checked) })
+              }
+            />
           </div>
         }
       />

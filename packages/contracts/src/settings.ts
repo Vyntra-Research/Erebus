@@ -185,6 +185,7 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_WALLPAPER_EFFECT)),
   ),
   wallpaperBottomBlur: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  wallpaperPaletteEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   fontSizeInterface: InterfaceFontSize.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_INTERFACE_FONT_SIZE)),
   ),
@@ -1001,6 +1002,7 @@ export const ClientSettingsPatch = Schema.Struct({
   glassOpacity: Schema.optionalKey(GlassOpacity),
   wallpaperEffect: Schema.optionalKey(WallpaperEffect),
   wallpaperBottomBlur: Schema.optionalKey(Schema.Boolean),
+  wallpaperPaletteEnabled: Schema.optionalKey(Schema.Boolean),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
   fontSizePrompt: Schema.optionalKey(PromptFontSize),
   fontSizeCode: Schema.optionalKey(CodeFontSize),

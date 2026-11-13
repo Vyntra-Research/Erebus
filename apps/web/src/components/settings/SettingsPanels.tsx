@@ -659,6 +659,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.wallpaperBottomBlur !== DEFAULT_UNIFIED_SETTINGS.wallpaperBottomBlur
         ? ["Wallpaper bottom blur"]
         : []),
+      ...(settings.wallpaperPaletteEnabled !== DEFAULT_UNIFIED_SETTINGS.wallpaperPaletteEnabled
+        ? ["Wallpaper colors"]
+        : []),
       ...(settings.environmentIdentificationMode !==
       DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
         ? ["Environment identification"]
@@ -750,6 +753,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.glassOpacity,
       settings.wallpaperEffect,
       settings.wallpaperBottomBlur,
+      settings.wallpaperPaletteEnabled,
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
       settings.sidebarAutoSettleAfterDays,
@@ -837,6 +841,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       wallpaperEffect: DEFAULT_UNIFIED_SETTINGS.wallpaperEffect,
       wallpaperBottomBlur: DEFAULT_UNIFIED_SETTINGS.wallpaperBottomBlur,
+      wallpaperPaletteEnabled: DEFAULT_UNIFIED_SETTINGS.wallpaperPaletteEnabled,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,

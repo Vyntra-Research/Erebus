@@ -49,6 +49,7 @@ describe("searchSettings", () => {
     expect(searchSettings("wallpaper").map((item) => item.id)).toEqual([
       "wallpaper",
       "wallpaper-effect",
+      "wallpaper-palette",
       "wallpaper-bottom-blur",
     ]);
     expect(searchSettings("xyzzy")).toEqual([]);

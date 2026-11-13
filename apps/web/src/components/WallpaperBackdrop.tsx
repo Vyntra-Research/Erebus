@@ -2,6 +2,9 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 import { useClientSettings } from "~/hooks/useSettings";
+import { syncBrowserChromeTheme, useTheme } from "~/hooks/useTheme";
+import { applyWallpaperThemeColors, clearWallpaperThemeColors } from "~/themePalette";
+import { useWallpaperPalette } from "~/wallpaperPalette";
 import { useWallpaperAsset } from "~/wallpaperStore";
 import { DitheredWallpaperCanvas } from "./DitheredWallpaperCanvas";
 
@@ -9,7 +12,22 @@ export function WallpaperBackdrop() {
   const wallpaper = useWallpaperAsset();
   const effect = useClientSettings((settings) => settings.wallpaperEffect);
   const bottomBlur = useClientSettings((settings) => settings.wallpaperBottomBlur);
+  const paletteEnabled = useClientSettings((settings) => settings.wallpaperPaletteEnabled);
+  const { refreshTheme, resolvedTheme } = useTheme();
+  const generatedPalette = useWallpaperPalette(wallpaper.url, resolvedTheme);
   const active = wallpaper.url !== null;
+
+  useEffect(() => {
+    clearWallpaperThemeColors();
+    if (!active || !paletteEnabled || generatedPalette.status !== "ready") {
+      refreshTheme();
+      return;
+    }
+
+    applyWallpaperThemeColors(generatedPalette.palette.colors, resolvedTheme);
+    syncBrowserChromeTheme();
+    return clearWallpaperThemeColors;
+  }, [active, generatedPalette, paletteEnabled, refreshTheme, resolvedTheme]);
 
   useEffect(() => {
     if (active) {

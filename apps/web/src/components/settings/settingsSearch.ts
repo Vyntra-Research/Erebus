@@ -92,6 +92,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "wallpaper-palette",
+    title: "Wallpaper colors",
+    to: "/settings/appearance",
+  },
+  {
     id: "wallpaper-bottom-blur",
     title: "Wallpaper bottom blur",
     to: "/settings/appearance",

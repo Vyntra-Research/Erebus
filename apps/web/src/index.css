@@ -2124,8 +2124,38 @@ html[data-wallpaper="true"] [data-slot="sidebar-inner"] {
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
 }
 
+html[data-wallpaper="true"] [data-chat-message-surface] {
+  background-color: color-mix(in srgb, var(--app-theme-canvas, var(--background)) 88%, transparent);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 10%);
+  -webkit-backdrop-filter: blur(16px) saturate(112%);
+  backdrop-filter: blur(16px) saturate(112%);
+}
+
+html[data-wallpaper="true"] [data-chat-message-surface="assistant"] {
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 1rem;
+  padding: 0.75rem;
+}
+
+html[data-wallpaper="true"] [data-chat-message-surface="user"] {
+  background-color: color-mix(
+    in oklab,
+    var(--app-theme-canvas, var(--background)) 88%,
+    var(--foreground) 12%
+  );
+}
+
+html[data-wallpaper="true"][data-theme-id="__wallpaper"] .chat-composer-glass-shell {
+  --chat-composer-glass-surface: var(--app-theme-canvas);
+}
+
 .electron-windows {
   --desktop-window-right-resize-inset: 6px;
+}
+
+html[data-wallpaper="true"].electron-windows {
+  --desktop-window-right-resize-inset: 0px;
 }
 
 html.electron-translucent[data-theme-id]:not([data-theme-id=""]) {

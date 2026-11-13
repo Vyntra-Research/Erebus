@@ -83,10 +83,17 @@ describe("ClientSettings glass opacity", () => {
 });
 
 describe("ClientSettings wallpaper", () => {
-  it("defaults to an unfiltered wallpaper without bottom blur", () => {
+  it("defaults to an unfiltered wallpaper without bottom blur or palette", () => {
     const settings = decodeClientSettings({});
     expect(settings.wallpaperEffect).toBe("none");
     expect(settings.wallpaperBottomBlur).toBe(false);
+    expect(settings.wallpaperPaletteEnabled).toBe(false);
+  });
+
+  it("accepts wallpaper palette generation", () => {
+    expect(
+      decodeClientSettingsPatch({ wallpaperPaletteEnabled: true }).wallpaperPaletteEnabled,
+    ).toBe(true);
   });
 
   it.each(["none", "dither", "dots"] as const)("accepts the %s effect", (wallpaperEffect) => {
