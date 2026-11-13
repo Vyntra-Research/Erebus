@@ -161,6 +161,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { WallpaperSettingsRows } from "./WallpaperSettings";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -652,6 +653,12 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Contrast"]
         : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
+      ...(settings.wallpaperEffect !== DEFAULT_UNIFIED_SETTINGS.wallpaperEffect
+        ? ["Wallpaper effect"]
+        : []),
+      ...(settings.wallpaperBottomBlur !== DEFAULT_UNIFIED_SETTINGS.wallpaperBottomBlur
+        ? ["Wallpaper bottom blur"]
+        : []),
       ...(settings.environmentIdentificationMode !==
       DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
         ? ["Environment identification"]
@@ -741,6 +748,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.fontSizePrompt,
       settings.fontSizeTerminal,
       settings.glassOpacity,
+      settings.wallpaperEffect,
+      settings.wallpaperBottomBlur,
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
       settings.sidebarAutoSettleAfterDays,
@@ -826,6 +835,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
+      wallpaperEffect: DEFAULT_UNIFIED_SETTINGS.wallpaperEffect,
+      wallpaperBottomBlur: DEFAULT_UNIFIED_SETTINGS.wallpaperBottomBlur,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
@@ -1289,6 +1300,8 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+
+        <WallpaperSettingsRows />
 
         {showEnvironmentIdentification ? (
           <SettingsRow

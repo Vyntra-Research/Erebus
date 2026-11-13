@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0 - 2026-11-13
+
+### Added
+
+- Choose a device-local wallpaper and apply dither, dot-screen, or progressive bottom-blur effects.
+- Keep the existing glass opacity control active across the interface when a wallpaper is visible.
+
 ## 1.0.3 - 2026-11-13
 
 ### Fixed

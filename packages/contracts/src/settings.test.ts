@@ -82,6 +82,22 @@ describe("ClientSettings glass opacity", () => {
   });
 });
 
+describe("ClientSettings wallpaper", () => {
+  it("defaults to an unfiltered wallpaper without bottom blur", () => {
+    const settings = decodeClientSettings({});
+    expect(settings.wallpaperEffect).toBe("none");
+    expect(settings.wallpaperBottomBlur).toBe(false);
+  });
+
+  it.each(["none", "dither", "dots"] as const)("accepts the %s effect", (wallpaperEffect) => {
+    expect(decodeClientSettingsPatch({ wallpaperEffect }).wallpaperEffect).toBe(wallpaperEffect);
+  });
+
+  it("rejects unsupported effects", () => {
+    expect(() => decodeClientSettingsPatch({ wallpaperEffect: "noise" })).toThrow();
+  });
+});
+
 describe("ClientSettings appearance contrast", () => {
   it("defaults to the theme's original contrast", () => {
     expect(decodeClientSettings({}).appearanceContrast).toBe(100);
