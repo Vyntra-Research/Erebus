@@ -2038,20 +2038,22 @@ body {
 
 .app-wallpaper__bottom-blur {
   inset: -4%;
-  filter: blur(36px);
+  filter: blur(42px);
   mask-image: linear-gradient(
     to bottom,
-    transparent 28%,
-    rgb(0 0 0 / 18%) 40%,
-    rgb(0 0 0 / 55%) 58%,
-    black 80%
+    transparent 18%,
+    rgb(0 0 0 / 20%) 28%,
+    rgb(0 0 0 / 55%) 42%,
+    rgb(0 0 0 / 82%) 56%,
+    black 72%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
-    transparent 28%,
-    rgb(0 0 0 / 18%) 40%,
-    rgb(0 0 0 / 55%) 58%,
-    black 80%
+    transparent 18%,
+    rgb(0 0 0 / 20%) 28%,
+    rgb(0 0 0 / 55%) 42%,
+    rgb(0 0 0 / 82%) 56%,
+    black 72%
   );
 }
 
