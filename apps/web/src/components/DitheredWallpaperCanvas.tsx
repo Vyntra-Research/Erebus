@@ -174,7 +174,7 @@ export function DitheredWallpaperCanvas({ url }: { readonly url: string }) {
       );
       context.uniform2f(imageSizeLocation, image.naturalWidth, image.naturalHeight);
       context.uniform2f(viewportSizeLocation, width, height);
-      context.uniform1f(cellSizeLocation, pixelRatio);
+      context.uniform1f(cellSizeLocation, pixelRatio * 2);
       context.drawArrays(context.TRIANGLE_STRIP, 0, 4);
     };
 
