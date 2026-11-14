@@ -2119,6 +2119,11 @@ html[data-wallpaper="true"] [data-slot="workspace-page-header"] {
   background-color: transparent;
 }
 
+html[data-wallpaper="true"] [data-slot="sidebar-container"] {
+  border-inline-width: 1px;
+  border-color: color-mix(in srgb, var(--sidebar-border) 45%, transparent);
+}
+
 html[data-wallpaper="true"] [data-slot="sidebar-inner"] {
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));

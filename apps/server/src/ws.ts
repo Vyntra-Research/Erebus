@@ -300,7 +300,7 @@ function projectSetupScriptCompatibilityDetail(
   }
 }
 
-export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
+type ThreadDetailEvent = Extract<
   OrchestrationEvent,
   {
     type:
@@ -311,7 +311,13 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
       | "thread.reverted"
       | "thread.session-set";
   }
-> {
+>;
+
+type ThreadDetailResetEvent = Extract<OrchestrationEvent, { type: "thread.sync-imported" }>;
+
+type ThreadDetailStreamEvent = ThreadDetailEvent | ThreadDetailResetEvent;
+
+export function isThreadDetailEvent(event: OrchestrationEvent): event is ThreadDetailEvent {
   return (
     event.type === "thread.message-sent" ||
     event.type === "thread.proposed-plan-upserted" ||
@@ -320,6 +326,12 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
     event.type === "thread.reverted" ||
     event.type === "thread.session-set"
   );
+}
+
+export function isThreadDetailResetEvent(
+  event: OrchestrationEvent,
+): event is ThreadDetailResetEvent {
+  return event.type === "thread.sync-imported";
 }
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
@@ -1458,17 +1470,60 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
-              const isThisThreadDetailEvent = (event: OrchestrationEvent) =>
+              const isThisThreadStreamEvent = (
+                event: OrchestrationEvent,
+              ): event is ThreadDetailStreamEvent =>
                 event.aggregateKind === "thread" &&
                 event.aggregateId === input.threadId &&
-                isThreadDetailEvent(event);
+                (isThreadDetailEvent(event) || isThreadDetailResetEvent(event));
+
+              const loadThreadSnapshot = Effect.fn("ws.loadThreadSnapshot")(function* () {
+                const snapshot = yield* projectionSnapshotQuery
+                  .getThreadDetailSnapshot(
+                    input.threadId,
+                    // A missing limit identifies a pre-pagination client. It
+                    // cannot fetch older pages, including after a reconnect
+                    // falls back from event replay to a fresh snapshot.
+                    input.turnLimit === undefined ? undefined : { turnLimit: input.turnLimit },
+                  )
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new OrchestrationGetSnapshotError({
+                          message: `Failed to load thread ${input.threadId}`,
+                          cause,
+                        }),
+                    ),
+                  );
+
+                if (Option.isNone(snapshot)) {
+                  return yield* new OrchestrationGetSnapshotError({
+                    message: `Thread ${input.threadId} was not found`,
+                    cause: input.threadId,
+                  });
+                }
+                return snapshot.value;
+              });
+
+              const projectThreadStreamEvent = Effect.fn("ws.projectThreadStreamEvent")(function* (
+                event: ThreadDetailStreamEvent,
+              ) {
+                if (!isThreadDetailResetEvent(event)) {
+                  return {
+                    kind: "event" as const,
+                    event: projectActivityEvent(event),
+                  };
+                }
+                const snapshot = yield* loadThreadSnapshot();
+                return {
+                  kind: "snapshot" as const,
+                  snapshot: projectThreadDetailSnapshot(snapshot),
+                };
+              });
 
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.filter(isThisThreadDetailEvent),
-                Stream.map((event) => ({
-                  kind: "event" as const,
-                  event: projectActivityEvent(event),
-                })),
+                Stream.filter(isThisThreadStreamEvent),
+                Stream.mapEffect(projectThreadStreamEvent),
               );
 
               // Attach live delivery before reading either replay or snapshot state.
@@ -1509,11 +1564,8 @@ const makeWsRpcLayer = (
                   const catchUpStream = orchestrationEngine
                     .readEvents(afterSequence, replayGap)
                     .pipe(
-                      Stream.filter(isThisThreadDetailEvent),
-                      Stream.map((event) => ({
-                        kind: "event" as const,
-                        event: projectActivityEvent(event),
-                      })),
+                      Stream.filter(isThisThreadStreamEvent),
+                      Stream.mapEffect(projectThreadStreamEvent),
                       Stream.mapError(
                         (cause) =>
                           new OrchestrationGetSnapshotError({
@@ -1538,30 +1590,7 @@ const makeWsRpcLayer = (
                 // fresh thread detail instead of an unbounded replay.
               }
 
-              const snapshot = yield* projectionSnapshotQuery
-                .getThreadDetailSnapshot(
-                  input.threadId,
-                  // A missing limit identifies a pre-pagination client. It
-                  // cannot fetch older pages, including after a reconnect
-                  // falls back from event replay to a fresh snapshot.
-                  input.turnLimit === undefined ? undefined : { turnLimit: input.turnLimit },
-                )
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: `Failed to load thread ${input.threadId}`,
-                        cause,
-                      }),
-                  ),
-                );
-
-              if (Option.isNone(snapshot)) {
-                return yield* new OrchestrationGetSnapshotError({
-                  message: `Thread ${input.threadId} was not found`,
-                  cause: input.threadId,
-                });
-              }
+              const snapshot = yield* loadThreadSnapshot();
 
               const afterSnapshot =
                 input.requestCompletionMarker === true
@@ -1575,7 +1604,7 @@ const makeWsRpcLayer = (
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
-                  snapshot: projectThreadDetailSnapshot(snapshot.value),
+                  snapshot: projectThreadDetailSnapshot(snapshot),
                 }),
                 afterSnapshot,
               );

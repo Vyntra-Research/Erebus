@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 - 2026-11-13
+
+### Fixed
+
+- Refresh an open thread as soon as Git sync replaces its history.
+- Keep the sidebar divider subtle and aligned with the wallpaper palette.
+
 ## 1.1.0 - 2026-11-13
 
 ### Added
