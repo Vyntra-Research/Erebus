@@ -4,7 +4,7 @@ Erebus works with local Git repositories and can connect to GitHub, GitLab, Bitb
 
 ## Projects and repositories
 
-Use **Add project** to open a local folder, clone a Git URL, or choose a repository from a connected host. A local repository without a remote can be published from the project actions. If it has no commits, Erebus creates the remote and waits for the first commit before pushing.
+Use **Add project** to open a local folder, clone a Git URL, or choose a repository from a connected host. A local repository can be published from the project actions. For an empty repository, Erebus creates the remote and waits for the first commit before pushing.
 
 The project toolbar can initialize Git, open the folder in an editor, create or switch branches, and show the current diff. Each turn also has a hidden checkpoint for review and revert.
 
@@ -63,4 +63,4 @@ Open **Settings > Source Control** and select **Rescan** after installing a CLI 
 
 ## Thread sync is separate
 
-Source control manages the repository you are researching. [Thread history sync](./thread-sync.md) uses a separate Git remote to move Erebus conversations between devices. Connecting one does not configure the other.
+Source control manages the repository you are researching. [Thread history sync](./thread-sync.md) uses its own Git remote to move Erebus conversations between devices. Each connection has separate settings and credentials.

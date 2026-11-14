@@ -15,8 +15,7 @@ the task commands.
 - `apps/desktop` (`@t3tools/desktop`): Electron shell. Supervises a desktop-scoped server, loads the
   web bundle over the compatibility `t3code://` protocol, hosts the browser preview, and manages
   desktop updates.
-- `apps/mobile` (`@t3tools/mobile`): inherited Expo/React Native client. It is not enabled or
-  published by current Erebus releases.
+- `apps/mobile` (`@t3tools/mobile`): inherited Expo/React Native client kept as compatibility source.
 
 ## packages
 
@@ -29,24 +28,21 @@ the task commands.
   session, environment registry, and Atom-based domain state used by web. The inherited mobile
   client also consumes it. See its
   [README](../../packages/client-runtime/README.md).
-- `packages/ssh` (`@t3tools/ssh`): inherited SSH and tunnel support. Current Erebus releases do not
-  expose remote environments.
-- `packages/tailscale` (`@t3tools/tailscale`): inherited Tailscale wrappers used by development
-  sharing code, not a shipped remote-access feature.
+- `packages/ssh` (`@t3tools/ssh`): inherited SSH and tunnel compatibility source.
+- `packages/tailscale` (`@t3tools/tailscale`): Tailscale wrappers used by development sharing.
 - `packages/effect-acp` (`effect-acp`): inherited Effect implementation of the Agent Client Protocol
-  for dormant ACP-speaking provider adapters.
+  for ACP-speaking provider adapters.
 - `packages/effect-codex-app-server` (`effect-codex-app-server`): Effect client for the
   `codex app-server` JSON-RPC protocol.
 
 ## infra
 
-- `infra/relay` (`t3code-relay`): inherited relay source. Erebus does not deploy or support it in the
-  current product.
+- `infra/relay` (`t3code-relay`): inherited relay compatibility source.
 
 ## Other top-level directories
 
 - `scripts/`: workspace tooling run through `vp run`. Dev runner, desktop artifact builds, release
-  helpers, update-manifest merging, and inherited checks for dormant surfaces.
+  helpers, update-manifest merging, and inherited compatibility checks.
 - `assets/`: brand and app icon sources per channel (`dev`, `nightly`, `prod`).
 - `patches/`: pnpm patches for pinned upstream dependencies.
 - `oxlint-plugin-t3code/`: repo-specific lint rules.

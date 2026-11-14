@@ -4,7 +4,7 @@
 [![CI](https://github.com/Vyntra-Research/Erebus/actions/workflows/ci.yml/badge.svg)](https://github.com/Vyntra-Research/Erebus/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](./LICENSE)
 
-Erebus is a local desktop harness for long-running offensive security research with Codex. It keeps research context durable, coordinates parallel work, manages more than one Codex account, and gives finished findings an independent technical review without forcing the research into campaigns or audit checklists.
+Erebus is a local desktop harness for long-running offensive security research with Codex. It keeps research context durable, coordinates parallel work, manages more than one Codex account, and gives finished findings an independent technical review.
 
 The current release runs on Windows and x64 Linux. Codex is the supported provider.
 
@@ -13,24 +13,24 @@ The current release runs on Windows and x64 Linux. Codex is the supported provid
   <img src="./docs/assets/erebus-wallpaper-glass.jpg" alt="Erebus with a light wallpaper, glass surfaces, and generated colors" width="49%">
 </p>
 
-## What Erebus adds
+## Features
 
-### A research runtime, not an audit workflow
+### Research runtime
 
 - Keeps compact offensive-research rules in the principal and co-agent context. They cover realistic attacker control, evidence scope, deduplication, natural exploit chains, conclusion reopening, and Post-AI blind spots.
-- Uses the native Codex goal as the only visible objective and progress lifecycle. Erebus has no active campaign or Observer layer.
-- Offers the optional Capri persona for a more direct, independent, and focused research style without changing the evidence bar or permission model.
+- Uses the native Codex goal for the visible objective and progress lifecycle.
+- Offers the optional Capri persona for a more direct, independent, and focused research style while preserving the evidence bar and permission model.
 - Installs [Argos](https://github.com/rafabd1/Argos) as the connected research map. Each project keeps its graph under `.argos/`.
-- Exposes legacy Proteus records through a managed read-only bridge. Erebus does not load Proteus skills or allow Proteus writes.
+- Exposes legacy Proteus records through a managed read-only bridge.
 
 ### Independent finding review
 
 - Submits a finding document and its working PoC to a separate Judge.
-- Stores each verdict and delivers it in a later turn, so the evaluator does not steer the original research.
-- Supports revisions without replacing the prior evaluation record.
+- Stores each verdict and delivers it in a later turn, keeping the evaluation independent from the original research.
+- Supports revisions while preserving every evaluation record.
 - Calculates explicit CVSS 3.0, 3.1, and 4.0 vectors through `research.calculate_cvss`.
 
-### Parallel work without losing the main thread
+### Parallel work
 
 - Runs up to four Erebus co-agent threads on separate research surfaces.
 - Lets each Codex task use its native subagents for narrower work inside that surface.
@@ -39,8 +39,8 @@ The current release runs on Windows and x64 Linux. Codex is the supported provid
 
 ### Long-running Codex sessions
 
-- Keeps steering messages transient across Codex compaction so older directions remain history instead of becoming fresh instructions.
-- Resumes large threads without loading the full transcript into the UI or provider process.
+- Keeps steering messages transient across Codex compaction, so older directions remain historical context.
+- Resumes large threads from a recent window and loads older turns on demand.
 - Preserves the thread when an account changes, disappears, or reaches its usage limit.
 - Shows the agent's internal browser in a dismissible preview and keeps terminal, diff, checkpoint, and revert tools beside the conversation.
 
@@ -53,11 +53,11 @@ The current release runs on Windows and x64 Linux. Codex is the supported provid
 
 ### Threads, projects, and Git sync
 
-- Creates standalone threads without a project. Link one later from its menu or drag it into a project.
-- Keeps active and settled primary thread history in a Git remote chosen by the user. Archived, deleted, and co-agent threads do not enter the mirror.
+- Creates standalone threads that can later be linked from their menu or dragged into a project.
+- Keeps active and settled primary thread history in a Git remote chosen by the user.
 - Handles conflicts per thread: use the remote history, keep both as separate threads, or replace that remote thread.
 - Keeps project paths device-local. A thread imported on another machine stays standalone until it is mapped to a local folder.
-- Removes deleted thread history, released co-agent data, stale browser caches, and unused standalone workspaces. Diagnostics can compact reclaimable SQLite space while no turn is active.
+- Removes deleted thread history, released co-agent data, stale browser caches, and unused standalone workspaces. Diagnostics compacts reclaimable SQLite space while the runtime is idle.
 
 ### Local workspaces and source control
 
@@ -93,7 +93,7 @@ chmod +x Erebus-*.AppImage
 
 GTK 3 tools, `xdg-utils`, and an active Secret Service are required on Linux. GNOME Keyring and KWallet are supported.
 
-Open **Settings > Providers > Codex** to sign in. Erebus stores the account in its own profile and does not reuse or modify the Codex desktop app profile.
+Open **Settings > Providers > Codex** to sign in. Erebus stores the account in a dedicated profile, separate from the Codex desktop app.
 
 ## Documentation
 
@@ -130,10 +130,10 @@ pnpm dist:desktop:linux
 
 Development state stays in the worktree-local `.t3` directory. Packaged builds use the Erebus profile under `.erebus`.
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before sending a change. Report vulnerabilities in Erebus through [SECURITY.md](./SECURITY.md), not a public issue.
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before sending a change. Report vulnerabilities in Erebus privately through [SECURITY.md](./SECURITY.md).
 
 ## License and upstream
 
-Erebus is licensed under [GPL-3.0-or-later](./LICENSE). It is based on [T3 Code](https://github.com/pingdotgg/t3code) and retains the original MIT notice in [LICENSES/T3-CODE-MIT.txt](./LICENSES/T3-CODE-MIT.txt). Erebus is not an official OpenAI or T3 Tools product.
+Erebus is an independent open-source project licensed under [GPL-3.0-or-later](./LICENSE). It is based on [T3 Code](https://github.com/pingdotgg/t3code) and retains the original MIT notice in [LICENSES/T3-CODE-MIT.txt](./LICENSES/T3-CODE-MIT.txt).
 
 Argos is maintained at [rafabd1/Argos](https://github.com/rafabd1/Argos). Proteus is maintained at [Vyntra-Research/Proteus](https://github.com/Vyntra-Research/Proteus). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the complete notices.

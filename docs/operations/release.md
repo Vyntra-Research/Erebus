@@ -22,7 +22,7 @@ Do not merge changes into `beta` or `stable`. The release workflow advances thos
 
 `.github/workflows/release.yml` uses the version in `apps/desktop/package.json`, unless a maintainer supplies an explicit version in a manual run. Manual runs must use a `main` commit with successful CI. The workflow then builds the Windows x64 installer and Linux x64 AppImage from the same tested revision. It extracts and checks the AppImage before a final job creates the matching `v<version>` tag and publishes all files in one GitHub Release. If the release already exists, the workflow keeps it and repairs the matching channel pointer when needed.
 
-A version with a suffix, such as `1.2.0-beta.1`, publishes a prerelease through `beta.yml` and advances `beta`. A version without a suffix publishes through `latest.yml` and advances `stable`. Nightly versions use their own update manifest without a branch pointer. The workflow does not publish npm packages or build macOS or ARM64 desktop apps.
+A version with a suffix, such as `1.2.0-beta.1`, publishes a prerelease through `beta.yml` and advances `beta`. A full version publishes through `latest.yml` and advances `stable`. Nightly versions use their own update manifest. The release matrix builds Windows x64 and Linux x64 desktop apps.
 
 ## Upstream history
 

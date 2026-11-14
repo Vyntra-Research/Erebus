@@ -2,7 +2,7 @@
 
 > For maintainers. Using Erebus? See [docs/user](../user/).
 
-Codex is the provider supported by current Erebus releases. The repository still contains inherited Claude, Cursor, Grok, and OpenCode adapters, but they have no supported settings, update, or release surface.
+Current Erebus releases use Codex. The repository retains inherited Claude, Cursor, Grok, and OpenCode adapters as compatibility source.
 
 ## Registry and sessions
 

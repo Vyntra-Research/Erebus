@@ -1,18 +1,18 @@
 # Research and independent review
 
-Erebus does not create research campaigns. A task can start, resume, change direction, or end without a research setup call. If the work needs a durable objective, use the native Codex goal.
+Research begins directly in any task. Use the native Codex goal when the work needs a durable objective.
 
-Older Codex tasks keep the tool schemas they received when first created. Erebus uses the authenticated `erebus-research` fallback when those schemas do not match the current tools. This preserves the task's history and finding state. Campaign and contract fields in old tools are not prerequisites: the agent must use the current fallback instead. Research and Judge tools never come from the browser MCP server.
+Older Codex tasks keep the tool schemas they received when first created. Erebus uses the authenticated `erebus-research` fallback when those schemas differ from the current tools. This preserves the task's history and finding state. The fallback supplies the current Research and Judge tools.
 
 ## Research context
 
 Erebus keeps a short set of rules in the principal and co-agent context. These cover realistic attacker control, evidence scope, natural exploit chains, dedupe, safe execution, anti-tunnel checks, and Post-AI blind spots.
 
-The rules apply when the agent ranks, narrows, discards, reopens, or promotes a path. A failed test closes only the path it exercised. A check in one route does not prove that every route crosses it. New evidence must reopen any conclusion whose premise changed.
+The rules apply when the agent ranks, narrows, discards, reopens, or promotes a path. A failed test closes the path it exercised. Protection claims stay bounded to the routes covered by evidence. New evidence reopens any conclusion whose premise changed.
 
-Argos is the connected memory for current research. Erebus installs its MCP and skills in the shared Codex profile. The agent updates canonical nodes and typed relations instead of copying the same fact into a second Erebus state. Each project's durable graph stays under `.argos/` in that project.
+Argos is the connected memory for current research. Erebus installs its MCP and skills in the shared Codex profile. The agent records canonical nodes and typed relations directly in each project's `.argos/` graph.
 
-Proteus is legacy history in current Erebus releases. The managed plugin exposes read-only lookup and status tools. It does not expose mutation tools, CVSS calculation, or Proteus skills.
+Proteus is legacy history in current Erebus releases. The managed plugin exposes read-only lookup and status tools.
 
 ## Co-agents and subagents
 
@@ -20,7 +20,7 @@ Native provider subagents help with parallel work inside one bounded task. Erebu
 
 Linked threads keep co-agents in the same project. Standalone threads can also create co-agents; those children remain isolated from other standalone threads.
 
-A co-agent receives the same research rules, but it does not own the principal's goal and cannot submit a finding to the Judge. It returns evidence and artifact paths to the principal.
+A co-agent receives the same research rules and returns evidence and artifact paths to the principal. The principal owns the goal and Judge submission.
 
 ## Judge handoff
 
@@ -45,9 +45,9 @@ Both submission tools use this shape:
 }
 ```
 
-`findingPath` must name an existing file under `findings/`. `pocPath` must name an existing file or directory under `pocs/`, or it may be `null` when the finding explains why no PoC artifact applies. Paths are relative to the task workspace and cannot escape those directories.
+`findingPath` must name an existing file under `findings/`. `pocPath` must name an existing file or directory under `pocs/`; use `null` with an explanation when a PoC artifact is inapplicable. Paths are relative to the task workspace and stay within those directories.
 
-The normal handoff contains only the finding and working PoC. Do not create a ZIP, checksum manifest, alternate deliverables directory, final report, or disclosure package for Judge review.
+The Judge handoff consists of the finding and working PoC.
 
 When a submission returns `accepted: true`, the agent ends its turn. The Judge reads the submitted artifacts in a separate bounded desk review. Erebus stores the result and starts a follow-up turn when the task is idle.
 
@@ -59,13 +59,11 @@ Judge verdicts mean:
 - `invalidSubmission`: the submitted artifacts cannot be judged in their current form.
 - `reviewBlocked`: the evaluator or evidence transport failed. Preserve the finding and retry the same unchanged revision after recovery.
 
-CVSS classifies a proved finding. It does not decide whether the finding is valid. The calculator never infers metrics from finding prose; pass the complete vector to `research.calculate_cvss`.
+CVSS classifies a proved finding. Pass a complete explicit vector to `research.calculate_cvss` after the evidence establishes validity.
 
 ## Settings
 
-Use **Settings > Research** to choose the Judge model and reasoning effort. Current Erebus releases have no Observer cadence or campaign setting.
-
-Existing campaign records from older Erebus releases remain in the local database for compatibility. Current Erebus releases do not resume or mutate them.
+Use **Settings > Research** to choose the Judge model and reasoning effort.
 
 ## Proteus updates
 
@@ -73,4 +71,4 @@ Erebus checks its managed Proteus runtime against the latest stable release. Whe
 
 ## Argos updates
 
-Erebus includes Argos 0.1.0 as a tested fallback and checks the latest stable Argos release separately. The app shows the current and latest versions. Both automatic and manual updates verify the exact release asset and its SHA-256 digest, then install the MCP and skills for enabled Codex accounts. The current and previous managed releases remain available, and project knowledge under `.argos/` is not replaced.
+Erebus includes Argos 0.1.0 as a tested fallback and checks the latest stable Argos release separately. The app shows the current and latest versions. Both automatic and manual updates verify the exact release asset and its SHA-256 digest, then install the MCP and skills for enabled Codex accounts. The current and previous managed releases remain available, and project knowledge under `.argos/` stays intact.

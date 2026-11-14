@@ -18,7 +18,6 @@ version and reuses an existing release. Windows and Linux jobs then build the un
 installer and Linux x64 AppImage in parallel. The Linux job extracts the AppImage and checks its
 payload. After both builds pass, one publish job tags the tested revision and publishes both apps
 and their update metadata in one GitHub Release. A final job advances the managed `beta` or
-`stable` channel branch. macOS, ARM64 desktop, mobile, relay, hosted
-preview, and package publication remain disabled.
+`stable` channel branch. The release matrix publishes Windows x64 and Linux x64 desktop artifacts.
 
 See [Release Checklist](../operations/release.md) for the full release/signing setup checklist.

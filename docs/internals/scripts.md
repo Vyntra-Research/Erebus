@@ -22,7 +22,7 @@ Node 24 is required. Bun is optional.
 - `vp run dev:server` starts only the local server.
 - `vp run dev:web` starts only Vite.
 - `vp run dev --browser` opens the pairing URL automatically.
-- `vp run dev --share` exposes the dev client on the machine's tailnet and prints an authenticated pairing URL. This is a development helper, not the dormant hosted relay product.
+- `vp run dev --share` exposes the dev client on the machine's tailnet and prints an authenticated pairing URL.
 - `vp run dev --home-dir <path>` uses an explicit isolated state directory.
 
 A linked worktree defaults to `<worktree>/.t3/userdata`. The main checkout defaults to `~/.t3/dev`. Never point a development server at a live packaged profile.
@@ -46,7 +46,7 @@ Follow [AGENTS.md](../../AGENTS.md) for test scope. Do not run the full workspac
 - `vp run dist:desktop:win:x64` builds the Windows x64 NSIS installer.
 - `vp run dist:desktop:linux` builds the Linux x64 AppImage.
 
-Artifacts are written under `release/`. Current Erebus releases do not publish macOS, ARM64, mobile, relay, hosted preview, or npm artifacts.
+Artifacts are written under `release/`. The release workflow publishes Windows x64 and Linux x64 desktop builds.
 
 Windows signing uses Azure Trusted Signing when the required release secrets are present. Local artifacts are unsigned by default.
 

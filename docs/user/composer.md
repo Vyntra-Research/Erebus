@@ -4,7 +4,7 @@ Messages can contain up to 120,000 characters. Erebus keeps an oversized draft i
 
 Images upload as soon as you add them. The send button becomes available after each upload finishes. Retry or remove a failed upload. HEIC and HEIF images are converted to JPEG on desktop.
 
-Draft text stays local to the composer while an active turn updates the timeline. Provider events do not submit it.
+Draft text stays local to the composer while an active turn updates the timeline. Only an explicit send action submits it.
 
 ## Commands and skills
 

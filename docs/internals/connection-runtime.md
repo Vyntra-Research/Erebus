@@ -4,7 +4,7 @@
 
 The connection runtime owns the authenticated link between the React interface and the local Erebus server. The web client mounts it once. The desktop app embeds that client and supplies the local server endpoint.
 
-Current releases do not expose remote environments, hosted relay discovery, or the inherited mobile client. Their code remains in the tree, but it is outside the supported product path.
+The current release path connects the Windows and Linux desktop app to its local server. Inherited remote, relay, and mobile sources remain available for future work.
 
 ## Composition
 

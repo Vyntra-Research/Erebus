@@ -4,14 +4,13 @@ Erebus can store portable thread history in a Git repository so the same work ca
 
 ## What sync includes
 
-The mirror contains primary thread history and attachments for active and settled threads. It excludes:
+The mirror contains primary thread history and attachments for active and settled threads. The following state stays local:
 
-- archived and deleted threads
-- co-agent threads and their provider history
+- archived, deleted, and co-agent histories
 - Codex accounts and credentials
 - provider, model, and permission settings
 - wallpapers and other device-local appearance data
-- local project paths
+- project paths on the current device
 
 Use a private repository when the conversations or attachments are private.
 
@@ -21,18 +20,18 @@ Create an empty Git repository, then enter its clone URL under **Git remote**. C
 
 The sync control supports three actions:
 
-- **Check** fetches the remote state without changing local history.
+- **Check** fetches remote state for comparison.
 - **Pull** imports remote changes.
 - **Push** writes local changes on top of the newest remote revision.
 
-Erebus reports local and remote changes separately. A successful check does not mean unsaved local threads have already been pushed.
+Erebus reports local and remote changes separately. **Check** compares them, while **Push** publishes local changes.
 
 ## Resolve conflicts
 
-Resolve each conflicting thread on its own. You can use the remote history, keep both histories as separate threads, or replace that remote thread with the local history during a push. Replacing one remote thread does not force-push the repository.
+Resolve each conflicting thread on its own. You can use the remote history, keep both histories as separate threads, or replace that remote thread with the local history during a push. Replacement stays scoped to the selected thread.
 
 ## Link projects on another device
 
-The mirror stores a portable project identity, not a host filesystem path. If the matching folder exists on the new device, map it from **Optional project links**. A thread without a local match remains standalone and can be linked later.
+The mirror stores a portable project identity. Each device maps that identity to its own filesystem path through **Optional project links**. An unmatched thread arrives as standalone and can be linked later.
 
-Linking or moving a thread on one device does not rewrite the project path on another device.
+Project links remain local to each device.

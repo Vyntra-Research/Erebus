@@ -10,7 +10,7 @@ A permission mode controls when Codex stops for approval. Set it per thread from
 
 **Auto** lets Codex review routine actions and pauses on actions that still require approval.
 
-**Full access** runs commands and edits without approval prompts. Erebus still applies its deterministic command guard and blocks hard safety violations before execution.
+**Full access** runs commands and edits directly. Erebus still applies its deterministic command guard and blocks hard safety violations before execution.
 
 Approvals appear inside the conversation. Approve or reject one and the turn continues from that point.
 

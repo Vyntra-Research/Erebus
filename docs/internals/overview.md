@@ -52,7 +52,7 @@ to the connection supervisor.
 `packages/client-runtime` holds every non-visual client concern: connection lifecycle,
 authentication, RPC, cached environment data, and domain state as Atom factories. The web client
 uses it directly, and desktop embeds that client. The inherited mobile client also uses the package
-but is not enabled in current Erebus releases. React components never construct transports, retry
+as compatibility source. React components never construct transports, retry
 loops, or RPC clients. See [connection-runtime.md](./connection-runtime.md).
 
 ## Orchestration is event-sourced
@@ -105,8 +105,8 @@ build production behavior on receipts.
 
 Current Erebus releases support Codex. `ProviderInstanceRegistry` owns each Codex account instance,
 and `CodexRequestGateway` chooses the account for every new model request without replacing the
-durable thread. The tree still contains inherited Claude, Cursor, Grok, and OpenCode adapters. Their
-presence in `BUILT_IN_DRIVERS` is compatibility code, not a supported release surface. See
+durable thread. The tree still contains inherited Claude, Cursor, Grok, and OpenCode adapters as
+compatibility code. The current release surface uses Codex. See
 [providers.md](./providers.md).
 
 ## Checkpointing

@@ -15,7 +15,7 @@ The local Erebus server grants narrow capabilities to the desktop shell and pair
 | `access:read`           | Inspect pairing links and authorized clients.             |
 | `access:write`          | Create or revoke pairing links and sessions.              |
 
-Relay scopes still exist in contracts for compatibility with dormant inherited code. Current Erebus releases do not expose a hosted relay.
+Relay scopes remain in contracts for compatibility with inherited source. The current release uses the local desktop and paired development-browser scopes above.
 
 ## Browser session
 

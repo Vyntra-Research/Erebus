@@ -17,7 +17,7 @@
 - [Project icons](./user/project-settings.md)
 - [Updates](./user/updating.md)
 
-The current release supports the Windows and x64 Linux desktop apps with Codex. Mobile, hosted relay, remote environments, macOS packaging, and other provider adapters remain dormant inherited code and are not product features.
+The current release is the Windows and x64 Linux desktop app with Codex.
 
 ## Work on Erebus
 

@@ -94,7 +94,7 @@ The live backend agent implementation and its event stream. The main service is 
 
 #### Provider
 
-The backend agent runtime that performs work. Current Erebus releases support Codex. Inherited adapters for Claude, Cursor, Grok, and OpenCode remain in the tree but are not supported product surfaces. See [ProviderService.ts][14], [ProviderAdapter.ts][15], and [CodexAdapter.ts][17].
+The backend agent runtime that performs work. Current Erebus releases use Codex. Inherited adapters for Claude, Cursor, Grok, and OpenCode remain in the tree as compatibility source. See [ProviderService.ts][14], [ProviderAdapter.ts][15], and [CodexAdapter.ts][17].
 
 #### Session
 

@@ -42,17 +42,17 @@ Older tasks that already use the Daybreak Blue model alias keep that selection. 
 
 Choose an agent persona under **Settings → General**. **Standard** keeps the usual Erebus behavior. **Capri** uses a stronger, more direct operating style: it favors high-value work, challenges weak premises, cuts repeated work, and keeps conclusions tied to evidence.
 
-The choice applies to the next Codex request, including requests in an open thread or co-agent thread. It does not change the thread history, model, reasoning effort, permission mode, or hard safety limits.
+The choice applies to the next Codex request, including requests in an open thread or co-agent thread. Thread history, model, reasoning effort, permission mode, and hard safety limits stay unchanged.
 
 ## Proteus integration
 
-Erebus manages Proteus inside this isolated profile. It ships a tested fallback, checks official stable releases once per day when the Codex environment starts, and accepts an update only after its package digest and runtime layout pass validation. Erebus retains the active and one previous managed runtime and plugin copy. It writes only its owned Codex configuration sections and removes only version directories marked as Erebus-managed. A global Proteus install is not required and does not control the Erebus runtime.
+Erebus manages Proteus inside this isolated profile. It ships a tested fallback, checks official stable releases once per day when the Codex environment starts, and accepts an update after its package digest and runtime layout pass validation. Erebus retains the active and one previous managed runtime and plugin copy. Its configuration and cleanup stay within sections and version directories marked as Erebus-managed.
 
 ## More than one account
 
-Use **Add Codex account** to add another login. Erebus creates its account profile and keeps `auth.json` separate. Sessions, configuration, skills, plugins, MCPs, and memories continue to use the default Erebus Codex home. Erebus uses native links to share that state: symbolic links on Linux, and directory junctions plus verified hard links on Windows. Windows does not require Developer Mode or administrator access.
+Use **Add Codex account** to add another login. Erebus creates its account profile and keeps `auth.json` separate. Sessions, configuration, skills, plugins, MCPs, and memories continue to use the default Erebus Codex home. Erebus uses symbolic links on Linux, and directory junctions plus verified hard links on Windows. The Windows setup runs in a standard user session.
 
-Sign in from the new account card, then choose which account is **Primary**. Automatic routing prefers that account until its remaining quota reaches the configured switch point. It then sends new model requests to a signed-in fallback account. When the primary quota resets, later requests return to it. Erebus applies account changes without restarting or detaching the Codex task. If an account rejects a request for lack of quota before streaming begins, Erebus can retry that request through another usable account; it never replays a response after streaming starts.
+Sign in from the new account card, then choose which account is **Primary**. Automatic routing prefers that account until its remaining quota reaches the configured switch point. It then sends new model requests to a signed-in fallback account. When the primary quota resets, later requests return to it. Erebus applies account changes while preserving the Codex task. If an account rejects a request for lack of quota before streaming begins, Erebus can retry through another usable account. Once output begins, that request stays on its selected account.
 
 The default switch point is 5% remaining. A fallback is preserved at 1% when the primary still has quota. You can change both values or disable automatic routing under **Advanced provider settings**.
 
