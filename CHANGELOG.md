@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.3 - 2026-11-14
+
+### Changed
+
+- Restore Capri's informal voice and visible judgment without turning her personality into a research playbook.
+- Treat skills and research heuristics as selective tools so focused security work does not default to full audit coverage.
+
 ## 1.1.2 - 2026-11-14
 
 ### Fixed
