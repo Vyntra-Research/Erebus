@@ -176,6 +176,24 @@ describe("theme files", () => {
     }
   });
 
+  it("keeps vivid code surfaces in the canvas color family", () => {
+    const neutralCanvas = createVividThemeColors("dark", "#111111", "#98ae8c");
+    const warmCanvas = createVividThemeColors("dark", "#241319", "#98ae8c");
+    const channels = (value: string) =>
+      [1, 3, 5].map((offset) => Number.parseInt(asHex(value).slice(offset, offset + 2), 16)) as [
+        number,
+        number,
+        number,
+      ];
+
+    const neutralChannels = channels(neutralCanvas.codeBackground);
+    expect(Math.max(...neutralChannels) - Math.min(...neutralChannels)).toBeLessThanOrEqual(1);
+
+    const [red, green, blue] = channels(warmCanvas.codeBackground);
+    expect(red).toBeGreaterThan(green);
+    expect(red).toBeGreaterThan(blue);
+  });
+
   it("keys status colors off the canvas, not the appearance slot", () => {
     // Inverted seeds: a dark canvas in the light slot must still get the dark
     // status pair, or the alert foreground lands on a dark surface unreadable.

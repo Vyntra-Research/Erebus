@@ -896,7 +896,13 @@ export function createVividThemeColors(
   const accentSurfaceRgb = themeOklchToRgb(accentSurface);
   const messageSurface = surfaceAt(dark ? 0.16 : 0.1, Math.min(0.13, accent.C * 0.6));
   const messageSurfaceRgb = themeOklchToRgb(messageSurface);
-  const codeBackground = surfaceAt(0.035, tintC * 0.8);
+  // Code is a large reading surface. Keep it in the canvas color family so a
+  // small accent extracted from the image cannot tint the whole block.
+  const codeBackground: ThemeOklch = {
+    L: Math.min(0.98, Math.max(0.05, canvas.L + step * 0.035)),
+    C: Math.min(0.035, canvas.C),
+    h: canvas.h,
+  };
   const updateSurface = surfaceAt(dark ? 0.14 : 0.09, Math.min(0.12, accent.C * 0.55));
 
   const foregroundOn = (surfaceRgb: ThemeRgbColor): string =>
