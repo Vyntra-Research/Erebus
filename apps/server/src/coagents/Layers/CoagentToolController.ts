@@ -137,7 +137,7 @@ const childAssignmentPrompt = (input: {
     "You are a direct co-agent. Work only on the bounded assignment below and return your result to the parent in your final response.",
     "Do not create or coordinate additional Erebus co-agent tasks. You may use the provider's native subagents for vertical parallel work that helps this same bounded assignment.",
     "Do not expand scope, change shared goals, or make overlapping edits unless the assignment explicitly authorizes them. The parent owns synthesis, decisions, and user communication.",
-    "You have the same Erebus project, workspace, model settings, available Argos tools, MCPs, and safe-execution policy as the parent. You do not inherit ownership of the parent's native goal.",
+    "You inherit the parent's Erebus scope: the same linked project when one exists, or a standalone task otherwise, plus its workspace, model settings, available Argos tools, MCPs, and safe-execution policy. You do not inherit ownership of the parent's native goal.",
     "Keep read-only work read-only. Never recursively traverse or copy dependency stores or links. A bounded search of the assigned codebase or one explicit source subtree is allowed when it avoids node_modules, package stores, junctions, symlinks, and reparse points. Use a task-owned workspace or system temp only when a concrete writable test needs it, and clean only exact task-owned resources. Scoped Docker, WSL, Git, and authorized external-target work remain available.",
     "Use Argos as connected canonical memory when available. Proteus is read-only legacy lookup and supplies no skills. The parent exclusively owns Judge submission, synthesis, and user communication. Return evidence and recommendations to the parent instead of calling research.submit_finding or research.revise_finding.",
     input.historicalContext
@@ -223,18 +223,24 @@ const make = Effect.gen(function* () {
     context: CoagentToolContext,
     target: OrchestrationThread | OrchestrationThreadShell,
   ) {
-    if (target.projectId !== context.projectId) return false;
     const link = Option.getOrUndefined(yield* callerLink(context));
-    return !link || target.id === link.parentThreadId || target.id === context.threadId;
+    if (link) return target.id === link.parentThreadId || target.id === context.threadId;
+    if (context.projectId !== null) return target.projectId === context.projectId;
+    if (target.id === context.threadId) return true;
+    const children = yield* registry.listByParent(context.threadId);
+    return children.some((candidate) => candidate.childThreadId === target.id);
   });
 
   const canSendTarget = Effect.fn("CoagentToolController.canSendTarget")(function* (
     context: CoagentToolContext,
     target: OrchestrationThread | OrchestrationThreadShell,
   ) {
-    if (target.projectId !== context.projectId || target.id === context.threadId) return false;
+    if (target.id === context.threadId) return false;
     const link = Option.getOrUndefined(yield* callerLink(context));
-    return !link || target.id === link.parentThreadId;
+    if (link) return target.id === link.parentThreadId;
+    if (context.projectId !== null) return target.projectId === context.projectId;
+    const children = yield* registry.listByParent(context.threadId);
+    return children.some((candidate) => candidate.childThreadId === target.id);
   });
 
   const startTurn = Effect.fn("CoagentToolController.startTurn")(function* (
@@ -286,7 +292,7 @@ const make = Effect.gen(function* () {
 
         const caller = yield* getThreadShell(context.threadId);
         if (!caller || caller.projectId !== context.projectId) {
-          return failure("The calling task is not active in this Erebus project.");
+          return failure("The calling task is not active in this Erebus coordination scope.");
         }
         const childLink = Option.getOrUndefined(yield* callerLink(context));
 
@@ -311,12 +317,19 @@ const make = Effect.gen(function* () {
               return failure("A co-agent cannot enumerate unrelated project tasks.");
             }
             const snapshot = yield* projections.getShellSnapshot();
+            const children =
+              context.projectId === null ? yield* registry.listByParent(context.threadId) : [];
+            const childIds = new Set(children.map((link) => link.childThreadId));
             return response({
               accepted: true,
               scope: input.scope,
               tasks: snapshot.threads
                 .filter(
-                  (thread) => thread.projectId === context.projectId && thread.archivedAt === null,
+                  (thread) =>
+                    thread.archivedAt === null &&
+                    (context.projectId !== null
+                      ? thread.projectId === context.projectId
+                      : thread.id === context.threadId || childIds.has(thread.id)),
                 )
                 .map(threadSummary),
             });

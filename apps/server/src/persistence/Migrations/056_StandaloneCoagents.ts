@@ -1,0 +1,37 @@
+import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+export default Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  yield* sql`ALTER TABLE coagent_threads RENAME TO coagent_threads_v55`;
+  yield* sql`
+    CREATE TABLE coagent_threads (
+      child_thread_id TEXT PRIMARY KEY,
+      parent_thread_id TEXT NOT NULL,
+      project_id TEXT,
+      assignment TEXT NOT NULL,
+      creation_mode TEXT NOT NULL CHECK (creation_mode IN ('blank', 'fork')),
+      status TEXT NOT NULL CHECK (status IN ('preparing', 'ready', 'failed', 'released')),
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      provider_history_deleted_at TEXT
+    )
+  `;
+  yield* sql`
+    INSERT INTO coagent_threads (
+      child_thread_id, parent_thread_id, project_id, assignment, creation_mode,
+      status, error, created_at, updated_at, provider_history_deleted_at
+    )
+    SELECT
+      child_thread_id, parent_thread_id, project_id, assignment, creation_mode,
+      status, error, created_at, updated_at, provider_history_deleted_at
+    FROM coagent_threads_v55
+  `;
+  yield* sql`DROP TABLE coagent_threads_v55`;
+  yield* sql`
+    CREATE INDEX idx_coagent_threads_parent_created
+    ON coagent_threads(parent_thread_id, created_at)
+  `;
+});

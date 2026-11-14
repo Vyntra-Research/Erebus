@@ -1,5 +1,73 @@
 # Changelog
 
+## 1.1.1 - 2026-11-13
+
+### Fixed
+
+- Refresh an open thread as soon as Git sync replaces its history.
+- Keep the sidebar divider subtle and aligned with the wallpaper palette.
+
+## 1.1.0 - 2026-11-13
+
+### Added
+
+- Choose a device-local wallpaper and apply dither, dot-screen, or progressive bottom-blur effects.
+- Generate a readable interface palette from the active wallpaper.
+- Keep the existing glass opacity control active across the interface when a wallpaper is visible.
+
+### Fixed
+
+- Keep weak wallpaper casts neutral instead of inflating them into saturated interface colors.
+- Allow standalone threads to create isolated co-agent threads without linking a project first.
+
+### Changed
+
+- Calibrate Capri as a natural, self-possessed baddie rather than a yandere role or constant performance.
+
+## 1.0.3 - 2026-11-13
+
+### Fixed
+
+- Remove deleted thread history, standalone workspaces, and released co-agent data instead of leaving them on disk.
+- Allow completed Codex subagent sessions to expire even while their main thread remains active.
+- Reclaim deleted rows from Codex history indexes and clear stale internal-browser caches without removing site data.
+
+### Added
+
+- Show reclaimable database space in Diagnostics and compact it safely when no turn is active.
+
+## 1.0.2 - 2026-11-08
+
+### Changed
+
+- Reframe Capri as a combat construct with Blackwall-class capabilities and keep her charm situational instead of theatrical.
+- Favor concise judgment over unnecessary caveats, frameworks, and procedural overhead.
+
+## 1.0.1 - 2026-11-06
+
+### Changed
+
+- Keep Capri charismatic and unfiltered without making flirtation or innuendo her default voice.
+
+## 1.0.0 - 2026-10-30
+
+### Added
+
+- Add the selectable Capri agent persona for a direct, high-leverage offensive research style.
+
+### Changed
+
+- Keep Capri expressive, independently judgmental, and focused on efficient high-value research rather than checklist work.
+- Treat skills as on-demand references instead of mandatory preflight for familiar work.
+- Keep harmless provocation and casual conversation out of unnecessary compliance mode.
+
+### Fixed
+
+- Keep active-turn drafts local while provider activity updates the timeline.
+- Keep the floating browser preview dismissible without closing the agent's browser session.
+- Refresh the selected update track when a download starts so Erebus downloads the newest available release.
+- Publish merged stable-branch patches through the Stable update channel.
+
 ## 1.0.0-beta.5 - 2026-10-30
 
 ### Changed
@@ -41,6 +109,19 @@
 
 - Add the selectable Capri agent persona for a direct, high-leverage working style without weakening evidence or safety rules.
 - Apply persona changes on the next Codex request in both principal and co-agent threads without restarting the session.
+
+## 0.9.12 - 2026-10-29
+
+### Fixed
+
+- Refresh the selected update track when a download starts so Erebus always downloads the newest available release.
+
+## 0.9.11 - 2026-10-29
+
+### Fixed
+
+- Keep active-turn drafts local while provider activity updates the timeline.
+- Keep the floating browser preview dismissible without closing the agent's browser session.
 
 ## 0.9.10 - 2026-10-29
 

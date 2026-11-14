@@ -7,6 +7,8 @@
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Organizing threads](./user/thread-sidebar.md)
+- [Appearance and wallpapers](./user/appearance.md)
+- [Managing local storage](./user/storage.md)
 - [Review usage](./user/usage.md)
 - [Customize a project icon](./user/project-settings.md)
 - Mobile and remote clients remain inherited development surfaces and are not enabled in the current release.

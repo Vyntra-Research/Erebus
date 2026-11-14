@@ -1841,6 +1841,32 @@ export function getThemeColorVariable(role: ThemeColorRole): string {
 
 /** Marks the document as wearing an unsaved draft rather than a stored theme. */
 export const THEME_PREVIEW_ID = "__preview";
+export const WALLPAPER_THEME_ID = "__wallpaper";
+
+let wallpaperThemeOverride: Readonly<{
+  colors: ThemeColors;
+  appearance: ThemeAppearance;
+}> | null = null;
+
+function paintThemeColors(id: string, colors: ThemeColors, appearance: ThemeAppearance): void {
+  const root = document.documentElement;
+  root.dataset.themeId = id;
+  root.classList.toggle("dark", appearance === "dark");
+  for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
+    if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
+  }
+}
+
+export function applyWallpaperThemeColors(colors: ThemeColors, appearance: ThemeAppearance): void {
+  if (typeof document === "undefined") return;
+  wallpaperThemeOverride = { colors, appearance };
+  setThemePreviewSidebarArtwork(false);
+  paintThemeColors(WALLPAPER_THEME_ID, colors, appearance);
+}
+
+export function clearWallpaperThemeColors(): void {
+  wallpaperThemeOverride = null;
+}
 
 /**
  * Paint a draft palette onto the live app without installing it, so the editor
@@ -1849,18 +1875,12 @@ export const THEME_PREVIEW_ID = "__preview";
  */
 export function applyThemeColorPreview(colors: ThemeColors, appearance: ThemeAppearance): void {
   if (typeof document === "undefined") return;
-  const root = document.documentElement;
-  if (!root?.style) return;
+  if (!document.documentElement?.style) return;
 
   // Drafts become user-controlled themes when saved, so their preview keeps
   // the fixed stage artwork hidden even when it was seeded from a built-in.
   setThemePreviewSidebarArtwork(false);
-  root.dataset.themeId = THEME_PREVIEW_ID;
-  root.classList.toggle("dark", appearance === "dark");
-  for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
-    // A half-typed hex keeps the last good value instead of blanking the role.
-    if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
-  }
+  paintThemeColors(THEME_PREVIEW_ID, colors, appearance);
 }
 
 export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppearance): void {
@@ -1879,12 +1899,20 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
     for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
-    return;
+  } else {
+    delete root.dataset.themeId;
+    for (const variable of Object.values(APP_THEME_VARIABLES)) {
+      root.style.removeProperty(variable);
+    }
   }
 
-  delete root.dataset.themeId;
-  for (const variable of Object.values(APP_THEME_VARIABLES)) {
-    root.style.removeProperty(variable);
+  if (wallpaperThemeOverride) {
+    setThemePreviewSidebarArtwork(false);
+    paintThemeColors(
+      WALLPAPER_THEME_ID,
+      wallpaperThemeOverride.colors,
+      wallpaperThemeOverride.appearance,
+    );
   }
 }
 

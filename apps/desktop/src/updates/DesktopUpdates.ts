@@ -355,6 +355,7 @@ export const make = Effect.gen(function* () {
   const checkForUpdates = Effect.fn("desktop.updates.checkForUpdates")(function* (
     reason: string,
     actionReservation: "acquire" | "held" = "acquire",
+    applyReturnedResult = false,
   ) {
     yield* Effect.annotateCurrentSpan({ reason });
     if (yield* Ref.get(desktopState.quitting)) return false;
@@ -377,7 +378,15 @@ export const make = Effect.gen(function* () {
       yield* logUpdaterInfo("checking for updates", { reason });
 
       return yield* electronUpdater.checkForUpdates.pipe(
-        Effect.as(true),
+        Effect.flatMap((result) => {
+          if (result === null) return Effect.succeed(false);
+          if (!applyReturnedResult) return Effect.succeed(true);
+          return (
+            result.isUpdateAvailable
+              ? handleUpdateAvailable(result.updateInfo)
+              : handleUpdateNotAvailable
+          ).pipe(Effect.as(true));
+        }),
         Effect.catchTags({
           ElectronUpdaterCheckForUpdatesError: Effect.fn(
             "desktop.updates.handleCheckForUpdatesFailure",
@@ -411,8 +420,21 @@ export const make = Effect.gen(function* () {
       return { accepted: false, completed: false };
     }
 
+    const rollbackStateRef = yield* Ref.make(state);
+
     return yield* Effect.gen(function* () {
-      yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
+      const checked = yield* checkForUpdates("download", "held", true);
+      if (!checked) {
+        return { accepted: false, completed: false };
+      }
+
+      const refreshedState = yield* Ref.get(updateStateRef);
+      if (refreshedState.status !== "available") {
+        return { accepted: true, completed: false };
+      }
+
+      yield* Ref.set(rollbackStateRef, refreshedState);
+      yield* setState(reduceDesktopUpdateStateOnDownloadStart(refreshedState));
       yield* electronUpdater.setDisableDifferentialDownload(
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
       );
@@ -435,7 +457,10 @@ export const make = Effect.gen(function* () {
         ),
       }),
       Effect.onInterrupt(() =>
-        updateState((current) => (current.status === "downloading" ? state : current)).pipe(
+        Ref.get(rollbackStateRef).pipe(
+          Effect.flatMap((rollbackState) =>
+            updateState((current) => (current.status === "downloading" ? rollbackState : current)),
+          ),
           Effect.asVoid,
         ),
       ),

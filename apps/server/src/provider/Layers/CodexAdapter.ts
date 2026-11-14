@@ -1812,7 +1812,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             'mcp_servers.erebus-research.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
           );
         }
-        const projectId = input.projectId;
+        const projectId = input.projectId ?? null;
         const researchToolController = options?.researchToolController;
         const coagentToolController = options?.coagentToolController;
         const runtimeInput: CodexSessionRuntimeOptions = {
@@ -1837,10 +1837,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   McpProviderSession.setMcpProviderSessionProteusHealth(input.threadId, health),
               }
             : {}),
-          ...(projectId && (researchToolController || coagentToolController)
+          ...((projectId && researchToolController) || coagentToolController
             ? {
                 dynamicTools: [
-                  ...(researchToolController ? [EREBUS_RESEARCH_DYNAMIC_TOOL] : []),
+                  ...(projectId && researchToolController ? [EREBUS_RESEARCH_DYNAMIC_TOOL] : []),
                   ...(coagentToolController ? [EREBUS_THREADS_DYNAMIC_TOOL] : []),
                 ],
                 handleDynamicTool: (params, _proteus) =>
@@ -1853,7 +1853,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                         },
                         params,
                       )
-                    : researchToolController
+                    : projectId && researchToolController
                       ? researchToolController.handle(
                           {
                             projectId,
@@ -1874,7 +1874,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               }
             : {}),
           ...(mcpSession?.researchFallbackEndpoint ||
-          (projectId && (researchToolController || coagentToolController)) ||
+          (projectId && researchToolController) ||
+          coagentToolController ||
           options?.getAgentPersonaDeveloperInstructions
             ? {
                 getAdditionalDeveloperInstructions: () =>
@@ -1886,7 +1887,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                           cwd: input.cwd ?? process.cwd(),
                         })
                       : Effect.succeed(""),
-                    projectId && coagentToolController
+                    coagentToolController
                       ? coagentToolController.instructions({
                           projectId,
                           threadId: input.threadId,

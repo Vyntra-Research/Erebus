@@ -1021,6 +1021,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(ServerSecretStore.layer),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
@@ -6527,6 +6528,82 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(items[0]?.kind, "snapshot");
       assert.equal(items[1]?.kind, "event");
       assert.equal(items[1]?.kind === "event" ? items[1].event.sequence : null, 2);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("refreshes an open thread after sync replaces its history", () =>
+    Effect.gen(function* () {
+      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
+      const importedThread = { ...thread, title: "Imported Thread" };
+      const liveEvents = yield* Queue.unbounded<OrchestrationEvent>();
+      const initialSnapshotLoaded = yield* Deferred.make<void>();
+      let snapshotCalls = 0;
+      const syncImportedEvent = {
+        sequence: 2,
+        eventId: EventId.make("event-sync-imported"),
+        aggregateKind: "thread",
+        aggregateId: defaultThreadId,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        type: "thread.sync-imported",
+        payload: {
+          threadId: defaultThreadId,
+          sourceRevision: "revision-2",
+          sourceHash: "hash-2",
+          importedAt: "2026-01-01T00:00:02.000Z",
+          thread: importedThread,
+          turns: [],
+          bindingUpdates: [],
+        },
+      } satisfies Extract<OrchestrationEvent, { type: "thread.sync-imported" }>;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            streamDomainEvents: Stream.fromQueue(liveEvents),
+          },
+          projectionSnapshotQuery: {
+            getThreadDetailSnapshot: () =>
+              Effect.gen(function* () {
+                snapshotCalls += 1;
+                if (snapshotCalls === 1) {
+                  yield* Deferred.succeed(initialSnapshotLoaded, undefined);
+                  return Option.some({ snapshotSequence: 1, thread });
+                }
+                return Option.some({ snapshotSequence: 2, thread: importedThread });
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId: defaultThreadId,
+            }).pipe(Stream.take(2), Stream.runCollect),
+          ).pipe(Effect.forkScoped);
+
+          yield* Deferred.await(initialSnapshotLoaded);
+          yield* Queue.offer(liveEvents, syncImportedEvent);
+          return yield* Fiber.join(fiber);
+        }),
+      ).pipe(Effect.timeout("2 seconds"));
+
+      assert.equal(items[0]?.kind, "snapshot");
+      assert.equal(
+        items[0]?.kind === "snapshot" ? items[0].snapshot.thread.title : null,
+        thread.title,
+      );
+      assert.equal(items[1]?.kind, "snapshot");
+      assert.equal(
+        items[1]?.kind === "snapshot" ? items[1].snapshot.thread.title : null,
+        importedThread.title,
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 

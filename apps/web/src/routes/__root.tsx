@@ -23,6 +23,7 @@ import { ProteusUpdateLaunchNotification } from "../components/ProteusUpdateLaun
 import { ArgosUpdateLaunchNotification } from "../components/ArgosUpdateLaunchNotification";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
+import { WallpaperBackdrop } from "../components/WallpaperBackdrop";
 import { Button } from "../components/ui/button";
 import {
   AnchoredToastProvider,
@@ -137,6 +138,7 @@ function RootRouteView() {
         <ContrastAppearanceSync />
         <GlassAppearanceSync />
         <FontAppearanceSync />
+        <WallpaperBackdrop />
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         <RelayClientInstallDialog />
         <ConnectOnboardingDialog />
