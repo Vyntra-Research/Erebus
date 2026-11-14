@@ -9,15 +9,20 @@ import type {
   ServerDeleteInactiveSubagentsResult,
   ServerDeleteRecoverySnapshotsInput,
   ServerDeleteRecoverySnapshotsResult,
+  ServerCompactStorageInput,
+  ServerCompactStorageResult,
   ServerStorageDiagnosticsResult,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 
 const CODEX_STATE_DATABASE = /^state_\d+\.sqlite$/u;
 const CODEX_HISTORY_DATABASE = /^thread_history_\d+\.sqlite$/u;
-const MINIMUM_IDLE_AGE_MS = 10 * 60 * 1_000;
+const MANUAL_CLEANUP_MINIMUM_IDLE_AGE_MS = 10 * 60 * 1_000;
+const AUTOMATIC_CLEANUP_MINIMUM_IDLE_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 
 interface IndexedSubagent {
   readonly id: string;
@@ -57,6 +62,26 @@ interface RecoverySnapshot {
   readonly digest: string;
 }
 
+interface DatabaseStorageSnapshot {
+  readonly databaseBytes: number;
+  readonly reclaimableBytes: number;
+  readonly activeTurnCount: number;
+  readonly modifiedAtMs: number;
+  readonly digest: string;
+}
+
+function managedCodexHomes(codexHome: string): ReadonlyArray<string> {
+  const homes = [NodePath.resolve(codexHome)];
+  const accountsRoot = NodePath.join(codexHome, "accounts");
+  if (NodeFS.existsSync(accountsRoot)) {
+    for (const account of NodeFS.readdirSync(accountsRoot, { withFileTypes: true })) {
+      if (!account.isDirectory() || account.isSymbolicLink()) continue;
+      homes.push(NodePath.resolve(account.parentPath, account.name));
+    }
+  }
+  return homes;
+}
+
 function databasePaths(codexHome: string, pattern: RegExp): ReadonlyArray<string> {
   const paths: string[] = [];
   const appendDirectMatches = (root: string) => {
@@ -67,14 +92,7 @@ function databasePaths(codexHome: string, pattern: RegExp): ReadonlyArray<string
       paths.push(NodePath.join(entry.parentPath, entry.name));
     }
   };
-  appendDirectMatches(codexHome);
-  const accountsRoot = NodePath.join(codexHome, "accounts");
-  if (NodeFS.existsSync(accountsRoot)) {
-    for (const account of NodeFS.readdirSync(accountsRoot, { withFileTypes: true })) {
-      if (!account.isDirectory()) continue;
-      appendDirectMatches(NodePath.join(account.parentPath, account.name));
-    }
-  }
+  for (const home of managedCodexHomes(codexHome)) appendDirectMatches(home);
   return [...new Set(paths.map((entry) => NodePath.resolve(entry)))];
 }
 
@@ -209,6 +227,147 @@ function buildRecoverySnapshot(stateDir: string): RecoverySnapshot {
   };
 }
 
+function readPragmaNumber(database: NodeSqlite.DatabaseSync, pragma: string): number {
+  const row = database.prepare(`PRAGMA ${pragma}`).get() as Record<string, number>;
+  return Object.values(row)[0] ?? 0;
+}
+
+function buildDatabaseStorageSnapshot(databasePath: string): DatabaseStorageSnapshot {
+  if (!NodeFS.existsSync(databasePath)) {
+    return {
+      databaseBytes: 0,
+      reclaimableBytes: 0,
+      activeTurnCount: 0,
+      modifiedAtMs: 0,
+      digest: NodeCrypto.createHash("sha256").update("missing").digest("hex"),
+    };
+  }
+  const files = [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]
+    .filter(NodeFS.existsSync)
+    .map((filePath) => NodeFS.statSync(filePath));
+  const databaseBytes = files.reduce((total, stat) => total + stat.size, 0);
+  const modifiedAtMs = Math.max(...files.map((stat) => stat.mtimeMs));
+  const walBytes = NodeFS.existsSync(`${databasePath}-wal`)
+    ? NodeFS.statSync(`${databasePath}-wal`).size
+    : 0;
+  const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
+  try {
+    database.exec("PRAGMA busy_timeout = 5000");
+    const pageSize = readPragmaNumber(database, "page_size");
+    const freePages = readPragmaNumber(database, "freelist_count");
+    const activeTurnCount = (
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM projection_thread_sessions
+            WHERE status IN ('starting', 'running') OR active_turn_id IS NOT NULL`,
+        )
+        .get() as { readonly count: number }
+    ).count;
+    const digest = NodeCrypto.createHash("sha256")
+      .update(String(databaseBytes))
+      .update("\0")
+      .update(String(modifiedAtMs))
+      .update("\0")
+      .update(String(freePages))
+      .digest("hex");
+    return {
+      databaseBytes,
+      reclaimableBytes: pageSize * freePages + walBytes,
+      activeTurnCount,
+      modifiedAtMs,
+      digest,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+const compactDatabase = Effect.fn("compactDatabase")(function* (input: {
+  readonly databasePath: string;
+  readonly request: ServerCompactStorageInput;
+  readonly sql: SqlClient.SqlClient;
+}): Effect.fn.Return<ServerCompactStorageResult, SqlError> {
+  const before = buildDatabaseStorageSnapshot(input.databasePath);
+  if (before.digest !== input.request.snapshotDigest) {
+    return yield* Effect.succeed({
+      accepted: false,
+      beforeBytes: before.databaseBytes,
+      afterBytes: before.databaseBytes,
+      freedBytes: 0,
+      message: "Storage changed. Refresh the details before compacting it.",
+    });
+  }
+  if (before.activeTurnCount > 0) {
+    return yield* Effect.succeed({
+      accepted: false,
+      beforeBytes: before.databaseBytes,
+      afterBytes: before.databaseBytes,
+      freedBytes: 0,
+      message: "Wait for active turns to finish before compacting local storage.",
+    });
+  }
+  if (before.reclaimableBytes === 0) {
+    return yield* Effect.succeed({
+      accepted: true,
+      beforeBytes: before.databaseBytes,
+      afterBytes: before.databaseBytes,
+      freedBytes: 0,
+      message: "The local database is already compact.",
+    });
+  }
+
+  const disk = NodeFS.statfsSync(NodePath.dirname(input.databasePath));
+  const availableBytes = disk.bavail * disk.bsize;
+  if (availableBytes < before.databaseBytes + 256 * 1024 * 1024) {
+    return yield* Effect.succeed({
+      accepted: false,
+      beforeBytes: before.databaseBytes,
+      afterBytes: before.databaseBytes,
+      freedBytes: 0,
+      message: "There is not enough free disk space to compact the local database safely.",
+    });
+  }
+
+  const compacted = yield* Effect.scoped(
+    Effect.gen(function* () {
+      const connection = yield* input.sql.reserve;
+      const activeRows = (yield* connection.executeUnprepared(
+        `SELECT COUNT(*) AS count
+           FROM projection_thread_sessions
+          WHERE status IN ('starting', 'running') OR active_turn_id IS NOT NULL`,
+        [],
+        undefined,
+      )) as ReadonlyArray<{ readonly count: number }>;
+      if ((activeRows[0]?.count ?? 0) > 0) return false;
+      yield* connection.executeUnprepared("PRAGMA busy_timeout = 30000", [], undefined);
+      yield* connection.executeUnprepared("PRAGMA wal_checkpoint(TRUNCATE)", [], undefined);
+      yield* connection.executeUnprepared("PRAGMA auto_vacuum = INCREMENTAL", [], undefined);
+      yield* connection.executeUnprepared("VACUUM", [], undefined);
+      yield* connection.executeUnprepared("PRAGMA optimize", [], undefined);
+      return true;
+    }),
+  );
+  if (!compacted) {
+    const current = buildDatabaseStorageSnapshot(input.databasePath);
+    return {
+      accepted: false,
+      beforeBytes: current.databaseBytes,
+      afterBytes: current.databaseBytes,
+      freedBytes: 0,
+      message: "Wait for active turns to finish before compacting local storage.",
+    };
+  }
+  const after = buildDatabaseStorageSnapshot(input.databasePath);
+  return {
+    accepted: true,
+    beforeBytes: before.databaseBytes,
+    afterBytes: after.databaseBytes,
+    freedBytes: Math.max(0, before.databaseBytes - after.databaseBytes),
+    message: "Local database storage was compacted.",
+  };
+});
+
 function readRolloutIdentity(filePath: string): {
   readonly id: string;
   readonly threadSource: string;
@@ -241,6 +400,7 @@ function buildSnapshot(input: {
   readonly codexHome: string;
   readonly erebusDatabasePath: string;
   readonly nowMs: number;
+  readonly minimumIdleAgeMs?: number;
 }): CleanupSnapshot {
   const stateDatabases = databasePaths(input.codexHome, CODEX_STATE_DATABASE);
   if (stateDatabases.length === 0) {
@@ -257,30 +417,19 @@ function buildSnapshot(input: {
   const { rows, edges } = readIndexedSubagents(stateDatabases);
   const parentByChild = new Map(edges.map((edge) => [edge.child_thread_id, edge.parent_thread_id]));
   const active = readProtectedProviderThreads(input.erebusDatabasePath);
-  const lockRoot = NodePath.join(input.codexHome, "thread-writer-locks");
-  const sessionRoots = ["sessions", "archived_sessions"]
-    .map((name) => NodePath.join(input.codexHome, name))
-    .filter(NodeFS.existsSync)
-    .map((root) => NodeFS.realpathSync.native(root));
+  const lockRoots = managedCodexHomes(input.codexHome).map((home) =>
+    NodePath.join(home, "thread-writer-locks"),
+  );
+  const sessionRoots = listCodexSessionRoots(input.codexHome);
   const protectedIds = new Set<string>();
 
   for (const row of rows) {
-    let current: string | undefined = row.id;
-    const visited = new Set<string>();
-    while (current && !visited.has(current)) {
-      visited.add(current);
-      if (active.has(current) || NodeFS.existsSync(NodePath.join(lockRoot, `${current}.lock`))) {
-        for (const id of visited) protectedIds.add(id);
-        break;
-      }
-      current = parentByChild.get(current);
-    }
-    if (!parentByChild.has(row.id)) protectedIds.add(row.id);
-  }
+    const isActive =
+      active.has(row.id) ||
+      lockRoots.some((root) => NodeFS.existsSync(NodePath.join(root, `${row.id}.lock`)));
+    if (!isActive && parentByChild.has(row.id)) continue;
 
-  // If an active descendant is protected, retain its whole ancestry as well.
-  for (const id of protectedIds) {
-    let current = parentByChild.get(id);
+    let current: string | undefined = row.id;
     while (current && !protectedIds.has(current)) {
       protectedIds.add(current);
       current = parentByChild.get(current);
@@ -312,7 +461,10 @@ function buildSnapshot(input: {
       identity.threadSource === "subagent" &&
       sessionRoots.some((root) => isWithin(root, canonicalPath));
     const isProtected =
-      protectedIds.has(row.id) || !valid || row.updatedAtMs > input.nowMs - MINIMUM_IDLE_AGE_MS;
+      protectedIds.has(row.id) ||
+      !valid ||
+      row.updatedAtMs >
+        input.nowMs - (input.minimumIdleAgeMs ?? MANUAL_CLEANUP_MINIMUM_IDLE_AGE_MS);
     if (isProtected) {
       protectedCount += 1;
       protectedBytes += bytes;
@@ -402,6 +554,13 @@ function deleteCodexIndexes(input: {
         }
       }
       database.exec("COMMIT");
+      for (const alias of [...aliases, ...historyAliases]) {
+        try {
+          database.exec(`PRAGMA ${alias}.incremental_vacuum`);
+        } catch {
+          // Index deletion is already durable. A later cleanup can reclaim the free pages.
+        }
+      }
     } catch (cause) {
       database.exec("ROLLBACK");
       throw cause;
@@ -411,11 +570,131 @@ function deleteCodexIndexes(input: {
   }
 }
 
+function listCodexSessionRoots(codexHome: string): ReadonlyArray<string> {
+  return managedCodexHomes(codexHome)
+    .flatMap((home) => ["sessions", "archived_sessions"].map((name) => NodePath.join(home, name)))
+    .filter(NodeFS.existsSync)
+    .map((root) => NodeFS.realpathSync.native(root));
+}
+
+function walkRolloutFiles(root: string): ReadonlyArray<string> {
+  const files: string[] = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) continue;
+    for (const entry of NodeFS.readdirSync(current, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      const entryPath = NodePath.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        files.push(entryPath);
+      }
+    }
+  }
+  return files;
+}
+
+function readIndexedRolloutPaths(
+  stateDatabases: ReadonlyArray<string>,
+  ids: ReadonlySet<string>,
+): ReadonlyArray<string> {
+  const paths = new Set<string>();
+  for (const databasePath of stateDatabases) {
+    const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const rows = database
+        .prepare("SELECT id, rollout_path AS rolloutPath FROM threads")
+        .all() as unknown as ReadonlyArray<{ readonly id: string; readonly rolloutPath: string }>;
+      for (const row of rows) {
+        if (ids.has(row.id) && row.rolloutPath.length > 0) paths.add(row.rolloutPath);
+      }
+    } finally {
+      database.close();
+    }
+  }
+  return [...paths];
+}
+
+function performCodexThreadHistoryDeletion(input: {
+  readonly codexHome: string;
+  readonly providerThreadIds: ReadonlyArray<string>;
+}): boolean {
+  const ids = new Set(input.providerThreadIds.filter((id) => id.length > 0));
+  if (ids.size === 0) return true;
+
+  const lockRoots = managedCodexHomes(input.codexHome).map((home) =>
+    NodePath.join(home, "thread-writer-locks"),
+  );
+  if (
+    [...ids].some((id) =>
+      lockRoots.some((root) => NodeFS.existsSync(NodePath.join(root, `${id}.lock`))),
+    )
+  ) {
+    return false;
+  }
+
+  const sessionRoots = listCodexSessionRoots(input.codexHome);
+  const indexedPaths = readIndexedRolloutPaths(
+    databasePaths(input.codexHome, CODEX_STATE_DATABASE),
+    ids,
+  );
+  const candidates = new Map<string, string>();
+  const resolvedIds = new Set<string>();
+  const addCandidate = (filePath: string) => {
+    if (!NodeFS.existsSync(filePath)) return;
+    const canonicalPath = NodeFS.realpathSync.native(filePath);
+    const identity = readRolloutIdentity(canonicalPath);
+    if (!ids.has(identity.id)) return;
+    if (!sessionRoots.some((root) => isWithin(root, canonicalPath))) {
+      throw new Error("A Codex rollout selected for cleanup is outside the managed session roots.");
+    }
+    candidates.set(canonicalPath.toLowerCase(), canonicalPath);
+    resolvedIds.add(identity.id);
+  };
+  for (const filePath of indexedPaths) addCandidate(filePath);
+
+  const filenameSuffixes = [...ids]
+    .filter((id) => !resolvedIds.has(id))
+    .map((id) => `${id}.jsonl`.toLowerCase());
+  if (filenameSuffixes.length > 0) {
+    for (const filePath of sessionRoots.flatMap(walkRolloutFiles)) {
+      const fileName = NodePath.basename(filePath).toLowerCase();
+      if (filenameSuffixes.some((suffix) => fileName.endsWith(suffix))) addCandidate(filePath);
+    }
+  }
+
+  const operationId = NodeCrypto.randomUUID();
+  const trashRoot = NodePath.join(input.codexHome, ".erebus-trash", `threads-${operationId}`);
+  NodeFS.mkdirSync(trashRoot, { recursive: true });
+  const staged: Array<{ readonly original: string; readonly staged: string }> = [];
+  try {
+    for (const [index, candidate] of [...candidates.values()].entries()) {
+      const stagedPath = NodePath.join(trashRoot, `${index}-${NodePath.basename(candidate)}`);
+      NodeFS.renameSync(candidate, stagedPath);
+      staged.push({ original: candidate, staged: stagedPath });
+    }
+    deleteCodexIndexes({ codexHome: input.codexHome, ids: [...ids] });
+  } catch (cause) {
+    for (const entry of staged.toReversed()) {
+      if (!NodeFS.existsSync(entry.staged) || NodeFS.existsSync(entry.original)) continue;
+      NodeFS.mkdirSync(NodePath.dirname(entry.original), { recursive: true });
+      NodeFS.renameSync(entry.staged, entry.original);
+    }
+    NodeFS.rmSync(trashRoot, { recursive: true, force: true });
+    throw cause;
+  }
+  NodeFS.rmSync(trashRoot, { recursive: true, force: true });
+  return true;
+}
+
 function performCleanup(input: {
   readonly codexHome: string;
   readonly erebusDatabasePath: string;
   readonly request: ServerDeleteInactiveSubagentsInput;
   readonly nowMs: number;
+  readonly minimumIdleAgeMs?: number;
 }): ServerDeleteInactiveSubagentsResult {
   const snapshot = buildSnapshot(input);
   if (snapshot.digest !== input.request.snapshotDigest) {
@@ -542,6 +821,17 @@ export const readStorageDiagnostics = Effect.fn("readStorageDiagnostics")(functi
       digest: "unavailable",
     })),
   );
+  const databaseSnapshot = yield* Effect.try(() =>
+    buildDatabaseStorageSnapshot(input.databasePath),
+  ).pipe(
+    Effect.orElseSucceed(() => ({
+      databaseBytes: 0,
+      reclaimableBytes: 0,
+      activeTurnCount: 0,
+      modifiedAtMs: 0,
+      digest: "unavailable",
+    })),
+  );
   const result = yield* Effect.result(
     Effect.try(() => buildSnapshot({ codexHome, erebusDatabasePath: input.databasePath, nowMs })),
   );
@@ -560,6 +850,9 @@ export const readStorageDiagnostics = Effect.fn("readStorageDiagnostics")(functi
       recoverySnapshotCount: recoverySnapshot.entries.length,
       recoverySnapshotBytes: recoverySnapshot.totalBytes,
       recoverySnapshotDigest: recoverySnapshot.digest,
+      databaseBytes: databaseSnapshot.databaseBytes,
+      reclaimableDatabaseBytes: databaseSnapshot.reclaimableBytes,
+      databaseSnapshotDigest: databaseSnapshot.digest,
     };
   }
   const snapshot = result.success;
@@ -580,6 +873,9 @@ export const readStorageDiagnostics = Effect.fn("readStorageDiagnostics")(functi
     recoverySnapshotCount: recoverySnapshot.entries.length,
     recoverySnapshotBytes: recoverySnapshot.totalBytes,
     recoverySnapshotDigest: recoverySnapshot.digest,
+    databaseBytes: databaseSnapshot.databaseBytes,
+    reclaimableDatabaseBytes: databaseSnapshot.reclaimableBytes,
+    databaseSnapshotDigest: databaseSnapshot.digest,
   };
 });
 
@@ -603,6 +899,68 @@ export const deleteInactiveSubagents = Effect.fn("deleteInactiveSubagents")(func
       deletedCount: 0,
       deletedBytes: 0,
       message: "Codex agent session cleanup failed without deleting the selected files.",
+    })),
+  );
+});
+
+export const pruneExpiredInactiveSubagents = Effect.fn("pruneExpiredInactiveSubagents")(
+  function* (input: {
+    readonly stateDir: string;
+    readonly databasePath: string;
+  }): Effect.fn.Return<ServerDeleteInactiveSubagentsResult> {
+    const codexHome = NodePath.join(input.stateDir, "providers", "codex");
+    const nowMs = yield* Clock.currentTimeMillis;
+    return yield* Effect.try(() => {
+      const snapshot = buildSnapshot({
+        codexHome,
+        erebusDatabasePath: input.databasePath,
+        nowMs,
+        minimumIdleAgeMs: AUTOMATIC_CLEANUP_MINIMUM_IDLE_AGE_MS,
+      });
+      return performCleanup({
+        codexHome,
+        erebusDatabasePath: input.databasePath,
+        request: { snapshotDigest: snapshot.digest },
+        nowMs,
+        minimumIdleAgeMs: AUTOMATIC_CLEANUP_MINIMUM_IDLE_AGE_MS,
+      });
+    }).pipe(
+      Effect.orElseSucceed(() => ({
+        accepted: false,
+        deletedCount: 0,
+        deletedBytes: 0,
+        message: "Automatic Codex agent session cleanup was skipped.",
+      })),
+    );
+  },
+);
+
+export const deleteCodexThreadHistories = Effect.fn("deleteCodexThreadHistories")(
+  function* (input: {
+    readonly stateDir: string;
+    readonly providerThreadIds: ReadonlyArray<string>;
+  }): Effect.fn.Return<boolean> {
+    return yield* Effect.try(() =>
+      performCodexThreadHistoryDeletion({
+        codexHome: NodePath.join(input.stateDir, "providers", "codex"),
+        providerThreadIds: input.providerThreadIds,
+      }),
+    ).pipe(Effect.orElseSucceed(() => false));
+  },
+);
+
+export const compactDatabaseStorage = Effect.fn("compactDatabaseStorage")(function* (input: {
+  readonly databasePath: string;
+  readonly request: ServerCompactStorageInput;
+  readonly sql: SqlClient.SqlClient;
+}): Effect.fn.Return<ServerCompactStorageResult> {
+  return yield* compactDatabase(input).pipe(
+    Effect.orElseSucceed(() => ({
+      accepted: false,
+      beforeBytes: 0,
+      afterBytes: 0,
+      freedBytes: 0,
+      message: "The local database could not be compacted. No data was removed.",
     })),
   );
 });

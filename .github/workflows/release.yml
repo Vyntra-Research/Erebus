@@ -6,7 +6,6 @@ on:
       - CI
     branches:
       - main
-      - stable
     types:
       - completed
   workflow_dispatch:
@@ -17,10 +16,11 @@ on:
         type: string
 
 concurrency:
-  group: release-stable
+  group: release
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
   pull-requests: read
 
@@ -40,16 +40,31 @@ jobs:
           CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           CI_BRANCH: ${{ github.event.workflow_run.head_branch }}
           TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_SHA: ${{ github.sha }}
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$DISPATCH_REF" != "refs/heads/main" ]]; then
+              echo "Manual releases must run from main, not $DISPATCH_REF."
+              exit 1
+            fi
+            successful_runs="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f branch=main \
+              -f status=success \
+              -f per_page=100 \
+              --jq ".workflow_runs | map(select(.head_sha == \"$DISPATCH_SHA\")) | length")"
+            if [[ "$successful_runs" -lt 1 ]]; then
+              echo "No successful CI run exists for $DISPATCH_SHA on main."
+              exit 1
+            fi
             echo "should_release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [[ "$CI_CONCLUSION" != "success" || ("$CI_BRANCH" != "main" && "$CI_BRANCH" != "stable") ]]; then
+          if [[ "$CI_CONCLUSION" != "success" || "$CI_BRANCH" != "main" ]]; then
             echo "should_release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          merged_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TESTED_SHA/pulls" --jq "[.[] | select(.merged_at != null and .base.ref == \"$CI_BRANCH\")] | length")"
+          merged_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TESTED_SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')"
           if [[ "$merged_count" -gt 0 ]]; then
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           else
@@ -70,6 +85,7 @@ jobs:
       windows_manifest: ${{ steps.version.outputs.windows_manifest }}
       linux_manifest: ${{ steps.version.outputs.linux_manifest }}
       release_exists: ${{ steps.existing.outputs.release }}
+      release_matches_target: ${{ steps.existing.outputs.matches_target }}
     steps:
       - name: Checkout tested revision
         uses: actions/checkout@v6
@@ -80,6 +96,14 @@ jobs:
             /*
             !/.repos/
           sparse-checkout-cone-mode: false
+
+      - name: Require revision from main
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$TARGET_SHA" origin/main
 
       - name: Resolve version
         id: version
@@ -117,12 +141,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           $output = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:TAG" --silent 2>&1
           if ($LASTEXITCODE -eq 0) {
             "release=true" >> $env:GITHUB_OUTPUT
+            $tagOutput = @(git rev-list -n 1 $env:TAG 2>$null)
+            $tagExitCode = $LASTEXITCODE
+            $taggedSha = if ($tagOutput.Count -gt 0) { ([string]$tagOutput[0]).Trim() } else { '' }
+            $matchesTarget = if ($tagExitCode -eq 0 -and $taggedSha -eq $env:TARGET_SHA) {
+              'true'
+            } else {
+              'false'
+            }
+            "matches_target=$matchesTarget" >> $env:GITHUB_OUTPUT
           } elseif (($output | Out-String) -match 'HTTP 404|Not Found') {
             "release=false" >> $env:GITHUB_OUTPUT
+            "matches_target=false" >> $env:GITHUB_OUTPUT
           } else {
             throw "Failed to check whether $env:TAG already has a release: $($output | Out-String)"
           }
@@ -382,4 +417,88 @@ jobs:
           & gh @releaseArgs
           if ($LASTEXITCODE -ne 0) {
             throw "GitHub Release creation failed with exit code $LASTEXITCODE."
+          }
+
+  channel-pointer:
+    name: Advance release channel
+    needs: [metadata, publish]
+    if: >-
+      ${{
+        always() &&
+        needs.metadata.result == 'success' &&
+        needs.metadata.outputs.channel != 'nightly' &&
+        (
+          needs.publish.result == 'success' ||
+          (
+            needs.metadata.outputs.release_exists == 'true' &&
+            needs.metadata.outputs.release_matches_target == 'true'
+          )
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tested revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Advance channel branch
+        shell: pwsh
+        env:
+          CHANNEL: ${{ needs.metadata.outputs.channel }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          $branch = if ($env:CHANNEL -eq 'latest') {
+            'stable'
+          } elseif ($env:CHANNEL -eq 'beta') {
+            'beta'
+          } else {
+            throw "Channel $env:CHANNEL does not have a release branch."
+          }
+
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName --jq '.tagName' | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release $env:TAG is not available."
+          }
+
+          git fetch --tags origin main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to fetch main and release tags."
+          }
+          git merge-base --is-ancestor $env:TARGET_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release commit $env:TARGET_SHA is not part of main."
+          }
+
+          $tagOutput = @(git rev-list -n 1 $env:TAG 2>$null)
+          $tagExitCode = $LASTEXITCODE
+          $taggedSha = if ($tagOutput.Count -gt 0) { ([string]$tagOutput[0]).Trim() } else { '' }
+          if ($tagExitCode -ne 0 -or $taggedSha -ne $env:TARGET_SHA) {
+            throw "Tag $env:TAG does not point to $env:TARGET_SHA."
+          }
+
+          $remoteBranch = @(git ls-remote --heads origin "refs/heads/$branch")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to inspect origin/$branch."
+          }
+          if ($remoteBranch.Count -gt 0) {
+            git fetch --no-tags origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to fetch origin/$branch."
+            }
+            git merge-base --is-ancestor "origin/$branch" $env:TARGET_SHA
+            if ($LASTEXITCODE -ne 0) {
+              throw "Refusing to move $branch backward or across unrelated history."
+            }
+          }
+
+          git push origin "${env:TARGET_SHA}:refs/heads/$branch"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to advance $branch to $env:TARGET_SHA."
           }

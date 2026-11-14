@@ -1,5 +1,10 @@
+// @effect-diagnostics nodeBuiltinImport:off - Electron preview partitions live in sessionData.
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+
 import type { Session } from "electron";
-import { session } from "electron";
+import { app, session } from "electron";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -10,6 +15,25 @@ import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
+const PREVIEW_PARTITION_DIRECTORY_PREFIX = PREVIEW_PARTITION_PREFIX.slice("persist:".length);
+const STALE_PREVIEW_CACHE_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
+
+function listStalePreviewPartitions(nowMs: number): ReadonlyArray<string> {
+  if (typeof app?.getPath !== "function") return [];
+  const root = NodePath.join(app.getPath("sessionData"), "Partitions");
+  if (!NodeFS.existsSync(root)) return [];
+  return NodeFS.readdirSync(root, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        !entry.isSymbolicLink() &&
+        entry.name.startsWith(PREVIEW_PARTITION_DIRECTORY_PREFIX),
+    )
+    .flatMap((entry) => {
+      const stat = NodeFS.lstatSync(NodePath.join(root, entry.name));
+      return stat.mtimeMs <= nowMs - STALE_PREVIEW_CACHE_AGE_MS ? [`persist:${entry.name}`] : [];
+    });
+}
 
 // Permissions granted to preview web content. `clipboard-sanitized-write` is the
 // Electron permission behind `navigator.clipboard.writeText()` — note it is NOT
@@ -111,6 +135,32 @@ export const make = Effect.gen(function* BrowserSessionMake() {
   const crypto = yield* Crypto.Crypto;
   const sessionsRef = yield* SynchronizedRef.make<ReadonlyMap<string, Session>>(new Map());
 
+  const pruneStalePreviewCaches = Effect.fn("BrowserSession.pruneStalePreviewCaches")(function* () {
+    const nowMs = yield* Clock.currentTimeMillis;
+    const stalePartitions = yield* Effect.try(() => listStalePreviewPartitions(nowMs)).pipe(
+      Effect.orElseSucceed(() => [] as ReadonlyArray<string>),
+    );
+    yield* Effect.forEach(
+      stalePartitions,
+      (partition) =>
+        Effect.gen(function* () {
+          const activeSessions = yield* SynchronizedRef.get(sessionsRef);
+          if (activeSessions.has(partition)) return;
+          yield* Effect.tryPromise(() => session.fromPartition(partition).clearCache()).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to prune an inactive preview cache", {
+                partition,
+                cause,
+              }),
+            ),
+          );
+        }),
+      { concurrency: 2, discard: true },
+    );
+  });
+
+  yield* Effect.forkDetach(pruneStalePreviewCaches());
+
   const getPartition = Effect.fn("BrowserSession.getPartition")(function* (scope = "shared") {
     const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(scope)).pipe(
       Effect.mapError(
@@ -126,7 +176,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
 
   const getSession = Effect.fn("BrowserSession.getSession")(function* (scope = "shared") {
     const partition = yield* getPartition(scope);
-    return yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
+    const browserSession = yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
       const existing = sessions.get(partition);
       if (existing) return Effect.succeed([existing, sessions] as const);
       return Effect.try({
@@ -155,6 +205,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
           }),
       });
     });
+    return browserSession;
   });
 
   return BrowserSession.of({

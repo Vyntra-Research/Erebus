@@ -373,6 +373,9 @@ export const ServerStorageDiagnosticsResult = Schema.Struct({
   recoverySnapshotCount: NonNegativeInt,
   recoverySnapshotBytes: NonNegativeInt,
   recoverySnapshotDigest: TrimmedNonEmptyString,
+  databaseBytes: NonNegativeInt,
+  reclaimableDatabaseBytes: NonNegativeInt,
+  databaseSnapshotDigest: TrimmedNonEmptyString,
 });
 export type ServerStorageDiagnosticsResult = typeof ServerStorageDiagnosticsResult.Type;
 
@@ -396,6 +399,20 @@ export type ServerDeleteRecoverySnapshotsInput = typeof ServerDeleteRecoverySnap
 
 export const ServerDeleteRecoverySnapshotsResult = ServerDeleteInactiveSubagentsResult;
 export type ServerDeleteRecoverySnapshotsResult = typeof ServerDeleteRecoverySnapshotsResult.Type;
+
+export const ServerCompactStorageInput = Schema.Struct({
+  snapshotDigest: TrimmedNonEmptyString,
+});
+export type ServerCompactStorageInput = typeof ServerCompactStorageInput.Type;
+
+export const ServerCompactStorageResult = Schema.Struct({
+  accepted: Schema.Boolean,
+  beforeBytes: NonNegativeInt,
+  afterBytes: NonNegativeInt,
+  freedBytes: NonNegativeInt,
+  message: TrimmedNonEmptyString,
+});
+export type ServerCompactStorageResult = typeof ServerCompactStorageResult.Type;
 
 export const ServerProcessResourceHistoryInput = Schema.Struct({
   windowMs: NonNegativeInt,

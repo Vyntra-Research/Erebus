@@ -1,13 +1,20 @@
+// @effect-diagnostics nodeBuiltinImport:off - Tests build temporary Electron partition fixtures.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
+import * as TestClock from "effect/testing/TestClock";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { fromPartition, sessions } = vi.hoisted(() => ({
+const { fromPartition, sessionDataPath, sessions } = vi.hoisted(() => ({
   fromPartition: vi.fn(),
+  sessionDataPath: { value: "" },
   sessions: new Map<
     string,
     {
@@ -22,6 +29,9 @@ const { fromPartition, sessions } = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => ({
+  app: {
+    getPath: () => sessionDataPath.value,
+  },
   session: {
     fromPartition,
   },
@@ -33,6 +43,7 @@ const layer = BrowserSession.layer.pipe(Layer.provide(NodeServices.layer));
 
 describe("BrowserSession", () => {
   beforeEach(() => {
+    sessionDataPath.value = NodePath.join(NodeOS.tmpdir(), "erebus-missing-session-data");
     sessions.clear();
     fromPartition.mockReset();
     fromPartition.mockImplementation((partition: string) => {
@@ -190,6 +201,34 @@ describe("BrowserSession", () => {
         assert.strictEqual(browserSession.clearCache.mock.calls.length, 1);
       }
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("clears cache from an inactive preview partition without clearing its storage", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "erebus-preview-cache-"));
+        const partition = "persist:t3code-preview-stale";
+        const partitionPath = NodePath.join(root, "Partitions", partition.slice("persist:".length));
+        NodeFS.mkdirSync(partitionPath, { recursive: true });
+        NodeFS.utimesSync(partitionPath, 0, 0);
+        sessionDataPath.value = root;
+        return { partition, root };
+      }),
+      ({ partition }) =>
+        Effect.gen(function* () {
+          yield* TestClock.adjust("9 days");
+          yield* BrowserSession.make.pipe(Effect.provide(NodeServices.layer));
+          yield* Effect.promise(() =>
+            vi.waitFor(() => {
+              const staleSession = sessions.get(partition);
+              assert.isDefined(staleSession);
+              assert.strictEqual(staleSession.clearCache.mock.calls.length, 1);
+              assert.strictEqual(staleSession.clearStorageData.mock.calls.length, 0);
+            }),
+          );
+        }),
+      ({ root }) => Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true })),
+    ),
   );
 
   it.effect("correlates clear failures while still attempting every session", () =>
