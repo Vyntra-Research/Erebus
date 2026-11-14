@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2 - 2026-11-14
+
+### Fixed
+
+- Keep code surfaces in the wallpaper's canvas color family instead of tinting them with a minor extracted accent.
+
 ## 1.1.1 - 2026-11-13
 
 ### Fixed
