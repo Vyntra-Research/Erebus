@@ -41,7 +41,7 @@ it("keeps Judge independent, artifact-bounded, and campaign-free", () => {
 });
 
 it("records the campaign-free policy revision and pinned evaluator", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 22);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 23);
   assert.include(
     RESEARCH_INTERNAL_POLICY.principalInstructions,
     EREBUS_PRINCIPAL_INSTRUCTIONS.trim(),
@@ -50,8 +50,8 @@ it("records the campaign-free policy revision and pinned evaluator", () => {
     RESEARCH_INTERNAL_POLICY.principalInstructions,
     /`mcp_fallback`[\s\S]*instead of native `research\.\*`/,
   );
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 24);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 24);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 25);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 25);
   assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 600);
   assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 60);
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

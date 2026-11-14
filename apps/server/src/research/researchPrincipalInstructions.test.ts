@@ -16,7 +16,6 @@ it("uses the native goal and leaves ordinary research free of Erebus lifecycle c
   assert.match(instructions, /Never use it for Judge submission/);
   assert.match(instructions, /`mcp_fallback`[\s\S]*instead of native `research\.\*`/);
   assert.match(instructions, /Never invent those fields or call lifecycle tools/);
-  assert.match(instructions, /Argos as the canonical connected research\s+memory/);
   assert.match(instructions, /Proteus is read-only legacy history/);
   assert.match(instructions, /Do not load or rely on Proteus skills/);
   assert.match(instructions, /research\.calculate_cvss/);
