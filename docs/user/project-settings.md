@@ -11,6 +11,6 @@ To choose a different icon:
 4. Search for an image file and select it.
 
 Erebus supports SVG, PNG, ICO, JPEG, GIF, AVIF, and WebP files. The selected path applies to
-each checkout in the project group and appears on your connected clients.
+each checkout in the project group and appears in the local app.
 
 To use automatic detection again, select **Automatic**.

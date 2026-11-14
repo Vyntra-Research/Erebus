@@ -3,10 +3,10 @@
 Edit keybindings from **Settings** → **Keybindings**. That page lists every command, its current
 shortcut, whether it is a default or your own, and warns about conflicts.
 
-The same configuration lives in `~/.t3/userdata/keybindings.json` on the machine running the
-server, if you prefer editing it directly. Erebus writes the built-in defaults into that file on
-first run, and adds any new defaults on later startups unless a rule of yours already claims the
-command or the shortcut.
+The packaged app stores the same configuration in `.erebus/userdata/keybindings.json` under your
+home directory. Development builds use the worktree-local `.t3/userdata/keybindings.json` instead.
+Erebus writes the built-in defaults on first run and adds new defaults on later startups unless one
+of your rules already claims the command or shortcut.
 
 The file is a JSON array of rules.
 
@@ -19,16 +19,16 @@ The file is a JSON array of rules.
 
 Invalid rules are ignored. An invalid file is ignored entirely, and the server logs a warning.
 
-## Rule Shape
+## Rule shape
 
 - `key` (required): shortcut string, like `mod+j`, `ctrl+k`, `cmd+shift+d`
 - `command` (required): the command ID to run
 - `when` (optional): boolean expression controlling when the shortcut is active
 
-## Key Syntax
+## Key syntax
 
-Modifiers: `mod` (`cmd` on macOS, `ctrl` elsewhere), `cmd` / `meta`, `ctrl` / `control`, `shift`,
-`alt` / `option`.
+Modifiers: `mod` (`ctrl` in the supported Windows and Linux builds), `cmd` / `meta`, `ctrl` /
+`control`, `shift`, and `alt` / `option`.
 
 Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
 
@@ -74,7 +74,7 @@ Background submission from a new thread is the exception. `mod+enter` starts tha
 another new thread with the same workspace mode and base branch. **New worktree** remains selected,
 but the new thread does not reuse the worktree created for the thread that just started.
 
-## `when` Conditions
+## `when` conditions
 
 A `when` expression is evaluated against context keys describing the current UI state. The keys
 the app supplies today are `terminalFocus`, `terminalOpen`, `previewFocus`, `previewOpen`, and

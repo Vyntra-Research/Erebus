@@ -1,11 +1,11 @@
 # Contributing
 
-Erebus is early. Focused bug fixes, reliability work, tests, and clear documentation corrections are welcome.
+Focused bug fixes, reliability work, tests, and documentation corrections are welcome.
 
-Before opening a large change, start a discussion in the [Erebus repository](https://github.com/Vyntra-Research/Erebus/discussions). Keep each pull request about one concern and explain the problem, the fix, and how you tested it.
+Open a discussion before starting a large feature or architectural change. Keep each pull request about one concern. Explain the problem, the fix, and the checks you ran.
 
-For UI changes, include before-and-after images. For timing or motion changes, include a short video. Do not commit screenshots that exist only as review evidence.
+For interface changes, include before-and-after images. Use a short video when motion or timing is part of the change. Keep review-only media out of the repository.
 
-Do not submit credentials, machine-specific paths, local research databases, research logs, private plans, proofs of concept against third parties, or unpublished vulnerability details. Report a flaw in Erebus through the process in [SECURITY.md](./SECURITY.md).
+Do not commit credentials, machine paths, local research databases, research logs, private plans, unpublished findings, or proofs of concept against third-party targets. Report a vulnerability in Erebus through [SECURITY.md](./SECURITY.md).
 
-Erebus is based on T3 Code. Preserve its MIT notice and do not remove the attribution in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+Erebus retains code and compatibility names inherited from T3 Code. Preserve its MIT notice and the attribution in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

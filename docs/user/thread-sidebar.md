@@ -1,38 +1,31 @@
 # Organizing threads
 
-Pin a thread from its context menu to keep it in the pinned section above your active work.
-Pinned threads are shown independently of their project, including when you connect to more than
-one environment.
+Threads do not need a project. The main **New thread** action creates a standalone thread. Shift-click it to create the thread in the current project, or use the new-thread action beside a project name.
 
-Pinned threads still move to **Settled** when they become inactive. They also move when their pull
-request merges if **Auto-settle merged threads** is enabled.
+A standalone thread appears under **Threads**. Link it later from its context menu with **Add to project**, or drag it into a project folder. A linked thread can move to another project through the same menu. The project supplies the workspace path; the conversation history stays with the thread.
 
-When you un-settle a thread, it returns to the top of the active list so you can find it right
-away. Its timestamps do not change. Other threads keep their positions.
+Projects are local folders. Adding or removing one from the sidebar does not delete its repository.
 
-Deleting a co-agent thread also deletes its stored Codex conversation and the history of any
-subagents it started. The parent task and other threads stay intact. `threads.release` does the
-same after the co-agent finishes, so collect its result before releasing it. This cannot be undone.
+## Active, settled, and archived
 
-Right-click a pull request link in a thread and choose **Link to thread** to show that pull request
-in the sidebar. The thread settles when the linked pull request merges if **Auto-settle merged
-threads** is enabled. Right-click the same link and choose **Unlink from thread** to remove it.
+Settle work that should remain visible but no longer needs attention. Un-settling returns it to the active list without changing its timestamps. Erebus can settle a thread after its linked pull request merges or after the configured idle period.
 
-On web and desktop, drag a pinned thread to change its position. On mobile, open the thread's menu
-and choose **Move up** or **Move down**. The order is stored by the server and appears on your
-other connected devices.
+Archive a thread when it should leave the normal sidebar. Deleting a thread removes its Erebus history and cannot be undone.
 
-If reordering is unavailable for one environment, update the Erebus server running in that
-environment. Older servers can still pin and unpin threads, but do not understand synced ordering;
-their pinned threads keep the default newest-first order below the ones you have arranged.
+Pin a thread to keep it above other work. Drag pinned threads to change their order.
 
-## Environment artwork
+## Co-agent threads
 
-Dev and Nightly environments can identify themselves with artwork at the top of the sidebar and in
-the send button. Choose **Artwork**, **Version pill**, or **None** in Settings under environment
-identification. Artwork is recolored to match each built-in theme. Custom themes use the **Version
-pill** fallback because their colors are not controlled by Erebus.
+Co-agents appear beneath their parent while they work. Releasing or deleting a co-agent removes its stored Codex conversation and the history of native subagents it started. Collect the handback first. The parent and other threads remain intact.
 
-To generate a fresh title from the conversation, open a thread's context menu and choose
-**Regenerate title**. While Erebus is generating it, the action reads **Regenerating…** and cannot
-be selected again. The option is hidden when the connected environment needs a server update.
+Standalone threads can create co-agents without a project. Their child workspaces remain isolated from unrelated standalone threads.
+
+## Pull requests and titles
+
+Link a pull request from its thread action so its state appears in the sidebar. Erebus can settle the thread when that pull request merges. Remove the link from the same action when it no longer belongs to the thread.
+
+Use **Regenerate title** in the thread menu to create a new title from the conversation.
+
+## Git sync
+
+The sync control at the bottom of the sidebar can move thread history between Erebus installations. Project folders are never copied. See [Thread history sync](./thread-sync.md).

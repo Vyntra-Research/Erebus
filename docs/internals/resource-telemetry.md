@@ -25,7 +25,7 @@ The monitor is intentionally not a Node native addon.
 - A monitor crash cannot corrupt the Node runtime.
 - The server can supervise, restart, version-check, and measure the monitor as a
   normal child process.
-- The same protocol works for the desktop app and the published CLI.
+- The same protocol works for the desktop app and local server development.
 - Packaging is a single platform executable instead of an addon toolchain plus
   Node/Electron ABI matrix.
 
@@ -51,22 +51,11 @@ Node server ── stdin/stdout NDJSON ── Rust resource monitor
      └─ WebSocket RPC/subscription ── diagnostics UI
 ```
 
-### Web, headless, and remote server
+### Local server development
 
 Electron telemetry is unavailable. The native monitor still runs beside the
 server and tracks the server process tree. Power fields degrade to `unknown`
 instead of invoking platform shell commands.
-
-### WSL backend limitation
-
-Windows desktop packages currently ship the Windows resource-monitor executable.
-That executable cannot run inside the Linux WSL backend, so a WSL-only backend
-does not receive `resourceMonitorPath` and reports native process telemetry as
-unavailable. Electron host-power telemetry remains available over the inherited
-desktop pipe. Supporting native WSL process telemetry requires publishing a
-Linux sidecar for each supported architecture in the Windows artifact and
-converting its packaged path into the selected distro; the configuration
-deliberately does not pass the Windows `.exe` into WSL as a false fallback.
 
 ## Native monitor
 
@@ -260,7 +249,7 @@ Reads fd 4, decodes schema-validated messages, stores the latest Electron
 snapshot, and publishes desktop health. It writes diagnostics demand to fd 5
 and gives the first sample a 90-second startup deadline. Once samples arrive,
 the stale deadline stays beyond the slower configured host-power interval with
-30 seconds of scheduling grace, so intentional 2–10 minute idle polling does
+30 seconds of scheduling grace, so intentional 2 to 10 minute idle polling does
 not oscillate the policy between constrained and unconstrained states. Decode
 errors, protocol mismatch, control-write failure, stream failure, stale input,
 and normal stream closure are represented explicitly.
@@ -357,8 +346,8 @@ Steady state uses:
 
 - one native process;
 - power-adaptive native counter sampling with no periodic Node snapshot stream;
-- event-driven Electron power updates plus profile-driven heartbeats (30–60
-  seconds while active and 2–10 minutes while idle);
+- event-driven Electron power updates plus profile-driven heartbeats (30 to 60
+  seconds while active and 2 to 10 minutes while idle);
 - no `app.getAppMetrics()` calls while diagnostics is closed;
 - no telemetry database;
 - no recurring shell probes;

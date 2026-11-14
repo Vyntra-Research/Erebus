@@ -1,8 +1,8 @@
 # Research and independent review
 
-Erebus does not create research campaigns. A task can start, resume, change direction, or end without a research setup call. If the work needs a durable objective, use the native Codex/T3 goal.
+Erebus does not create research campaigns. A task can start, resume, change direction, or end without a research setup call. If the work needs a durable objective, use the native Codex goal.
 
-Older Codex tasks keep the tool schemas they received when first created. Erebus uses the authenticated `erebus-research` fallback when those schemas do not match the current tools. This preserves the task's history and finding state. Campaign and contract fields in old tools are not prerequisites: the agent must use the current fallback instead. The `t3-code` MCP server only provides browser tools.
+Older Codex tasks keep the tool schemas they received when first created. Erebus uses the authenticated `erebus-research` fallback when those schemas do not match the current tools. This preserves the task's history and finding state. Campaign and contract fields in old tools are not prerequisites: the agent must use the current fallback instead. Research and Judge tools never come from the browser MCP server.
 
 ## Research context
 

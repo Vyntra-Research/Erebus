@@ -7,15 +7,16 @@ the task commands.
 
 ## apps
 
-- `apps/server` (`t3`): the execution runtime and the published CLI. Owns orchestration, provider
+- `apps/server` (`erebus`): the execution runtime and bundled server CLI. Owns orchestration, provider
   drivers, checkpointing, VCS, terminals, filesystem access, auth, and the HTTP + WebSocket surface.
   Also serves the built web app.
 - `apps/web` (`@t3tools/web`): React + Vite UI. Consumes the shared client runtime and adds routing,
   components, and web-specific platform layers.
-- `apps/desktop` (`@t3tools/desktop`): Electron shell. Supervises a desktop-scoped `t3` backend,
-  loads the web bundle over the `t3code://` protocol, and owns SSH-managed remote environments.
-- `apps/mobile` (`@t3tools/mobile`): Expo/React Native client. Same client runtime composition as
-  web, different platform layer and UI.
+- `apps/desktop` (`@t3tools/desktop`): Electron shell. Supervises a desktop-scoped server, loads the
+  web bundle over the compatibility `t3code://` protocol, hosts the browser preview, and manages
+  desktop updates.
+- `apps/mobile` (`@t3tools/mobile`): inherited Expo/React Native client. It is not enabled or
+  published by current Erebus releases.
 
 ## packages
 
@@ -25,28 +26,27 @@ the task commands.
   (`DrainableWorker`, git and source-control helpers, relay auth and signing, DPoP, semver, logging,
   observability, and more).
 - `packages/client-runtime` (`@t3tools/client-runtime`): connection lifecycle, authorization, RPC
-  session, environment registry, and Atom-based domain state shared by web and mobile. See its
+  session, environment registry, and Atom-based domain state used by web. The inherited mobile
+  client also consumes it. See its
   [README](../../packages/client-runtime/README.md).
-- `packages/ssh` (`@t3tools/ssh`): SSH config parsing, auth prompts, command execution, and the
-  tunnel/environment manager behind desktop-managed SSH environments.
-- `packages/tailscale` (`@t3tools/tailscale`): Tailscale CLI wrapper, including the
-  `ensureTailscaleServe` / `disableTailscaleServe` serve lifecycle the server drives.
-- `packages/effect-acp` (`effect-acp`): Effect client and agent implementation of the Agent Client
-  Protocol, used by ACP-speaking provider drivers.
+- `packages/ssh` (`@t3tools/ssh`): inherited SSH and tunnel support. Current Erebus releases do not
+  expose remote environments.
+- `packages/tailscale` (`@t3tools/tailscale`): inherited Tailscale wrappers used by development
+  sharing code, not a shipped remote-access feature.
+- `packages/effect-acp` (`effect-acp`): inherited Effect implementation of the Agent Client Protocol
+  for dormant ACP-speaking provider adapters.
 - `packages/effect-codex-app-server` (`effect-codex-app-server`): Effect client for the
   `codex app-server` JSON-RPC protocol.
 
 ## infra
 
-- `infra/relay` (`t3code-relay`): the hosted T3 Connect relay, deployed with Alchemy. Handles
-  environment discovery, cloud-side records, and mobile notifications. It is not in the hot path;
-  after connect, client traffic goes directly to the environment. See
-  [t3-connect.md](./t3-connect.md).
+- `infra/relay` (`t3code-relay`): inherited relay source. Erebus does not deploy or support it in the
+  current product.
 
 ## Other top-level directories
 
 - `scripts/`: workspace tooling run through `vp run`. Dev runner, desktop artifact builds, release
-  helpers, mobile static checks and showcase capture, update-manifest merging.
+  helpers, update-manifest merging, and inherited checks for dormant surfaces.
 - `assets/`: brand and app icon sources per channel (`dev`, `nightly`, `prod`).
 - `patches/`: pnpm patches for pinned upstream dependencies.
 - `oxlint-plugin-t3code/`: repo-specific lint rules.

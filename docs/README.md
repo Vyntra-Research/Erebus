@@ -1,42 +1,40 @@
 # Erebus docs
 
-## Using Erebus
+## Use Erebus
 
 - [Install and first run](./user/install.md)
+- [Codex accounts and routing](./user/providers-codex.md)
 - [Research and independent review](./user/research-supervision.md)
 - [Permission modes](./user/permission-modes.md)
-- [Keyboard shortcuts](./user/keybindings.md)
-- [Organizing threads](./user/thread-sidebar.md)
-- [Appearance and wallpapers](./user/appearance.md)
-- [Managing local storage](./user/storage.md)
-- [Review usage](./user/usage.md)
-- [Customize a project icon](./user/project-settings.md)
-- Mobile and remote clients remain inherited development surfaces and are not enabled in the current release.
-- [Keeping app and server in sync](./user/updating.md)
+- [Message composer](./user/composer.md)
+- [Standalone threads and projects](./user/thread-sidebar.md)
+- [Thread history sync through Git](./user/thread-sync.md)
 - [Source control integrations](./user/source-control.md)
-- Provider: [Codex](./user/providers-codex.md)
+- [Keyboard shortcuts](./user/keybindings.md)
+- [Appearance and wallpapers](./user/appearance.md)
+- [Storage cleanup](./user/storage.md)
+- [Usage review](./user/usage.md)
+- [Project icons](./user/project-settings.md)
+- [Updates](./user/updating.md)
 
----
+The current release supports the Windows and x64 Linux desktop apps with Codex. Mobile, hosted relay, remote environments, macOS packaging, and other provider adapters remain dormant inherited code and are not product features.
 
-## Working on Erebus
+## Work on Erebus
 
-Everything below is for maintainers. Setup lives in the [root README](../README.md);
-policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../AGENTS.md).
+Setup lives in the [root README](../README.md). Contribution policy is in [CONTRIBUTING.md](../CONTRIBUTING.md), and agent rules are in [AGENTS.md](../AGENTS.md).
 
 - [Architecture overview](./internals/overview.md)
 - [Workspace layout](./internals/workspace-layout.md)
 - [Glossary](./internals/glossary.md)
 - [Scripts](./internals/scripts.md)
 - [Connection runtime](./internals/connection-runtime.md)
-- [Providers](./internals/providers.md)
-- [Remote environments](./internals/remote.md)
-- [Server updates](./internals/server-updates.md)
+- [Codex provider runtime](./internals/providers.md)
 - [Resource telemetry](./internals/resource-telemetry.md)
-- [Environment auth](./internals/environment-auth.md)
-- Inherited relay, mobile, and other provider code remains dormant in the current release.
+- [Environment authorization](./internals/environment-auth.md)
 - [CI gates](./internals/ci.md)
 - [Engineering work artifacts](./internals/work-artifacts.md)
 
 ### Runbooks
 
 - [Release](./operations/release.md)
+- [Observability](./operations/observability.md)

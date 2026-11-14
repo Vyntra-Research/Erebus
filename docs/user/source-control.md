@@ -1,151 +1,66 @@
-# Source Control Integrations
+# Source control
 
-Erebus connects to your Git hosting provider so you can create pull requests, review code, and manage repositories without leaving the app.
+Erebus works with local Git repositories and can connect to GitHub, GitLab, Bitbucket, and Azure DevOps.
 
-## Supported Providers
+## Projects and repositories
 
-Erebus works with the platforms your team already uses:
+Use **Add project** to open a local folder, clone a Git URL, or choose a repository from a connected host. A local repository without a remote can be published from the project actions. If it has no commits, Erebus creates the remote and waits for the first commit before pushing.
 
-- **GitHub** – Pull requests, repository creation, and clone integration
-- **GitLab** – Merge requests, repository publishing, and hosted clones
-- **Bitbucket** – Pull request workflows (via API token authentication)
-- **Azure DevOps** – Pull request support for Microsoft-hosted repositories
+The project toolbar can initialize Git, open the folder in an editor, create or switch branches, and show the current diff. Each turn also has a hidden checkpoint for review and revert.
 
-## What You Can Do
+## Pull requests
 
-### Start Projects from Anywhere
+After pushing a branch, create a pull request or merge request from the Git controls. Erebus can draft the title and description from the branch commits.
 
-**Clone repositories directly**
+Linked reviews open in the right panel. You can inspect the diff, edit your own title, description, or comments where the host supports it, open the review in a browser, and link it to the active thread. GitHub, GitLab, and Bitbucket support comment editing. Azure DevOps comments remain read-only.
 
-- Open the Command Palette (`Cmd/Ctrl + K`) → **Add Project**
-- Choose **GitHub repository**, **GitLab repository**, **Bitbucket repository**, **Azure DevOps repository**, or paste any **Git URL**
-- Enter the repository path (`owner/repo`, `group/project`, `workspace/repository`, or `project/repository`) or a full Git URL, pick a destination, and start coding
+## Authentication
 
-**Publish local projects to the cloud**
+Authentication belongs to the machine running Erebus.
 
-- Have a local Git repository without a remote?
-- Use the **Publish Repository** action to create a new hosted repository (GitHub, GitLab, Bitbucket, or Azure DevOps), add it as your origin remote, and push, in one flow
-- If the local repository has no commits yet, publishing creates the remote and wires it up but does not push. Make a commit, then push normally.
+### GitHub
 
-### Manage Code Reviews Without Context Switching
+Install GitHub CLI 2.81.0 or newer, then run:
 
-**Create pull requests while you work**
+```sh
+gh auth login
+```
 
-- Push a branch and create a pull request from the Git actions controls in the toolbar
-- Erebus can suggest titles and descriptions based on your commits
-- Supports GitHub Pull Requests, GitLab Merge Requests, Bitbucket Pull Requests, and Azure DevOps Pull Requests
+### GitLab
 
-**Stay on top of open reviews**
+Install GitLab CLI, then run:
 
-- See if your current branch already has an open PR/MR
-- Open several reviews from the **Pull requests** page as tabs in the right panel
-- While working in a thread, open linked reviews in the same compact right-panel tabs without
-  leaving the conversation
-- Open the review directly in your browser with one click
-- Command-click (Control-click on Windows and Linux) a pull request number in the sidebar to open it in your browser instead of in Erebus
-- Check out a teammate's branch to review code locally
+```sh
+glab auth login
+```
 
-**Fix what you wrote, in place**
+### Bitbucket
 
-- Rewrite a pull request's title and description from the review itself, in Markdown, with a
-  preview before you save
-- Rewrite your own comments the same way, wherever they are shown
-- Works on GitHub, GitLab, and Bitbucket. Azure DevOps takes a new title and description; its
-  comments stay read-only here, as they already were
+Set a Bitbucket access token before starting Erebus.
 
-### Know Your Setup at a Glance
+```powershell
+$env:T3CODE_BITBUCKET_ACCESS_TOKEN="your-access-token"
+```
 
-The **Source Control settings** page shows you exactly what's connected:
+On Linux:
 
-- ✅ Which providers are authenticated and ready
-- ⚠️ What's missing and how to fix it
-- 👤 Which account is signed in (when available)
-
-Run a quick **Rescan** after setting up a new machine or changing credentials.
-
-## Getting Started
-
-### For GitHub (Recommended for most users)
-
-1. Install the GitHub CLI (version 2.81.0 or newer) on the machine running Erebus:
-   ```bash
-   brew install gh
-   ```
-2. Sign in:
-   ```bash
-   gh auth login
-   ```
-3. Open **Settings → Source Control** in Erebus and verify GitHub shows as authenticated
-
-You can now clone, publish, and create pull requests.
-
-### For GitLab
-
-1. Install the GitLab CLI:
-   ```bash
-   brew install glab
-   ```
-2. Authenticate:
-   ```bash
-   glab auth login
-   ```
-3. Check **Settings → Source Control** to confirm the connection
-
-### For Bitbucket
-
-Bitbucket uses tokens instead of a CLI tool. Two options, both set as environment variables on the
-machine running Erebus.
-
-Recommended, a Bitbucket access token:
-
-```bash
+```sh
 export T3CODE_BITBUCKET_ACCESS_TOKEN="your-access-token"
 ```
 
-Or an Atlassian account email plus API token, with read/write access to pull requests and
-repositories, plus read access to your user account (`read:user:bitbucket`, used to verify the
-connection):
+The older `T3CODE_BITBUCKET_EMAIL` and `T3CODE_BITBUCKET_API_TOKEN` pair is also supported. These `T3CODE_*` names remain for compatibility with the upstream codebase.
 
-```bash
-export T3CODE_BITBUCKET_EMAIL="you@example.com"
-export T3CODE_BITBUCKET_API_TOKEN="your-token"
+### Azure DevOps
+
+Install Azure CLI and its DevOps extension, then sign in:
+
+```sh
+az extension add --name azure-devops
+az login
 ```
 
-If both are set, the access token wins. Restart Erebus and verify the connection in **Source
-Control settings**.
+Open **Settings > Source Control** and select **Rescan** after installing a CLI or changing credentials.
 
-### For Azure DevOps
+## Thread sync is separate
 
-1. Install Azure CLI:
-   ```bash
-   brew install azure-cli
-   ```
-2. Add the DevOps extension:
-   ```bash
-   az extension add --name azure-devops
-   ```
-3. Sign in:
-   ```bash
-   az login
-   ```
-
----
-
-## Requirements & Troubleshooting
-
-**Git is required** – Erebus uses Git for all local operations. Ensure `git` is installed on your server.
-
-**Server-side setup** – Authentication happens on the machine running Erebus (the server), not your local browser. If you're using a hosted or team instance, your administrator may have already configured providers.
-
-**Common issues:**
-
-- **Provider shows "Not authenticated"** – Run the login command for that provider (e.g., `gh auth login`) in a terminal on the server, then rescan in Settings
-- **GitHub says it could not verify sign-in status** – Erebus needs GitHub CLI 2.81.0 or newer to check sign-in status. Update `gh` (e.g., `brew upgrade gh`), then rescan
-- **Bitbucket not connecting** – Double-check your environment variables are set in the correct shell profile and the server was restarted
-- **Can't push to a remote** – Verify your Git remote URL matches the provider you've authenticated with (SSH vs HTTPS remotes may need different credentials)
-
-**Need more help?** Check your provider's CLI documentation:
-
-- [GitHub CLI](https://cli.github.com/)
-- [GitLab CLI](https://gitlab.com/gitlab-org/cli)
-- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/)
+Source control manages the repository you are researching. [Thread history sync](./thread-sync.md) uses a separate Git remote to move Erebus conversations between devices. Connecting one does not configure the other.

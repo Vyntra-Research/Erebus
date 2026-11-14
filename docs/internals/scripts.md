@@ -4,123 +4,52 @@
 
 ## First checkout
 
-Erebus uses [Vite+](https://viteplus.dev/guide/). Install the global `vp` command, install
-dependencies, then start the dev stack:
+Erebus uses [Vite+](https://viteplus.dev/guide/). Install its `vp` command, then install the workspace:
 
-```bash
-curl -fsSL https://vite.plus | bash   # Windows: irm https://vite.plus/ps1 | iex
+```sh
+curl -fsSL https://vite.plus | bash
 vp i
-vp run dev
 ```
 
-Node 24 is required. Bun is not: the server picks Bun adapters when it detects Bun and falls back to
-Node otherwise, and nothing in contributor setup needs it.
+On PowerShell, install Vite+ with `irm https://vite.plus/ps1 | iex`.
 
-`vp run dev` prints a one-time pairing URL. Open it so the first browser navigation is
-authenticated.
+Node 24 is required. Bun is optional.
 
-## Dev
+## Development
 
-- `vp run dev`: Starts contracts, server, and web in watch mode.
-- `vp run dev --share`: Also publishes the web port over HTTPS on this machine's tailnet. The
-  startup pairing URL is built against the shared origin, and the mapping is removed on exit.
-  Shared runs default to Vite's bundled dev mode (`T3CODE_BUNDLED_DEV=1`): a remote browser pays a
-  network round trip per import level in unbundled dev, which turns a cold module graph into
-  minutes of waterfall. Set `T3CODE_BUNDLED_DEV=0` to opt a shared run back out.
-- `vp run dev --browser`: Auto-opens a browser. Off by default. The dev runner writes
-  `T3CODE_NO_BROWSER` itself from this flag, so setting `T3CODE_NO_BROWSER=0` in your environment has
-  no effect; use `--browser`.
-- `vp run dev:server`: Starts just the server. It runs on Node (`node --watch src/bin.ts`), so
-  without Bun present it selects `NodePtyAdapter` and `NodeHttpServer`.
-- `vp run dev:web`: Starts just the Vite dev server for the web app.
-- `vp run dev:desktop`: Starts the Electron shell against the dev server.
-- Pass dev-runner flags directly after the root task name, for example:
-  `vp run dev --home-dir /tmp/t3code-dev`
+- `vp run dev` starts the server and web client in watch mode.
+- `vp run dev:desktop` starts the Electron app against the dev server.
+- `vp run dev:server` starts only the local server.
+- `vp run dev:web` starts only Vite.
+- `vp run dev --browser` opens the pairing URL automatically.
+- `vp run dev --share` exposes the dev client on the machine's tailnet and prints an authenticated pairing URL. This is a development helper, not the dormant hosted relay product.
+- `vp run dev --home-dir <path>` uses an explicit isolated state directory.
 
-### Dev state directories
+A linked worktree defaults to `<worktree>/.t3/userdata`. The main checkout defaults to `~/.t3/dev`. Never point a development server at a live packaged profile.
 
-- Dev commands run from a linked **git worktree** default to that worktree's gitignored `.t3`, even
-  when `T3CODE_HOME` is set, storing state in `<worktree>/.t3/userdata`. Pass `--home-dir <path>` to
-  choose another isolated directory explicitly. Submodules are not worktrees and keep the normal
-  precedence.
-- From the **main checkout**, dev commands implicitly use `~/.t3/dev`, keeping development state
-  separate from `~/.t3/userdata`. An explicit `--home-dir <path>` stores state under
-  `<path>/userdata`; the base directory remains available for caches, worktrees, and other shared
-  data.
+Worktrees derive stable port offsets from their paths. Read the real server and web ports from the `[dev-runner]` line because an occupied port may shift them.
 
-## Build, check, test
+The inherited `T3CODE_*`, `.t3`, `@t3tools/*`, and `t3code://` names remain compatibility identifiers. Do not rename them piecemeal.
 
-- `vp run build`: Fans out over `apps/*`, `packages/*`, `oxlint-plugin-t3code`, and `scripts`.
-  Workspaces that define a build task run one: desktop, marketing, server (which depends on web), and
-  web. Shared packages are consumed and bundled transitively rather than built separately.
-- `vp run build:desktop`: Builds the desktop pipeline (desktop plus server).
-- `vp run start`: Runs the production server (serves the built web app as static files).
-- `vp check`: Vite+ format, lint, and type checks. This repo sets `typeCheck: false` in its lint
-  options, so workspace type checking runs separately.
-- `vp run typecheck`: Strict TypeScript checks for all packages.
-- `vp run test`: Runs workspace tests.
-- `vp run lint:mobile`: Mobile native static analysis (`scripts/mobile-native-static-check.ts`).
-- `node apps/server/scripts/t3-sqlite-state.ts <query|exec> --base-dir <path> ...`: Inspects or seeds
-  an isolated T3 SQLite database; writes create a private backup first.
+## Build and verification
+
+- `vp run build:desktop` builds the desktop and server pipeline.
+- `vp check` runs formatting and lint rules.
+- `vp run typecheck` runs workspace TypeScript checks.
+- `vp test run <files>` runs focused tests.
+- `cargo test --locked --manifest-path native/resource-monitor/Cargo.toml` tests the Rust monitor.
+
+Follow [AGENTS.md](../../AGENTS.md) for test scope. Do not run the full workspace suite for a narrow change unless the maintainer asks.
 
 ## Desktop artifacts
 
-- `vp run dist:desktop:artifact --platform <mac|linux|win> --target <target> --arch <arch>`: Builds a desktop artifact for a specific platform/target/arch.
-- `vp run dist:desktop:dmg`: Builds a shareable macOS `.dmg` into `./release`. Architecture defaults
-  to the host, so this produces an arm64 DMG on Apple Silicon. Use `dist:desktop:dmg:arm64` or
-  `dist:desktop:dmg:x64`, or pass `--arch <arm64|x64|universal>`, to force one.
-- `vp run dist:desktop:linux`: Builds the Linux x64 AppImage into `./release`.
-- `vp run dist:desktop:win`: Builds a Windows NSIS installer into `./release`. `:arm64` and `:x64`
-  variants exist.
+- `vp run dist:desktop:win:x64` builds the Windows x64 NSIS installer.
+- `vp run dist:desktop:linux` builds the Linux x64 AppImage.
 
-### Desktop `.dmg` packaging notes
+Artifacts are written under `release/`. Current Erebus releases do not publish macOS, ARM64, mobile, relay, hosted preview, or npm artifacts.
 
-- Default build is unsigned/not notarized for local sharing.
-- The DMG build uses `assets/prod/black-macos-1024.png` as the production app icon source.
-- The DMG chrome follows the release channel: neutral for Latest and the Nightly sky artwork for
-  Nightly. Blueprint artwork remains exclusive to Dev builds. Packaging rasterizes the selected
-  SVG into standard and Retina PNGs inside the disposable staging directory.
-- The Finder window is 540×412 while its background is 540×380; the extra 32px accounts for the
-  title bar included in Finder's window bounds.
-- Desktop production windows load the bundled UI from the `t3code://app/` root URL (not a
-  `127.0.0.1` document URL, and not an explicit `index.html` path).
-- Desktop packaging includes `apps/server/dist` (the `t3` backend) and starts it on loopback with an
-  auth token for WebSocket/API traffic.
-- Your tester can still open it on macOS by right-clicking the app and choosing **Open** on first
-  launch.
-- To keep staging files for debugging package contents, run: `vp run dist:desktop:dmg --keep-stage`
-- To allow code-signing/notarization when configured in CI/secrets, add: `--signed`.
-- Signed macOS builds also require `T3CODE_APPLE_TEAM_ID` and
-  `T3CODE_MACOS_PROVISIONING_PROFILE`. The passkey RP domain is derived from
-  `T3CODE_CLERK_PUBLISHABLE_KEY` unless `T3CODE_CLERK_PASSKEY_RP_DOMAINS` overrides it.
-- Windows `--signed` uses Azure Trusted Signing and expects:
-  `AZURE_TRUSTED_SIGNING_ENDPOINT`, `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`,
-  `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`, and `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`.
-- Azure authentication env vars are also required (for example service principal with secret):
-  `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`.
+Windows signing uses Azure Trusted Signing when the required release secrets are present. Local artifacts are unsigned by default.
 
 ## Browser development
 
-`dev` and `dev:web` leave `VITE_HTTP_URL` and `VITE_WS_URL` unset so the browser resolves the backend
-from `window.location.origin`. Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known` to the
-server, allowing the same bundle to work from localhost or a tailnet hostname.
-
-## Running multiple dev instances
-
-Worktrees derive a preferred port offset from their path.
-
-- Default ports: server `13773`, web `5733`
-- Shifted ports: `base + offset`
-- Example: `T3CODE_DEV_INSTANCE=branch-a vp run dev:desktop`
-
-Offset resolution, in order:
-
-1. `T3CODE_PORT_OFFSET`, which must be a non-negative integer. Negative values are rejected.
-2. `T3CODE_DEV_INSTANCE`. An all-digit value is used directly as the offset; any other non-empty
-   value is hashed into one.
-3. The worktree path hash.
-
-Collision scanning depends on the mode. `dev:web` scans only the web port and shifts only the web
-offset. `dev:server` scans only the server port. `dev` and `dev:desktop` scan both and shift them
-together as one shared offset. Explicit server or dev-URL overrides remove the corresponding port
-from the availability check. Treat the `[dev-runner]` output as authoritative.
+Leave `VITE_HTTP_URL` and `VITE_WS_URL` unset. Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known` to the local server so the same bundle works from localhost or the optional tailnet dev share.

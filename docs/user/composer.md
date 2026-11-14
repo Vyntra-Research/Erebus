@@ -1,27 +1,15 @@
 # Message composer
 
-Messages can contain up to 120,000 characters. If a draft is longer, Erebus keeps it in the
-composer and shows how many characters need to be removed. Shorten the draft or split it into
-multiple messages, then send again in the same thread.
+Messages can contain up to 120,000 characters. Erebus keeps an oversized draft in the composer and shows how many characters must be removed.
 
-On servers that support direct uploads, images upload as soon as you add them. The send button
-becomes available after every upload finishes. Failed uploads can be retried or removed.
+Images upload as soon as you add them. The send button becomes available after each upload finishes. Retry or remove a failed upload. HEIC and HEIF images are converted to JPEG on desktop.
 
-On web and desktop, HEIC and HEIF photos are automatically converted to JPEG when you drag them into
-the composer or paste them into a message.
+Draft text stays local to the composer while an active turn updates the timeline. Provider events do not submit it.
 
 ## Commands and skills
 
-Type `/` to open the command menu. Type `$` to find and add a skill. Skill rows show their source,
-such as System, Personal, Project, or App.
+Type `/` to open commands. Type `$` to search skills. Skill results show their source and add the matching `$name` token to the message.
 
-By default, the `/` menu includes skills. To keep this menu command-only, turn off **Show skills in
-slash menu** in **Settings → General**. Skill results use the `/skill:Skill Name` label and add the
-same `$name` skill token to your message. The original skill name remains searchable. If the provider
-also reports that skill as a native slash command, Erebus hides the duplicate native entry and keeps
-the `/skill:Skill Name` label.
+Turn off **Show skills in slash menu** under **Settings > General** to keep `/` command-only.
 
-On desktop, press `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux from a new thread to
-start it in the background. Erebus opens another new thread and shows an **Open** action for the
-thread that started. The new thread keeps the selected workspace mode and base branch. If **New
-worktree** is selected, each background thread creates its own worktree.
+From a new thread, press `Ctrl+Enter` to start it in the background and open another draft. The running thread keeps its selected workspace mode and base branch. When **New worktree** is selected, each background thread receives its own worktree.

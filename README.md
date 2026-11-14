@@ -4,32 +4,74 @@
 [![CI](https://github.com/Vyntra-Research/Erebus/actions/workflows/ci.yml/badge.svg)](https://github.com/Vyntra-Research/Erebus/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](./LICENSE)
 
-Erebus is a desktop harness for long-running security research with Codex. It keeps a small set of research rules in the agent context, coordinates parallel tasks, and sends finished findings to an independent Judge. Research itself stays direct: there is no Erebus campaign to register or maintain.
+Erebus is a local desktop harness for long-running offensive security research with Codex. It keeps research context durable, coordinates parallel work, manages more than one Codex account, and gives finished findings an independent technical review without forcing the research into campaigns or audit checklists.
 
-Erebus is based on [T3 Code](https://github.com/pingdotgg/t3code). The current release supports Windows, Linux x64, and Codex. Other platforms and provider bindings remain disabled while they are tested.
+The current release runs on Windows and x64 Linux. Codex is the supported provider.
 
-## What it does
+<p align="center">
+  <img src="./docs/assets/erebus-wallpaper-dither.jpg" alt="Erebus with a dark wallpaper and dither effect" width="49%">
+  <img src="./docs/assets/erebus-wallpaper-glass.jpg" alt="Erebus with a light wallpaper, glass surfaces, and generated colors" width="49%">
+</p>
 
-- Keeps evidence scope, realistic attacker control, anti-tunnel checks, dedupe, safe execution, and Post-AI blind-spot analysis active during long runs.
-- Uses the native Codex/T3 goal for visible task progress. Erebus does not create a second goal or campaign state.
-- Sends the finding document and working PoC to an independent Judge, then delivers the verdict in a separate turn.
-- Supports up to four direct co-agent tasks for separate horizontal research surfaces. Each co-agent can use native subagents for work within its assigned surface.
-- Supports multiple Codex accounts with separate sign-in state, shared task data, and quota-aware routing at turn boundaries.
-- Keeps the Erebus Codex profile separate from the Codex desktop app profile.
-- Provides read-only access to legacy Proteus records. Erebus does not load Proteus skills or allow Proteus writes.
-- Calculates explicit CVSS 3.0, 3.1, and 4.0 vectors directly through `research.calculate_cvss`.
-- Installs [Argos](https://github.com/rafabd1/Argos) as the connected research map, including its MCP tools and specialist skills.
+## What Erebus adds
 
-## Research and review
+### A research runtime, not an audit workflow
 
-1. Start research directly. Create a native goal only when the task benefits from one.
-2. Record connected research knowledge in Argos. Erebus does not mirror that state.
-3. Use Proteus only to read older evidence or check prior records. Use Erebus to calculate CVSS.
-4. Place the finding under `findings/` and the working PoC under `pocs/`.
-5. Submit those paths to the Judge. A successful submission ends the current turn.
-6. Erebus stores the verdict and starts a separate follow-up turn when the task is idle.
+- Keeps compact offensive-research rules in the principal and co-agent context. They cover realistic attacker control, evidence scope, deduplication, natural exploit chains, conclusion reopening, and Post-AI blind spots.
+- Uses the native Codex goal as the only visible objective and progress lifecycle. Erebus has no active campaign or Observer layer.
+- Offers the optional Capri persona for a more direct, independent, and focused research style without changing the evidence bar or permission model.
+- Installs [Argos](https://github.com/rafabd1/Argos) as the connected research map. Each project keeps its graph under `.argos/`.
+- Exposes legacy Proteus records through a managed read-only bridge. Erebus does not load Proteus skills or allow Proteus writes.
 
-The Judge checks fixed evidence gates. It does not run a new research project, fill gaps on behalf of the submitter, or require ZIP files, hashes, release bundles, or a final report.
+### Independent finding review
+
+- Submits a finding document and its working PoC to a separate Judge.
+- Stores each verdict and delivers it in a later turn, so the evaluator does not steer the original research.
+- Supports revisions without replacing the prior evaluation record.
+- Calculates explicit CVSS 3.0, 3.1, and 4.0 vectors through `research.calculate_cvss`.
+
+### Parallel work without losing the main thread
+
+- Runs up to four Erebus co-agent threads on separate research surfaces.
+- Lets each Codex task use its native subagents for narrower work inside that surface.
+- Folds completed co-agent handbacks, resolved approvals, and tool logs into the run that produced them.
+- Keeps native goals visible above the composer with pause, resume, and delete controls.
+
+### Long-running Codex sessions
+
+- Keeps steering messages transient across Codex compaction so older directions remain history instead of becoming fresh instructions.
+- Resumes large threads without loading the full transcript into the UI or provider process.
+- Preserves the thread when an account changes, disappears, or reaches its usage limit.
+- Shows the agent's internal browser in a dismissible preview and keeps terminal, diff, checkpoint, and revert tools beside the conversation.
+
+### Multiple Codex accounts
+
+- Keeps account credentials separate while sharing Erebus sessions, configuration, MCPs, skills, and plugins.
+- Tracks quota per account and routes each new model request by primary priority, remaining quota, and available credits.
+- Applies priority changes during an active task. A request rejected before streaming can retry through another usable account.
+- Supports current Codex model options, reasoning effort, speed, and Daybreak when the selected account exposes it.
+
+### Threads, projects, and Git sync
+
+- Creates standalone threads without a project. Link one later from its menu or drag it into a project.
+- Keeps active and settled primary thread history in a Git remote chosen by the user. Archived, deleted, and co-agent threads do not enter the mirror.
+- Handles conflicts per thread: use the remote history, keep both as separate threads, or replace that remote thread.
+- Keeps project paths device-local. A thread imported on another machine stays standalone until it is mapped to a local folder.
+- Removes deleted thread history, released co-agent data, stale browser caches, and unused standalone workspaces. Diagnostics can compact reclaimable SQLite space while no turn is active.
+
+### Local workspaces and source control
+
+- Opens a local folder, clones a Git repository, or creates a standalone workspace for a new thread.
+- Connects GitHub, GitLab, Bitbucket, and Azure DevOps for repository browsing and pull request work.
+- Keeps terminal, file search, source diff, hidden turn checkpoints, and revert controls next to the conversation.
+- Supports image attachments, commands, skills, custom keybindings, and permission modes from supervised approval to full access.
+
+### A desktop that can be made yours
+
+- Includes themes, contrast, glass opacity, font controls, and device-local wallpapers.
+- Applies dither, dot-screen, and progressive bottom-blur effects over the wallpaper.
+- Can derive a readable interface palette from the current image.
+- Ships desktop updates through separate Stable and Beta channels.
 
 ## Install
 
@@ -37,24 +79,37 @@ Download the Windows x64 installer or Linux x64 AppImage from [GitHub Releases](
 
 You need:
 
-- Windows 10 or newer, or a current glibc-based Linux distribution
-- Git for repository projects
-- a ChatGPT account with access to Codex
-- the Codex CLI available on `PATH`
+- Windows 10 or newer, or a current x64 glibc-based Linux distribution
+- Git for repository projects and thread sync
+- a ChatGPT account with Codex access
+- the Codex CLI on `PATH`
 
-On Linux, make the AppImage executable before opening it. GTK 3 tools (`gtk-launch`), `xdg-utils`, and an active, unlocked Secret Service are required; GNOME Keyring and KWallet are supported.
+On Linux, make the AppImage executable before opening it:
 
-Open **Settings > Providers > Codex** after installation to sign in. Erebus uses Codex's browser login and stores the session in its own profile. It does not copy or modify the Codex desktop app profile.
+```sh
+chmod +x Erebus-*.AppImage
+./Erebus-*.AppImage
+```
 
-Proteus needs no separate installation. Erebus maintains a verified runtime and exposes only its read-only legacy lookup surface. It keeps the active and previous managed versions. If an update fails, the last verified runtime remains available.
+GTK 3 tools, `xdg-utils`, and an active Secret Service are required on Linux. GNOME Keyring and KWallet are supported.
 
-Argos also needs no separate installation. Erebus includes the tested Argos 0.1.0 release, checks for newer stable releases, verifies the package digest, and installs its MCP and skills in the shared Codex profile. Each project keeps its own connected map under `.argos/`, so every task and Codex account working in that project sees the same research knowledge.
+Open **Settings > Providers > Codex** to sign in. Erebus stores the account in its own profile and does not reuse or modify the Codex desktop app profile.
 
-See the [installation guide](./docs/user/install.md), [research and Judge guide](./docs/user/research-supervision.md), and [update guide](./docs/user/updating.md) for details.
+## Documentation
+
+- [Install and first run](./docs/user/install.md)
+- [Codex accounts, routing, models, and personas](./docs/user/providers-codex.md)
+- [Research context, co-agents, CVSS, and Judge review](./docs/user/research-supervision.md)
+- [Standalone threads and project organization](./docs/user/thread-sidebar.md)
+- [Thread history sync through Git](./docs/user/thread-sync.md)
+- [Appearance and wallpapers](./docs/user/appearance.md)
+- [Storage cleanup](./docs/user/storage.md)
+- [Updates](./docs/user/updating.md)
+- [Developer documentation](./docs/README.md)
 
 ## Development
 
-Source builds need Node.js 24.13.1 or newer within the Node 24 line, plus pnpm 11. Install the platform prerequisites in the [installation guide](./docs/user/install.md#build-from-source) before `pnpm install`; Linux packages such as `node-pty` may compile during installation.
+Source builds need Node.js 24.13.1 or newer within the Node 24 line, plus pnpm 11.
 
 ```sh
 pnpm install
@@ -73,17 +128,12 @@ Build the Linux x64 AppImage on Linux with:
 pnpm dist:desktop:linux
 ```
 
-Development state stays in the worktree-local `.t3` directory inherited from T3 Code. Packaged builds use an Erebus desktop profile in the user's `.erebus` directory.
+Development state stays in the worktree-local `.t3` directory. Packaged builds use the Erebus profile under `.erebus`.
 
-Read the [developer documentation](./docs/README.md) before changing provider, desktop lifecycle, or release code. Contributions should follow [CONTRIBUTING.md](./CONTRIBUTING.md). Report security problems through [SECURITY.md](./SECURITY.md), not a public issue.
-
-## Project status
-
-Erebus is an early release. Keep normal backups and review Judge decisions before disclosure. The Judge gives an independent triage result; it does not replace researcher judgment.
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before sending a change. Report vulnerabilities in Erebus through [SECURITY.md](./SECURITY.md), not a public issue.
 
 ## License and upstream
 
-Erebus is licensed under [GPL-3.0-or-later](./LICENSE). It retains the original T3 Code MIT notice in [LICENSES/T3-CODE-MIT.txt](./LICENSES/T3-CODE-MIT.txt). Erebus is not an official T3 Tools release.
+Erebus is licensed under [GPL-3.0-or-later](./LICENSE). It is based on [T3 Code](https://github.com/pingdotgg/t3code) and retains the original MIT notice in [LICENSES/T3-CODE-MIT.txt](./LICENSES/T3-CODE-MIT.txt). Erebus is not an official OpenAI or T3 Tools product.
 
-Proteus is maintained separately at [Vyntra-Research/Proteus](https://github.com/Vyntra-Research/Proteus). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for third-party notices.
-Argos is maintained at [rafabd1/Argos](https://github.com/rafabd1/Argos).
+Argos is maintained at [rafabd1/Argos](https://github.com/rafabd1/Argos). Proteus is maintained at [Vyntra-Research/Proteus](https://github.com/Vyntra-Research/Proteus). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the complete notices.

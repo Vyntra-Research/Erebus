@@ -2,14 +2,14 @@
 
 > For maintainers. Using Erebus? See [docs/user](../user/).
 
-Erebus is a server runtime that owns agent sessions, workspaces, and version control, plus clients
-(web, desktop, mobile) that talk to it over one authenticated Effect RPC WebSocket. The server is the
-execution boundary: every provider process, terminal, git operation, and filesystem read happens
-there, never in the client.
+Erebus is a local server runtime that owns Codex sessions, workspaces, research tools, and version
+control. The React web client is the interface, and the Electron desktop app packages that client
+with the server. They communicate over one authenticated Effect RPC WebSocket. Provider processes,
+terminal commands, Git operations, and filesystem reads run at the server boundary.
 
 ```
 ┌────────────────────────────────────────────────┐
-│ Clients: apps/web, apps/desktop, apps/mobile   │
+│ Client: apps/web inside apps/desktop           │
 │ shared runtime: packages/client-runtime        │
 │  connection supervisor, RPC session, Atom state│
 └──────────────────┬─────────────────────────────┘
@@ -18,13 +18,12 @@ there, never in the client.
 ┌──────────────────▼─────────────────────────────┐
 │ apps/server                                    │
 │  orchestration engine (event-sourced)          │
-│  provider driver registry (5 built-in drivers) │
+│  Codex provider runtime and account gateway    │
 │  checkpointing, VCS, terminals, filesystem     │
 └──────────────────┬─────────────────────────────┘
                    │ per-driver transport
 ┌──────────────────▼─────────────────────────────┐
-│ Agent CLIs: Codex, Claude, Cursor, Grok,       │
-│ OpenCode                                       │
+│ Codex CLI and app-server                       │
 └────────────────────────────────────────────────┘
 ```
 
@@ -51,12 +50,10 @@ to the connection supervisor.
 ## Shared client runtime
 
 `packages/client-runtime` holds every non-visual client concern: connection lifecycle,
-authentication, RPC, cached environment data, and domain state as Atom factories. Web and mobile
-compose it the same way (`apps/web/src/connection/runtime.ts` and
-`apps/mobile/src/connection/runtime.ts` mirror each other, differing only in platform-specific
-background-activity layers) and differ beyond that only in the platform layer they supply and the
-UI they build on top. React components never construct transports, retry loops,
-or RPC clients. See [connection-runtime.md](./connection-runtime.md).
+authentication, RPC, cached environment data, and domain state as Atom factories. The web client
+uses it directly, and desktop embeds that client. The inherited mobile client also uses the package
+but is not enabled in current Erebus releases. React components never construct transports, retry
+loops, or RPC clients. See [connection-runtime.md](./connection-runtime.md).
 
 ## Orchestration is event-sourced
 
@@ -104,13 +101,13 @@ Runtime receipts are a test-only mechanism. `RuntimeReceiptBusLive` in
 [`RuntimeReceiptBus.ts`][receipts] publishes nothing; only the test layer is PubSub-backed. Do not
 build production behavior on receipts.
 
-## Provider drivers
+## Provider runtime
 
-Five drivers ship built in, registered in [`builtInDrivers.ts`][drivers] as `BUILT_IN_DRIVERS`:
-Codex, Claude, Cursor, Grok, and OpenCode. A driver declares its kind and config schema and creates a
-scoped adapter; `ProviderInstanceRegistry` owns live instances and `ProviderAdapterRegistry` resolves
-an instance to its adapter, so `ProviderService` routes session and turn operations without knowing
-which agent is behind them. See [providers.md](./providers.md).
+Current Erebus releases support Codex. `ProviderInstanceRegistry` owns each Codex account instance,
+and `CodexRequestGateway` chooses the account for every new model request without replacing the
+durable thread. The tree still contains inherited Claude, Cursor, Grok, and OpenCode adapters. Their
+presence in `BUILT_IN_DRIVERS` is compatibility code, not a supported release surface. See
+[providers.md](./providers.md).
 
 ## Checkpointing
 
@@ -132,7 +129,6 @@ already dispatch.
 ## Related
 
 - [Workspace layout](./workspace-layout.md), [Glossary](./glossary.md)
-- [Remote environments](./remote.md), [Server updates](./server-updates.md)
 - [Resource telemetry](./resource-telemetry.md)
 - [Scripts](./scripts.md), [CI gates](./ci.md)
 
@@ -149,4 +145,3 @@ already dispatch.
 [cmd]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
 [checkpoint]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts
 [receipts]: ../../apps/server/src/orchestration/Layers/RuntimeReceiptBus.ts
-[drivers]: ../../apps/server/src/provider/builtInDrivers.ts
