@@ -1,6 +1,6 @@
-import type { ScopedProjectRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { FolderPlusIcon } from "lucide-react";
+import { FolderPlusIcon, MessagesSquareIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -26,11 +26,15 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface DraftHeroHeadlineProps {
+  readonly activeEnvironmentId: EnvironmentId;
   readonly activeProjectRef: ScopedProjectRef | null;
   readonly activeProjectTitle: string | null;
 }
 
+const STANDALONE_PROJECT_VALUE = "__standalone__";
+
 export function DraftHeroHeadline({
+  activeEnvironmentId,
   activeProjectRef,
   activeProjectTitle,
 }: DraftHeroHeadlineProps) {
@@ -92,24 +96,24 @@ export function DraftHeroHeadline({
             (projectRef) => scopedProjectKey(projectRef) === scopedProjectKey(activeProjectRef),
           ),
         ) ?? null);
-  const activeProjectKey = activeProjectGroup?.projectKey ?? "";
+  const activeProjectKey =
+    activeProjectGroup?.projectKey ??
+    (activeProjectRef ? scopedProjectKey(activeProjectRef) : STANDALONE_PROJECT_VALUE);
   const activeProjectDisplayName = activeProjectGroup?.displayName ?? activeProjectTitle;
-  const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
-  const shouldShowProjectMenu = canChooseProject;
 
-  const projectSelector = shouldShowProjectMenu ? (
+  const projectSelector = canChooseProject ? (
     <Menu>
       <Tooltip>
         <TooltipTrigger
           render={
             <MenuTrigger
-              aria-label={hasResolvedProject ? "Change project" : "Choose a project"}
+              aria-label="Choose a project"
               className="pointer-events-auto inline-block max-w-64 truncate border-foreground/60 border-b border-dotted align-baseline text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
         >
-          {activeProjectDisplayName ?? "Choose a project"}
+          {activeProjectDisplayName ?? "No project"}
         </TooltipTrigger>
         {activeProjectDisplayName ? (
           <TooltipPopup side="top" className="max-w-80">
@@ -121,6 +125,16 @@ export function DraftHeroHeadline({
         <MenuRadioGroup
           value={activeProjectKey}
           onValueChange={(value) => {
+            if (value === STANDALONE_PROJECT_VALUE) {
+              if (activeProjectKey === STANDALONE_PROJECT_VALUE) {
+                return;
+              }
+              void handleNewThread(
+                { environmentId: activeEnvironmentId, projectId: null },
+                { replace: true, carryComposerContent: true },
+              );
+              return;
+            }
             const entry = projectEntryByKey.get(value as string);
             if (!entry || value === activeProjectKey) {
               return;
@@ -134,6 +148,11 @@ export function DraftHeroHeadline({
             });
           }}
         >
+          <MenuRadioItem value={STANDALONE_PROJECT_VALUE} closeOnClick>
+            <MessagesSquareIcon />
+            No project
+          </MenuRadioItem>
+          <MenuSeparator />
           {projectPickerEntries.map(({ group }) => {
             return (
               <MenuRadioItem key={group.projectKey} value={group.projectKey} closeOnClick>
@@ -162,17 +181,16 @@ export function DraftHeroHeadline({
       onClick={openAddProject}
       className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     >
-      {activeProjectTitle ?? "Add a project"}
+      Add a project
     </button>
   );
 
   return (
-    <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-      {hasResolvedProject ? (
-        <>What should we build in {projectSelector}?</>
-      ) : (
-        <>What can I help with?</>
-      )}
-    </h1>
+    <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-2 text-center">
+      <h1 className="font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+        What can I help with?
+      </h1>
+      <div className="text-sm text-muted-foreground">Project: {projectSelector}</div>
+    </div>
   );
 }

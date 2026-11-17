@@ -987,10 +987,12 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: "provider-thread-1",
+        developerInstructions: "persona:capri",
       });
 
       NodeAssert.equal(resumePayload?.threadId, "provider-thread-1");
       NodeAssert.equal(resumePayload?.excludeTurns, true);
+      NodeAssert.equal(resumePayload?.developerInstructions, "persona:capri");
     }),
   );
 
@@ -1027,11 +1029,13 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: undefined,
+        developerInstructions: "persona:capri",
         dynamicTools,
       });
 
       NodeAssert.equal(startPayload?.approvalPolicy, "on-request");
       NodeAssert.equal(startPayload?.sandbox, "danger-full-access");
+      NodeAssert.equal(startPayload?.developerInstructions, "persona:capri");
       NodeAssert.deepStrictEqual(startPayload?.dynamicTools, dynamicTools);
     }),
   );

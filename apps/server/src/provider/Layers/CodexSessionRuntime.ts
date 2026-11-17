@@ -215,6 +215,7 @@ export interface CodexSessionRuntimeOptions {
     proteus: ResearchProteusHealth,
   ) => Effect.Effect<EffectCodexSchema.DynamicToolCallResponse>;
   readonly onProteusHealth?: (health: ResearchProteusHealth) => void;
+  readonly getThreadDeveloperInstructions?: () => Effect.Effect<string>;
   readonly getAdditionalDeveloperInstructions?: () => Effect.Effect<string>;
 }
 
@@ -647,6 +648,7 @@ function buildThreadStartParams(input: {
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
+  readonly developerInstructions?: string;
   readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
@@ -658,6 +660,9 @@ function buildThreadStartParams(input: {
     ...(input.dynamicTools ? { dynamicTools: input.dynamicTools } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+    ...(input.developerInstructions?.trim()
+      ? { developerInstructions: input.developerInstructions }
+      : {}),
   };
 }
 
@@ -817,6 +822,7 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly developerInstructions?: string;
   readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
@@ -825,6 +831,7 @@ export const openCodexThread = (input: {
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
+    ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     ...(input.dynamicTools ? { dynamicTools: input.dynamicTools } : {}),
   });
 
@@ -2387,6 +2394,9 @@ export const makeCodexSessionRuntime = (
 
       const requestedModel = normalizeCodexModelSlug(options.model);
       const resumeThreadId = readResumeCursorThreadId(options.resumeCursor);
+      const threadDeveloperInstructions = options.getThreadDeveloperInstructions
+        ? yield* options.getThreadDeveloperInstructions()
+        : "";
       if (resumeThreadId !== undefined) {
         const versionError = validateCodexHistoryFreeResumeVersion(initialized.userAgent);
         if (versionError !== null) {
@@ -2402,6 +2412,9 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId,
+        ...(threadDeveloperInstructions
+          ? { developerInstructions: threadDeveloperInstructions }
+          : {}),
         ...(options.dynamicTools ? { dynamicTools: options.dynamicTools } : {}),
       });
 
