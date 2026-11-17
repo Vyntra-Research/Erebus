@@ -1,21 +1,15 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
-import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import {
-  useAllEnvironmentShellsBootstrapped,
-  useProjects,
-  useThreadShells,
-} from "../state/entities";
-import { useEnvironments } from "../state/environments";
+import { useAllEnvironmentShellsBootstrapped } from "../state/entities";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
@@ -31,43 +25,37 @@ function ChatIndexRouteView() {
 }
 
 /**
- * Landing on the index route drops straight into a draft thread for the most
- * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
+ * Landing on the index route starts an unlinked draft. The user may attach a
+ * project from the draft screen, but a plain new-chat action never picks one
+ * on their behalf.
  */
 function IndexDraftLanding() {
-  const projects = useProjects();
-  const threads = useThreadShells();
+  const { environments } = useEnvironments();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
-
-  const mostRecentProject = useMemo(
-    () =>
-      bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
-        : null,
-    [bootstrapped, projects, threads],
-  );
+  const standaloneEnvironmentId = primaryEnvironmentId ?? environments[0]?.environmentId ?? null;
 
   useEffect(() => {
-    if (mostRecentProject === null || startingRef.current) {
+    if (!bootstrapped || standaloneEnvironmentId === null || startingRef.current) {
       return;
     }
     startingRef.current = true;
-    void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
-      replace: true,
-    }).catch(() => {
+    void handleNewThread(
+      { environmentId: standaloneEnvironmentId, projectId: null },
+      { replace: true },
+    ).catch(() => {
       startingRef.current = false;
       setStartState((state) => ({ ...state, failed: true }));
     });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+  }, [bootstrapped, handleNewThread, standaloneEnvironmentId, startState.retryRequest]);
 
   if (!bootstrapped) {
     return null;
   }
-  if (mostRecentProject !== null) {
+  if (standaloneEnvironmentId !== null) {
     return startState.failed ? (
       <DraftStartError
         onRetry={() => {
@@ -79,7 +67,7 @@ function IndexDraftLanding() {
       />
     ) : null;
   }
-  return <NoProjectsHero />;
+  return <NoEnvironmentHero />;
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
@@ -103,7 +91,7 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
   );
 }
 
-function NoProjectsHero() {
+function NoEnvironmentHero() {
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
 
   return (
@@ -116,7 +104,7 @@ function NoProjectsHero() {
                 What should we work on?
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                Add a project to start your first thread.
+                Add a project or connect an environment to start a thread.
               </EmptyDescription>
               <div className="mt-6 flex justify-center">
                 <Button size="sm" onClick={openAddProject}>

@@ -681,7 +681,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("reads the active persona instructions for every turn", () => {
+  it.effect("provides persona instructions at the thread boundary", () => {
     const runtimeFactory = makeRuntimeFactory();
     let instructions = "persona:first";
     const layer = Layer.effect(
@@ -706,17 +706,12 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       });
 
       const runtime = runtimeFactory.lastRuntime;
-      NodeAssert.ok(runtime?.options.getAdditionalDeveloperInstructions);
-      NodeAssert.equal(
-        yield* runtime.options.getAdditionalDeveloperInstructions(),
-        "persona:first",
-      );
+      NodeAssert.ok(runtime?.options.getThreadDeveloperInstructions);
+      NodeAssert.equal(yield* runtime.options.getThreadDeveloperInstructions(), "persona:first");
 
       instructions = "persona:capri";
-      NodeAssert.equal(
-        yield* runtime.options.getAdditionalDeveloperInstructions(),
-        "persona:capri",
-      );
+      NodeAssert.equal(yield* runtime.options.getThreadDeveloperInstructions(), "persona:capri");
+      NodeAssert.equal(runtime.options.getAdditionalDeveloperInstructions, undefined);
     }).pipe(Effect.provide(layer));
   });
 
