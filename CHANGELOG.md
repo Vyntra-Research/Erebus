@@ -6,6 +6,7 @@
 
 - Deliver the selected agent persona through Codex thread instructions across supported models.
 - Start new chats without a project unless one is selected from the new-chat screen.
+- Remove the wallpaper sidebar divider so visual effects cannot show through its edge.
 
 ## 1.1.3 - 2026-11-14
 

@@ -2120,8 +2120,7 @@ html[data-wallpaper="true"] [data-slot="workspace-page-header"] {
 }
 
 html[data-wallpaper="true"] [data-slot="sidebar-container"] {
-  border-inline-width: 1px;
-  border-color: color-mix(in srgb, var(--sidebar-border) 45%, transparent);
+  border-inline-width: 0;
 }
 
 html[data-wallpaper="true"] [data-slot="sidebar-inner"] {
