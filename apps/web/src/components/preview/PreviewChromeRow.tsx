@@ -52,6 +52,8 @@ interface Props {
   pickDisabled?: boolean | undefined;
   /** Optional reason string surfaced in the disabled tooltip. */
   pickDisabledReason?: string | undefined;
+  /** Optional control rendered before the existing three-dot menu. */
+  browserSessionAction?: ReactNode;
   /**
    * Trailing slot rendered after the URL input. Used by the preview view
    * to mount the three-dot menu (hard reload, devtools, zoom, clear data).
@@ -84,6 +86,7 @@ export function PreviewChromeRow({
   pickActive,
   pickDisabled,
   pickDisabledReason,
+  browserSessionAction,
   trailingActions,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -304,6 +307,7 @@ export function PreviewChromeRow({
             </TooltipPopup>
           </Tooltip>
         ) : null}
+        {browserSessionAction}
         {trailingActions}
       </form>
       <div

@@ -1,17 +1,18 @@
+import * as NodeCrypto from "node:crypto";
 import * as NodeURL from "node:url";
 
 import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@t3tools/contracts";
 import {
-  createOpencodeClient,
-  type Agent,
-  type FilePartInput,
-  type Model,
-  type OpencodeClient,
-  type PermissionRuleset,
-  type ProviderListResponse,
-  type QuestionAnswer,
-  type QuestionRequest,
-} from "@opencode-ai/sdk/v2";
+  makeOpenCodeClient,
+  type OpenCodeAgent as Agent,
+  type OpenCodeCompatClient as OpencodeClient,
+  type OpenCodeFilePartInput as FilePartInput,
+  type OpenCodeModel as Model,
+  type OpenCodePermissionRuleset as PermissionRuleset,
+  type OpenCodeProviderListResponse as ProviderListResponse,
+  type OpenCodeQuestionAnswer as QuestionAnswer,
+  type OpenCodeQuestionRequest as QuestionRequest,
+} from "./opencodeClient.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -48,17 +49,19 @@ export function resolveOpenCodeConfigContent(
   );
 }
 
-const OPENCODE_SERVER_READY_PREFIX = "opencode server listening";
+const OPENCODE_SERVER_READY_PREFIX = "server listening on";
 const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 30_000;
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const OPENCODE_SKILL_DISCOVERY_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 export interface OpenCodeServerProcess {
   readonly url: string;
+  readonly password?: string;
   readonly exitCode: Effect.Effect<number, never>;
 }
 
 export interface OpenCodeServerConnection {
   readonly url: string;
+  readonly password?: string;
   readonly exitCode: Effect.Effect<number, never> | null;
   readonly external: boolean;
 }
@@ -187,7 +190,7 @@ export interface OpenCodeRuntimeShape {
 
 function parseServerUrlFromOutput(output: string): string | null {
   for (const line of output.split("\n")) {
-    if (!line.startsWith(OPENCODE_SERVER_READY_PREFIX)) {
+    if (!line.trimStart().toLowerCase().startsWith(OPENCODE_SERVER_READY_PREFIX)) {
       continue;
     }
     const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
@@ -280,6 +283,7 @@ export function parseAgentListCliOutput(stdout: string): ReadonlyArray<Agent> {
         try {
           const permission = JSON.parse(jsonStr);
           agents.push({
+            id: currentHeader.name,
             name: currentHeader.name,
             mode: currentHeader.mode as Agent["mode"],
             hidden: KNOWN_HIDDEN_AGENTS.has(currentHeader.name),
@@ -507,6 +511,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           ),
         ));
       const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
+      const serverPassword = NodeCrypto.randomBytes(32).toString("base64url");
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
       const spawnCommand = yield* resolveCommand(input.binaryPath, args, input.environment);
 
@@ -525,6 +530,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
               // relying on inheritance) because `extendEnv` is false whenever
               // `input.environment` is provided.
               OPENCODE_CONFIG_CONTENT: resolveOpenCodeConfigContent(input.environment),
+              OPENCODE_PASSWORD: serverPassword,
             },
             extendEnv: input.environment === undefined,
           }),
@@ -644,6 +650,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 
       return {
         url: readyOption.value,
+        password: serverPassword,
         exitCode: child.exitCode.pipe(
           Effect.map(Number),
           Effect.orElseSucceed(() => 0),
@@ -671,6 +678,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
     }).pipe(
       Effect.map((server) => ({
         url: server.url,
+        ...(server.password ? { password: server.password } : {}),
         exitCode: server.exitCode,
         external: false,
       })),
@@ -678,18 +686,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
   };
 
   const createOpenCodeSdkClient: OpenCodeRuntimeShape["createOpenCodeSdkClient"] = (input) =>
-    createOpencodeClient({
-      baseUrl: input.baseUrl,
-      directory: input.directory,
-      ...(input.serverPassword
-        ? {
-            headers: {
-              Authorization: `Basic ${Buffer.from(`opencode:${input.serverPassword}`, "utf8").toString("base64")}`,
-            },
-          }
-        : {}),
-      throwOnError: true,
-    });
+    makeOpenCodeClient(input);
 
   const loadProviders = (client: OpencodeClient) =>
     runOpenCodeSdk("provider.list", () => client.provider.list()).pipe(
@@ -716,9 +713,9 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
     runOpenCodeSdk("app.skills", () => client.app.skills()).pipe(
       Effect.map((result) =>
         (result.data ?? []).map((skill) => ({
-          name: skill.name,
+          ...(skill.name === undefined ? {} : { name: skill.name }),
           ...(skill.description === undefined ? {} : { description: skill.description }),
-          location: skill.location,
+          ...(skill.location === undefined ? {} : { location: skill.location }),
         })),
       ),
       Effect.orElseSucceed((): ReadonlyArray<OpenCodeSkill> => []),

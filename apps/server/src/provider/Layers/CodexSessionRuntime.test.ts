@@ -30,16 +30,6 @@ import {
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
-const proteusHealth = {
-  runtime: "ready",
-  plugin: "ready",
-  skills: "ready",
-  mcp: "ready",
-  version: "2.1.5",
-  message: null,
-  checkedAt: "2026-08-28T00:00:00.000Z",
-} as const;
-
 const dynamicToolParams = {
   namespace: "research",
   tool: "get_status",
@@ -55,7 +45,6 @@ it.effect("dispatches a dynamic tool call from the active provider thread", () =
     const response = yield* handleDynamicToolCallForProviderThread({
       providerThreadId: "provider-thread-1",
       params: dynamicToolParams,
-      proteus: proteusHealth,
       handle: () => {
         calls += 1;
         return Effect.succeed({ success: true, contentItems: [] });
@@ -73,7 +62,6 @@ it.effect("rejects a dynamic tool call from another provider thread", () =>
     const response = yield* handleDynamicToolCallForProviderThread({
       providerThreadId: "provider-thread-2",
       params: dynamicToolParams,
-      proteus: proteusHealth,
       handle: () => {
         calls += 1;
         return Effect.succeed({ success: true, contentItems: [] });
@@ -412,6 +400,24 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it.effect("injects web tool guidance when the scoped toolkit is available", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-web",
+        runtimeMode: "full-access",
+        prompt: "Inspect the capture",
+        webToolsAvailable: true,
+      });
+
+      NodeAssert.equal(params.collaborationMode?.mode, "default");
+      NodeAssert.ok(
+        params.collaborationMode?.settings.developer_instructions?.includes(
+          "## Erebus web testing",
+        ),
+      );
+    }),
+  );
+
   it.effect("injects refreshed Erebus instructions even when interaction mode is absent", () =>
     Effect.gen(function* () {
       const params = yield* buildTurnStartParams({
@@ -460,8 +466,8 @@ describe("Codex MCP elicitation approvals", () => {
 
   const toolApprovalRequest = {
     ...request,
-    serverName: "proteus",
-    message: "Allow Proteus to run Get Memory Record?",
+    serverName: "browser-tools",
+    message: "Allow browser tools to read the current page?",
     _meta: {
       codex_approval_kind: "mcp_tool_call",
       persist: ["session", "always"],

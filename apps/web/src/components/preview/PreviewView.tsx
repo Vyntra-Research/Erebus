@@ -60,6 +60,7 @@ import {
   useActiveBrowserRecordingTabIds,
 } from "~/browser/browserRecording";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import { BrowserProfileControl } from "./BrowserProfileControl";
 
 interface Props {
   threadRef: ScopedThreadRef;
@@ -683,6 +684,7 @@ export function PreviewView({
         pickDisabledReason={
           isUnreachable ? "Page didn't load — pick unavailable until the page renders" : undefined
         }
+        browserSessionAction={<BrowserProfileControl threadRef={threadRef} tabId={tabId} />}
         trailingActions={
           previewBridge ? (
             <PreviewMoreMenu

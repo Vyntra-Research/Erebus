@@ -354,7 +354,6 @@ import {
   type LocalDispatchSnapshot,
   PullRequestDialogState,
   cloneComposerImageForRetry,
-  deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
   resolveBackgroundDraftWorkspaceOptions,
@@ -485,6 +484,11 @@ const PreviewPanel = lazy(() =>
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const WebSecurityPanel = lazy(() =>
+  import("./web-security/WebSecurityPanel").then((module) => ({
+    default: module.WebSecurityPanel,
+  })),
+);
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -2125,11 +2129,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread?.modelSelection.instanceId ??
     activeProject?.defaultModelSelection?.instanceId ??
     null;
-  const lockedProvider = deriveLockedProvider({
-    thread: activeThread,
-    selectedProvider: selectedProviderByThreadId,
-    threadProvider,
-  });
+  const lockedProvider: ProviderDriverKind | null = null;
   // Once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
   const serverConfig = activeThread
@@ -3531,6 +3531,10 @@ function ChatViewContent(props: ChatViewProps) {
   const addAgentsSurface = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
+  }, [activeThreadRef]);
+  const addWebSurface = useCallback(() => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "web-security");
   }, [activeThreadRef]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
@@ -6749,7 +6753,7 @@ function ChatViewContent(props: ChatViewProps) {
       terminalAvailable={activeProject !== null}
       terminalOpen={terminalUiState.terminalOpen}
       terminalShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
-      rightPanelAvailable={activeProject !== null}
+      rightPanelAvailable={activeThreadRef !== null}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
       // Suppressed while the Agents surface is visible: the roster itself is
@@ -6861,6 +6865,10 @@ function ChatViewContent(props: ChatViewProps) {
         composerDraftTarget={composerDraftTarget}
         onStateChange={handlePullRequestTabStatusChange}
       />
+    ) : activeRightPanelSurface?.kind === "web-security" ? (
+      <Suspense fallback={null}>
+        <WebSecurityPanel environmentId={activeThreadRef.environmentId} />
+      </Suspense>
     ) : activeRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
@@ -7347,12 +7355,14 @@ function ChatViewContent(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddAgents={addAgentsSurface}
+          onAddWeb={addWebSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           agentsAvailable
+          webAvailable={isPreviewSupportedInRuntime()}
           pullRequestStatuses={pullRequestTabStatuses}
           liveAgentCount={agentPanelModel.liveCount}
         >
@@ -7387,12 +7397,14 @@ function ChatViewContent(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddAgents={addAgentsSurface}
+            onAddWeb={addWebSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             agentsAvailable
+            webAvailable={isPreviewSupportedInRuntime()}
             pullRequestStatuses={pullRequestTabStatuses}
             liveAgentCount={agentPanelModel.liveCount}
           >

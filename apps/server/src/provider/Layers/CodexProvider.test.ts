@@ -7,7 +7,6 @@ import {
   applyPreferredCodexDefaultModel,
   codexLoginInstruction,
   deriveArgosHealth,
-  deriveProteusHealth,
   mapCodexModelCapabilities,
   parseCodexModelListResponse,
   requestAllCodexModels,
@@ -303,49 +302,6 @@ it("ignores custom models that shadow a preferred slug", () => {
   assert.deepStrictEqual(models.find((model) => model.isDefault)?.slug, "gpt-5.4");
 });
 
-it("reports read-only Proteus ready without loading Proteus skills", () => {
-  const checkedAt = "2026-08-27T12:00:00.000Z";
-  const health = deriveProteusHealth({
-    pluginList: {
-      marketplaces: [
-        {
-          name: "local",
-          plugins: [
-            {
-              id: "proteus@local",
-              name: "proteus",
-              installed: true,
-              enabled: true,
-              localVersion: "2.1.5",
-            },
-          ],
-        },
-      ],
-    } as unknown as CodexSchema.V2PluginListResponse,
-    skills: [],
-    mcpStatus: {
-      data: [
-        {
-          name: "proteus",
-          tools: { proteus_query_memory: { name: "proteus_query_memory", inputSchema: {} } },
-          serverInfo: { name: "proteus", version: "2.1.5" },
-        },
-      ],
-    } as unknown as CodexSchema.V2ListMcpServerStatusResponse,
-    checkedAt,
-  });
-
-  assert.deepStrictEqual(health, {
-    runtime: "ready",
-    plugin: "ready",
-    skills: "ready",
-    mcp: "ready",
-    version: "2.1.5",
-    message: "Proteus read-only history is ready.",
-    checkedAt,
-  });
-});
-
 it("reports managed Argos ready when its plugin, MCP, and skills are loaded", () => {
   const checkedAt = "2026-09-12T12:00:00.000Z";
   const health = deriveArgosHealth({
@@ -399,20 +355,6 @@ it("reports missing Argos parts without failing the Codex provider probe", () =>
 
   assert.equal(health.plugin, "missing");
   assert.equal(health.skills, "missing");
-  assert.equal(health.mcp, "missing");
-  assert.equal(health.runtime, "missing");
-});
-
-it("reports missing Proteus parts without failing the Codex provider probe", () => {
-  const health = deriveProteusHealth({
-    pluginList: { marketplaces: [] },
-    skills: [],
-    mcpStatus: { data: [] },
-    checkedAt: "2026-08-27T12:00:00.000Z",
-  });
-
-  assert.equal(health.plugin, "missing");
-  assert.equal(health.skills, "ready");
   assert.equal(health.mcp, "missing");
   assert.equal(health.runtime, "missing");
 });

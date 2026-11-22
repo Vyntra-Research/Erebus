@@ -51,12 +51,18 @@ import {
   stageLinuxIconSize,
   stageDesktopDmgBackground,
   stageResourceMonitor,
+  stageWebRuntime,
   STAGE_INSTALL_ARGS,
   ancestorNodeModulesPaths,
   copyDirectoryPreservingSymlinks,
   validateWindowsPackagedPayload,
+  WEB_CAPTURE_EXTENSION_INSTALL_ARGS,
+  WEB_CAPTURE_EXTENSION_REQUIRED_FILES,
+  WebCaptureExtensionBuildOutputMissingError,
   WindowsPrimaryNativeProbeError,
   WindowsPackagedPayloadValidationError,
+  WebRuntimeBuildOutputMissingError,
+  WebRuntimeSourceMissingError,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
   WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
   WINDOWS_SERVER_ASAR_REQUIRED_RUNTIME_FILES,
@@ -64,6 +70,7 @@ import {
   WINDOWS_SERVER_ASAR_RESOURCE,
   WINDOWS_SERVER_ASAR_UNPACK_GLOB,
   WINDOWS_SERVER_RESOURCE_SOURCE_DIR,
+  webRuntimeExecutableName,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -105,6 +112,27 @@ function iconResizeSpawnerLayer(
   );
 }
 
+const writeWebCaptureExtensionFixture = Effect.fn("test.writeWebCaptureExtensionFixture")(
+  function* (repoRoot: string, omittedOutput?: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const extensionDirectory = path.join(repoRoot, "native/erebus-web/extension");
+    const distDirectory = path.join(extensionDirectory, "dist");
+    yield* fs.makeDirectory(distDirectory, { recursive: true });
+    yield* fs.writeFileString(path.join(extensionDirectory, "package.json"), "{}\n");
+    yield* fs.writeFileString(
+      path.join(extensionDirectory, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+    );
+    yield* fs.writeFileString(path.join(extensionDirectory, "build.mjs"), "export {};\n");
+    yield* fs.writeFileString(path.join(extensionDirectory, "manifest.json"), "{}\n");
+    for (const fileName of WEB_CAPTURE_EXTENSION_REQUIRED_FILES) {
+      if (fileName === omittedOutput) continue;
+      yield* fs.writeFileString(path.join(distDirectory, fileName), `fixture:${fileName}`);
+    }
+  },
+);
+
 const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(function* (input: {
   readonly copyUnpackedNatives: boolean;
   readonly serverEntrySource?: string;
@@ -136,6 +164,8 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   const packagedAppDir = path.join(stageDistDir, "win-unpacked");
   const resourcesDir = path.join(packagedAppDir, "resources");
   yield* fs.makeDirectory(path.join(resourcesDir, "resource-monitor"), { recursive: true });
+  yield* fs.makeDirectory(path.join(resourcesDir, "erebus-web"), { recursive: true });
+  yield* fs.makeDirectory(path.join(resourcesDir, "erebus-web/extension"), { recursive: true });
   yield* fs.copyFile(generatedAsarPath, path.join(resourcesDir, WINDOWS_SERVER_ASAR_RESOURCE));
   if (input.copyUnpackedNatives) {
     yield* fs.copy(
@@ -147,6 +177,13 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
     path.join(resourcesDir, "resource-monitor/t3-resource-monitor.exe"),
     "monitor",
   );
+  yield* fs.writeFileString(path.join(resourcesDir, "erebus-web/erebus-webd.exe"), "runtime");
+  for (const fileName of WEB_CAPTURE_EXTENSION_REQUIRED_FILES) {
+    yield* fs.writeFileString(
+      path.join(resourcesDir, "erebus-web/extension", fileName),
+      `fixture:${fileName}`,
+    );
+  }
   const appExecutableName = "erebus.exe";
   yield* fs.writeFileString(path.join(packagedAppDir, appExecutableName), "electron");
   yield* fs.writeFileString(path.join(packagedAppDir, "chrome_crashpad_handler.exe"), "crashpad");
@@ -527,6 +564,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           from: "apps/desktop/prod-resources/resource-monitor",
           to: "resource-monitor",
         },
+        {
+          from: "apps/desktop/prod-resources/erebus-web",
+          to: "erebus-web",
+        },
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
       ]);
       assert.deepStrictEqual(win.nsis, { differentialPackage: true });
@@ -716,6 +757,246 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ),
           "cached monitor",
         );
+      }),
+    ),
+  );
+
+  it.effect("stages a cached web runtime and extension on Linux", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({
+          prefix: "erebus-web-runtime-cache-test-",
+        });
+        const manifestPath = path.join(repoRoot, "native/erebus-web/Cargo.toml");
+        const binaryPath = path.join(
+          repoRoot,
+          "native/erebus-web/target/x86_64-unknown-linux-gnu/release/erebus-webd",
+        );
+        const stageResourcesDir = path.join(repoRoot, "stage");
+        yield* fs.makeDirectory(path.dirname(manifestPath), { recursive: true });
+        yield* fs.makeDirectory(path.dirname(binaryPath), { recursive: true });
+        yield* fs.writeFileString(manifestPath, "[package]\nname='erebus-webd'\n");
+        yield* fs.writeFileString(binaryPath, "cached runtime");
+        yield* writeWebCaptureExtensionFixture(repoRoot);
+
+        yield* stageWebRuntime({
+          repoRoot,
+          stageResourcesDir,
+          platform: "linux",
+          arch: "x64",
+          verbose: false,
+        }).pipe(
+          Effect.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({ env: { T3CODE_DESKTOP_REUSE_WEB_RUNTIME: "true" } }),
+            ),
+          ),
+        );
+
+        assert.equal(
+          yield* fs.readFileString(path.join(stageResourcesDir, "erebus-web/erebus-webd")),
+          "cached runtime",
+        );
+        assert.equal(
+          yield* fs.readFileString(
+            path.join(stageResourcesDir, "erebus-web/extension/manifest.json"),
+          ),
+          "fixture:manifest.json",
+        );
+      }),
+    ),
+  );
+
+  it.effect("stages the Windows runtime and unpacked extension layout", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({
+          prefix: "erebus-web-runtime-windows-cache-test-",
+        });
+        const manifestPath = path.join(repoRoot, "native/erebus-web/Cargo.toml");
+        const binaryPath = path.join(
+          repoRoot,
+          "native/erebus-web/target/x86_64-pc-windows-msvc/release/erebus-webd.exe",
+        );
+        const stageResourcesDir = path.join(repoRoot, "stage");
+        yield* fs.makeDirectory(path.dirname(manifestPath), { recursive: true });
+        yield* fs.makeDirectory(path.dirname(binaryPath), { recursive: true });
+        yield* fs.writeFileString(manifestPath, "[package]\nname='erebus-webd'\n");
+        yield* fs.writeFileString(binaryPath, "cached runtime");
+        yield* writeWebCaptureExtensionFixture(repoRoot);
+
+        yield* stageWebRuntime({
+          repoRoot,
+          stageResourcesDir,
+          platform: "win",
+          arch: "x64",
+          verbose: false,
+        }).pipe(
+          Effect.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({ env: { T3CODE_DESKTOP_REUSE_WEB_RUNTIME: "true" } }),
+            ),
+          ),
+        );
+
+        assert.equal(
+          yield* fs.readFileString(path.join(stageResourcesDir, "erebus-web/erebus-webd.exe")),
+          "cached runtime",
+        );
+        assert.isTrue(
+          yield* fs.exists(path.join(stageResourcesDir, "erebus-web/extension/background.js")),
+        );
+      }),
+    ),
+  );
+
+  it.effect("builds the extension from its frozen lockfile before staging", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({
+          prefix: "erebus-web-extension-build-test-",
+        });
+        const extensionDirectory = path.join(repoRoot, "native/erebus-web/extension");
+        const manifestPath = path.join(repoRoot, "native/erebus-web/Cargo.toml");
+        const binaryPath = path.join(
+          repoRoot,
+          "native/erebus-web/target/x86_64-unknown-linux-gnu/release/erebus-webd",
+        );
+        yield* fs.makeDirectory(path.dirname(manifestPath), { recursive: true });
+        yield* fs.makeDirectory(path.dirname(binaryPath), { recursive: true });
+        yield* fs.writeFileString(manifestPath, "[package]\nname='erebus-webd'\n");
+        yield* fs.writeFileString(binaryPath, "built runtime");
+        yield* writeWebCaptureExtensionFixture(repoRoot);
+        const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
+          [];
+
+        yield* stageWebRuntime({
+          repoRoot,
+          stageResourcesDir: path.join(repoRoot, "stage"),
+          platform: "linux",
+          arch: "x64",
+          verbose: false,
+        }).pipe(Effect.provide(iconResizeSpawnerLayer(commands, [0, 0, 0])));
+
+        assert.deepStrictEqual(
+          commands.map(({ args }) =>
+            args.map((arg) =>
+              arg.startsWith('^"') && arg.endsWith('^"') ? arg.slice(2, -2) : arg,
+            ),
+          ),
+          [
+            ["--dir", extensionDirectory, ...WEB_CAPTURE_EXTENSION_INSTALL_ARGS],
+            ["--dir", extensionDirectory, "run", "build"],
+            [
+              "build",
+              "--locked",
+              "--release",
+              "--manifest-path",
+              manifestPath,
+              "--target",
+              "x86_64-unknown-linux-gnu",
+            ],
+          ],
+        );
+      }),
+    ),
+  );
+
+  it.effect("fails clearly when the web runtime source is absent", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({
+          prefix: "erebus-web-runtime-source-missing-",
+        });
+        const error = yield* stageWebRuntime({
+          repoRoot,
+          stageResourcesDir: repoRoot,
+          platform: "linux",
+          arch: "x64",
+          verbose: false,
+        }).pipe(Effect.flip);
+        assert.instanceOf(error, WebRuntimeSourceMissingError);
+        assert.include(error.manifestPath.replaceAll("\\", "/"), "native/erebus-web/Cargo.toml");
+      }),
+    ),
+  );
+
+  it.effect("fails clearly when a cached web runtime binary is absent", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({
+          prefix: "erebus-web-runtime-output-missing-",
+        });
+        const manifestPath = path.join(repoRoot, "native/erebus-web/Cargo.toml");
+        yield* fs.makeDirectory(path.dirname(manifestPath), { recursive: true });
+        yield* fs.writeFileString(manifestPath, "[package]\nname='erebus-webd'\n");
+        yield* writeWebCaptureExtensionFixture(repoRoot);
+
+        const error = yield* stageWebRuntime({
+          repoRoot,
+          stageResourcesDir: repoRoot,
+          platform: "linux",
+          arch: "x64",
+          verbose: false,
+        }).pipe(
+          Effect.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({ env: { T3CODE_DESKTOP_REUSE_WEB_RUNTIME: "true" } }),
+            ),
+          ),
+          Effect.flip,
+        );
+        assert.instanceOf(error, WebRuntimeBuildOutputMissingError);
+        assert.equal(error.rustTarget, "x86_64-unknown-linux-gnu");
+      }),
+    ),
+  );
+
+  it.effect("fails clearly when the cached extension output is incomplete", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({
+          prefix: "erebus-web-extension-output-missing-",
+        });
+        const manifestPath = path.join(repoRoot, "native/erebus-web/Cargo.toml");
+        const binaryPath = path.join(
+          repoRoot,
+          "native/erebus-web/target/x86_64-unknown-linux-gnu/release/erebus-webd",
+        );
+        yield* fs.makeDirectory(path.dirname(manifestPath), { recursive: true });
+        yield* fs.makeDirectory(path.dirname(binaryPath), { recursive: true });
+        yield* fs.writeFileString(manifestPath, "[package]\nname='erebus-webd'\n");
+        yield* fs.writeFileString(binaryPath, "cached runtime");
+        yield* writeWebCaptureExtensionFixture(repoRoot, "background.js");
+
+        const error = yield* stageWebRuntime({
+          repoRoot,
+          stageResourcesDir: path.join(repoRoot, "stage"),
+          platform: "linux",
+          arch: "x64",
+          verbose: false,
+        }).pipe(
+          Effect.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({ env: { T3CODE_DESKTOP_REUSE_WEB_RUNTIME: "true" } }),
+            ),
+          ),
+          Effect.flip,
+        );
+
+        assert.instanceOf(error, WebCaptureExtensionBuildOutputMissingError);
+        assert.deepStrictEqual(error.missingFiles, ["background.js"]);
       }),
     ),
   );
@@ -970,6 +1251,48 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.deepStrictEqual(resourceMonitorError.missingFiles, [
           "resource-monitor/t3-resource-monitor.exe",
         ]);
+
+        yield* fs.remove(resourceMonitorPath, { recursive: true });
+        yield* fs.writeFileString(resourceMonitorPath, "monitor");
+        const webRuntimePath = path.join(
+          fixture.packagedAppDir,
+          "resources/erebus-web/erebus-webd.exe",
+        );
+        yield* fs.remove(webRuntimePath);
+        yield* fs.makeDirectory(webRuntimePath);
+
+        const webRuntimeError = yield* validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+        }).pipe(Effect.flip);
+        assert.instanceOf(webRuntimeError, WindowsPackagedPayloadValidationError);
+        assert.equal(webRuntimeError.reason, "web-runtime-missing");
+        assert.deepStrictEqual(webRuntimeError.missingFiles, ["erebus-web/erebus-webd.exe"]);
+      }),
+    ),
+  );
+
+  it.effect("rejects a Windows payload without the unpacked web extension", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
+        const extensionManifestPath = path.join(
+          fixture.packagedAppDir,
+          "resources/erebus-web/extension/manifest.json",
+        );
+        yield* fs.remove(extensionManifestPath);
+
+        const extensionError = yield* validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+        }).pipe(Effect.flip);
+        assert.instanceOf(extensionError, WindowsPackagedPayloadValidationError);
+        assert.equal(extensionError.reason, "web-extension-missing");
+        assert.deepStrictEqual(extensionError.missingFiles, ["erebus-web/extension/manifest.json"]);
       }),
     ),
   );
@@ -1318,6 +1641,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         from: "apps/desktop/prod-resources/resource-monitor",
         to: "resource-monitor",
       },
+      {
+        from: "apps/desktop/prod-resources/erebus-web",
+        to: "erebus-web",
+      },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [
       "aarch64-apple-darwin",
@@ -1331,6 +1658,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ]);
     assert.equal(resourceMonitorExecutableName("mac"), "t3-resource-monitor");
     assert.equal(resourceMonitorExecutableName("win"), "t3-resource-monitor.exe");
+    assert.equal(webRuntimeExecutableName("linux"), "erebus-webd");
+    assert.equal(webRuntimeExecutableName("win"), "erebus-webd.exe");
+    assert.deepStrictEqual(WEB_CAPTURE_EXTENSION_INSTALL_ARGS, [
+      "install",
+      "--frozen-lockfile",
+      "--ignore-workspace",
+    ]);
   });
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {

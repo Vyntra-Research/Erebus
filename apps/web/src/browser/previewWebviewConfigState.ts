@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type {
+  DesktopPreviewBrowserProfileId,
   DesktopPreviewBridge,
   DesktopPreviewWebviewConfig,
   EnvironmentId,
@@ -46,31 +47,37 @@ type PreviewConfigBridge = Pick<DesktopPreviewBridge, "getPreviewConfig">;
 export const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
   bridge: PreviewConfigBridge | null = previewBridge,
+  browserProfileId?: DesktopPreviewBrowserProfileId,
 ): Effect.Effect<DesktopPreviewWebviewConfig, PreviewWebviewConfigError> => {
   if (bridge === null) {
     return Effect.fail(new PreviewWebviewBridgeUnavailableError({ environmentId }));
   }
 
   return Effect.tryPromise({
-    try: () => bridge.getPreviewConfig(environmentId),
+    try: () => bridge.getPreviewConfig(environmentId, browserProfileId),
     catch: (cause) => new PreviewWebviewConfigLoadError({ environmentId, cause }),
   });
 };
 
-const previewWebviewConfigAtom = Atom.family((environmentId: EnvironmentId) =>
-  Atom.make(loadPreviewWebviewConfig(environmentId)).pipe(
-    Atom.swr({
-      staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
-      revalidateOnMount: true,
-    }),
-    Atom.setIdleTTL(PREVIEW_CONFIG_IDLE_TTL_MS),
-    Atom.withLabel(`preview:webview-config:${environmentId}`),
-  ),
+const previewWebviewConfigAtom = Atom.family(
+  ([environmentId, browserProfileId]: readonly [
+    EnvironmentId,
+    DesktopPreviewBrowserProfileId | undefined,
+  ]) =>
+    Atom.make(loadPreviewWebviewConfig(environmentId, previewBridge, browserProfileId)).pipe(
+      Atom.swr({
+        staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
+        revalidateOnMount: true,
+      }),
+      Atom.setIdleTTL(PREVIEW_CONFIG_IDLE_TTL_MS),
+      Atom.withLabel(`preview:webview-config:${environmentId}:${browserProfileId ?? "default"}`),
+    ),
 );
 
 export function usePreviewWebviewConfig(
   environmentId: EnvironmentId,
+  browserProfileId?: DesktopPreviewBrowserProfileId,
 ): DesktopPreviewWebviewConfig | null {
-  const result = useAtomValue(previewWebviewConfigAtom(environmentId));
+  const result = useAtomValue(previewWebviewConfigAtom([environmentId, browserProfileId]));
   return Option.getOrNull(AsyncResult.value(result));
 }

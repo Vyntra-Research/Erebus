@@ -541,10 +541,8 @@ export type GrokSettings = typeof GrokSettings.Type;
 
 export const OpenCodeSettings = makeProviderSettingsSchema(
   {
-    // Off by default (like Cursor and Grok): the binding is not yet stable
-    // enough to probe on every install. Users opt in from Settings.
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting("opencode").pipe(
@@ -686,6 +684,35 @@ export const ResearchSupervisionSettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type ResearchSupervisionSettings = typeof ResearchSupervisionSettings.Type;
 
+export const SecretHoundModuleSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  binaryPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  patternsPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type SecretHoundModuleSettings = typeof SecretHoundModuleSettings.Type;
+
+export const KatanaModuleSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  binaryPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  configPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type KatanaModuleSettings = typeof KatanaModuleSettings.Type;
+
+export const SubfinderModuleSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  binaryPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  configPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  providerConfigPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type SubfinderModuleSettings = typeof SubfinderModuleSettings.Type;
+
+export const PentestModulesSettings = Schema.Struct({
+  secrethound: SecretHoundModuleSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  katana: KatanaModuleSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  subfinder: SubfinderModuleSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type PentestModulesSettings = typeof PentestModulesSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -710,6 +737,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_AGENT_PERSONA_PRESET)),
   ),
   researchSupervision: ResearchSupervisionSettings,
+  pentestModules: PentestModulesSettings,
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
   // consumers should resolve `backgroundActivity` instead.
@@ -932,6 +960,32 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       evaluatorModel: Schema.optionalKey(TrimmedNonEmptyString),
       evaluatorReasoningEffort: Schema.optionalKey(ResearchEvaluatorReasoningEffort),
+    }),
+  ),
+  pentestModules: Schema.optionalKey(
+    Schema.Struct({
+      secrethound: Schema.optionalKey(
+        Schema.Struct({
+          enabled: Schema.optionalKey(Schema.Boolean),
+          binaryPath: Schema.optionalKey(TrimmedString),
+          patternsPath: Schema.optionalKey(TrimmedString),
+        }),
+      ),
+      katana: Schema.optionalKey(
+        Schema.Struct({
+          enabled: Schema.optionalKey(Schema.Boolean),
+          binaryPath: Schema.optionalKey(TrimmedString),
+          configPath: Schema.optionalKey(TrimmedString),
+        }),
+      ),
+      subfinder: Schema.optionalKey(
+        Schema.Struct({
+          enabled: Schema.optionalKey(Schema.Boolean),
+          binaryPath: Schema.optionalKey(TrimmedString),
+          configPath: Schema.optionalKey(TrimmedString),
+          providerConfigPath: Schema.optionalKey(TrimmedString),
+        }),
+      ),
     }),
   ),
   backgroundActivity: Schema.optionalKey(

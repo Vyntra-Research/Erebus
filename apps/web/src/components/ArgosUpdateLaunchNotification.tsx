@@ -29,7 +29,7 @@ export function ArgosUpdateLaunchNotification() {
         timeout: 0,
         actionProps: {
           children: "View",
-          onClick: () => void navigate({ to: "/settings/general" }),
+          onClick: () => void navigate({ to: "/settings/modules" }),
         },
         actionVariant: "outline",
         data: {

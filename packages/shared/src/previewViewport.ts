@@ -40,6 +40,13 @@ const PREVIEW_VIEWPORT_PRESET_DEFINITIONS = {
     width: 390,
     height: 844,
   },
+  "iphone-15-pro": {
+    label: "iPhone 15 Pro",
+    category: "Phone",
+    detail: "393 × 852",
+    width: 393,
+    height: 852,
+  },
   "iphone-14-pro-max": {
     label: "iPhone 14 Pro Max",
     category: "Phone",

@@ -2,7 +2,7 @@
 
 > For maintainers. Using Erebus? See [docs/user](../user/).
 
-Erebus is a local server runtime that owns Codex sessions, workspaces, research tools, and version
+Erebus is a local server runtime that owns provider sessions, workspaces, research tools, and version
 control. The React web client is the interface, and the Electron desktop app packages that client
 with the server. They communicate over one authenticated Effect RPC WebSocket. Provider processes,
 terminal commands, Git operations, and filesystem reads run at the server boundary.
@@ -18,12 +18,12 @@ terminal commands, Git operations, and filesystem reads run at the server bounda
 ┌──────────────────▼─────────────────────────────┐
 │ apps/server                                    │
 │  orchestration engine (event-sourced)          │
-│  Codex provider runtime and account gateway    │
-│  checkpointing, VCS, terminals, filesystem     │
+│  Codex and OpenCode provider runtimes          │
+│  web capture, microVMs, VCS, terminals         │
 └──────────────────┬─────────────────────────────┘
                    │ per-driver transport
 ┌──────────────────▼─────────────────────────────┐
-│ Codex CLI and app-server                       │
+│ Codex app-server, OpenCode, web runtime, VMs   │
 └────────────────────────────────────────────────┘
 ```
 
@@ -103,11 +103,24 @@ build production behavior on receipts.
 
 ## Provider runtime
 
-Current Erebus releases support Codex. `ProviderInstanceRegistry` owns each Codex account instance,
-and `CodexRequestGateway` chooses the account for every new model request without replacing the
-durable thread. The tree still contains inherited Claude, Cursor, Grok, and OpenCode adapters as
-compatibility code. The current release surface uses Codex. See
-[providers.md](./providers.md).
+Current Erebus releases support Codex and OpenCode. `ProviderInstanceRegistry` owns each configured
+instance. Codex can use several isolated accounts, and `CodexRequestGateway` chooses one for every
+new model request without replacing the durable thread. OpenCode uses one instance backed by its
+local CLI configuration or a configured server. See [providers.md](./providers.md).
+
+## Web testing runtime
+
+`native/erebus-web` owns capture storage, HTTP and WebSocket ingestion, replay, scope evaluation, and
+site-map queries. The server exposes that runtime through typed tools and RPC, while the desktop app
+owns browser profiles, Chromium partitions, proxy binding, and extension pairing. Capture state and
+browser state stay separate so one can recover without silently changing the other.
+
+## MicroVM runtime
+
+`apps/server/src/microVm` wraps the local Microsandbox backend. Erebus stores VM metadata and disks
+under its application data, exposes lifecycle and execution through typed tools, and gives the web
+client a settings view over the same contract. Source enters a guest as a private copy. No guest
+command is assembled through a host shell.
 
 ## Checkpointing
 
@@ -129,6 +142,7 @@ already dispatch.
 ## Related
 
 - [Workspace layout](./workspace-layout.md), [Glossary](./glossary.md)
+- [Web application testing](../user/web-pentest.md), [Persistent microVMs](../user/microvms.md)
 - [Resource telemetry](./resource-telemetry.md)
 - [Scripts](./scripts.md), [CI gates](./ci.md)
 

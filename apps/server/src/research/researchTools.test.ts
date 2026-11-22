@@ -12,7 +12,7 @@ it("identifies the current transport and required fields when native schemas are
   assert.include(EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS, 'mode="mcp_fallback"');
   assert.include(
     EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS,
-    "even when a native tool has the same name",
+    "do not call both transports for one operation",
   );
   assert.include(EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS, "discover it on erebus-research");
   assert.match(EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS, /get_status accepts \{\}/);
@@ -59,7 +59,6 @@ it("routes only calls from the research namespace", () => {
   };
 
   assert.isTrue(isErebusResearchToolCall(call));
-  assert.isFalse(isErebusResearchToolCall({ ...call, namespace: "proteus" }));
   assert.isFalse(isErebusResearchToolCall({ ...call, tool: "finish_without_judge" }));
 });
 

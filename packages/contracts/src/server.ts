@@ -20,7 +20,7 @@ import {
 import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
-import { ResearchArgosHealth, ResearchProteusHealth } from "./research.ts";
+import { ResearchArgosHealth } from "./research.ts";
 import { ServerSettings } from "./settings.ts";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
@@ -210,7 +210,6 @@ export const ServerProvider = Schema.Struct({
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   argos: Schema.optionalKey(ResearchArgosHealth),
-  proteus: Schema.optionalKey(ResearchProteusHealth),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
   accountUsage: Schema.optionalKey(ServerProviderAccountUsage),
@@ -724,16 +723,53 @@ export class ServerArgosError extends Schema.TaggedErrorClass<ServerArgosError>(
   }
 }
 
-export const ServerProteusStatus = ServerManagedResearchRuntimeStatus;
-export type ServerProteusStatus = typeof ServerProteusStatus.Type;
+export const ServerModuleId = Schema.Literals(["argos", "secrethound", "katana", "subfinder"]);
+export type ServerModuleId = typeof ServerModuleId.Type;
 
-export const ServerProteusUpdateResult = ServerManagedResearchRuntimeUpdateResult;
-export type ServerProteusUpdateResult = typeof ServerProteusUpdateResult.Type;
+export const ServerModuleState = Schema.Literals(["ready", "missing", "unsupported", "error"]);
+export type ServerModuleState = typeof ServerModuleState.Type;
 
-export class ServerProteusError extends Schema.TaggedErrorClass<ServerProteusError>()(
-  "ServerProteusError",
+export const ServerModuleStatus = Schema.Struct({
+  id: ServerModuleId,
+  displayName: TrimmedNonEmptyString,
+  description: TrimmedNonEmptyString,
+  state: ServerModuleState,
+  installedVersion: Schema.NullOr(TrimmedNonEmptyString),
+  latestVersion: Schema.NullOr(TrimmedNonEmptyString),
+  updateAvailable: Schema.Boolean,
+  checkedAt: Schema.NullOr(Schema.Number),
+  updateCheckError: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerModuleStatus = typeof ServerModuleStatus.Type;
+
+export const ServerModulesStatus = Schema.Struct({
+  modules: Schema.Array(ServerModuleStatus),
+});
+export type ServerModulesStatus = typeof ServerModulesStatus.Type;
+
+export const ServerModulesStatusInput = Schema.Struct({
+  forceUpdateCheck: Schema.optionalKey(Schema.Boolean),
+});
+export type ServerModulesStatusInput = typeof ServerModulesStatusInput.Type;
+
+export const ServerModuleUpdateInput = Schema.Struct({
+  id: ServerModuleId,
+});
+export type ServerModuleUpdateInput = typeof ServerModuleUpdateInput.Type;
+
+export const ServerModuleUpdateResult = Schema.Struct({
+  id: ServerModuleId,
+  previousVersion: Schema.NullOr(TrimmedNonEmptyString),
+  version: TrimmedNonEmptyString,
+  updated: Schema.Boolean,
+});
+export type ServerModuleUpdateResult = typeof ServerModuleUpdateResult.Type;
+
+export class ServerModuleError extends Schema.TaggedErrorClass<ServerModuleError>()(
+  "ServerModuleError",
   {
-    operation: Schema.Literals(["status", "update"]),
+    module: ServerModuleId,
+    operation: Schema.Literals(["status", "install", "update", "resolve", "run"]),
     detail: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
   },

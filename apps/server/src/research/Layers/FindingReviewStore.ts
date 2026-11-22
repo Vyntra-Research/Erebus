@@ -24,7 +24,7 @@ import {
 } from "../Services/FindingReviewStore.ts";
 
 const SubmissionRow = Schema.Struct({
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
   threadId: ThreadId,
   findingId: ResearchFindingId,
   findingRevision: Schema.Int,

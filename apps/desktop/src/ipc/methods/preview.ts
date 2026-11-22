@@ -1,6 +1,13 @@
 import {
+  DEFAULT_DESKTOP_PREVIEW_BROWSER_PROFILE_ID,
   DesktopPreviewAnnotationThemeInputSchema,
   DesktopPreviewArtifactInputSchema,
+  DesktopPreviewBrowserProfileDeleteInputSchema,
+  DesktopPreviewBrowserProfileDeleteResultSchema,
+  DesktopPreviewBrowserProfilesClearEnvironmentInputSchema,
+  DesktopPreviewBrowserProfileNameInputSchema,
+  DesktopPreviewBrowserProfileSchema,
+  DesktopPreviewBrowserProfileUpdateInputSchema,
   DesktopPreviewAutomationClickInputSchema,
   DesktopPreviewAutomationEvaluateInputSchema,
   DesktopPreviewAutomationPressInputSchema,
@@ -8,6 +15,7 @@ import {
   DesktopPreviewAutomationTypeInputSchema,
   DesktopPreviewAutomationWaitForInputSchema,
   DesktopPreviewConfigInputSchema,
+  DesktopPreviewConfigureProxyInputSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
   DesktopPreviewRecordingSaveInputSchema,
@@ -23,11 +31,17 @@ import {
   PreviewAutomationStatus,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as ElectronShell from "../../electron/ElectronShell.ts";
+import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
+import * as BrowserProfileRegistry from "../../preview/BrowserProfileRegistry.ts";
+import * as BrowserSession from "../../preview/BrowserSession.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -218,14 +232,193 @@ export const getPreviewConfig = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_GET_CONFIG_CHANNEL,
   payload: DesktopPreviewConfigInputSchema,
   result: DesktopPreviewWebviewConfigSchema,
-  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({ environmentId }) {
+  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({
+    environmentId,
+    browserProfileId,
+  }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.getBrowserSession(environmentId);
+    const profiles = yield* BrowserProfileRegistry.BrowserProfileRegistry;
+    yield* profiles.assertExists(browserProfileId);
+    const namedProfileId =
+      browserProfileId === DEFAULT_DESKTOP_PREVIEW_BROWSER_PROFILE_ID
+        ? undefined
+        : browserProfileId;
+    yield* manager.getBrowserSession(environmentId, namedProfileId);
+    const partition = yield* manager.getBrowserPartition(environmentId, namedProfileId);
+    yield* profiles.recordPartition(
+      browserProfileId ?? DEFAULT_DESKTOP_PREVIEW_BROWSER_PROFILE_ID,
+      partition,
+      environmentId,
+    );
     return {
-      partition: yield* manager.getBrowserPartition(environmentId),
+      partition,
       webPreferences: PREVIEW_WEBVIEW_PREFERENCES,
       preloadUrl: NodeURL.pathToFileURL(`${__dirname}/preview-pick-preload.cjs`).href,
     };
+  }),
+});
+
+export const resolveWebCaptureExtensionDirectory = Effect.fn(
+  "desktop.ipc.preview.resolveWebCaptureExtensionDirectory",
+)(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const relativeDirectory = environment.path.join("erebus-web", "extension");
+  const candidates = environment.isDevelopment
+    ? [
+        environment.path.join(environment.rootDir, "native", "erebus-web", "extension", "dist"),
+        environment.path.join(
+          environment.rootDir,
+          "apps",
+          "desktop",
+          "prod-resources",
+          relativeDirectory,
+        ),
+      ]
+    : environment.isPackaged
+      ? [environment.path.join(environment.resourcesPath, relativeDirectory)]
+      : environment.resolveResourcePathCandidates(relativeDirectory);
+
+  for (const candidate of candidates) {
+    const isDirectory = yield* fileSystem.stat(candidate).pipe(
+      Effect.map((stat) => stat.type === "Directory"),
+      Effect.orElseSucceed(() => false),
+    );
+    if (!isDirectory) continue;
+    if (!(environment.isPackaged && environment.platform === "linux")) {
+      return Option.some(candidate);
+    }
+
+    const stableDirectory = environment.path.join(environment.stateDir, "web-capture-extension");
+    const copied = yield* fileSystem
+      .copy(candidate, stableDirectory, { overwrite: true })
+      .pipe(Effect.option);
+    return Option.isSome(copied) ? Option.some(stableDirectory) : Option.none<string>();
+  }
+  return Option.none<string>();
+});
+
+export const openCaptureExtensionFolder = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_OPEN_CAPTURE_EXTENSION_FOLDER_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.preview.openCaptureExtensionFolder")(function* () {
+    const extensionDirectory = yield* resolveWebCaptureExtensionDirectory();
+    if (Option.isNone(extensionDirectory)) return false;
+    return yield* (yield* ElectronShell.ElectronShell).openPath(extensionDirectory.value);
+  }),
+});
+
+export const configureProxy = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_CONFIGURE_PROXY_CHANNEL,
+  payload: DesktopPreviewConfigureProxyInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.configureProxy")(function* ({
+    environmentId,
+    browserProfileId,
+    proxy,
+  }) {
+    const manager = yield* PreviewManager.PreviewManager;
+    const profiles = yield* BrowserProfileRegistry.BrowserProfileRegistry;
+    yield* profiles.assertExists(browserProfileId);
+    const namedProfileId =
+      browserProfileId === DEFAULT_DESKTOP_PREVIEW_BROWSER_PROFILE_ID
+        ? undefined
+        : browserProfileId;
+    yield* profiles.recordPartition(
+      browserProfileId ?? DEFAULT_DESKTOP_PREVIEW_BROWSER_PROFILE_ID,
+      yield* manager.getBrowserPartition(environmentId, namedProfileId),
+      environmentId,
+    );
+    yield* manager.configureBrowserProxy(environmentId, namedProfileId, proxy);
+  }),
+});
+
+export const listBrowserProfiles = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_BROWSER_PROFILES_LIST_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Array(DesktopPreviewBrowserProfileSchema),
+  handler: Effect.fn("desktop.ipc.preview.listBrowserProfiles")(function* () {
+    return yield* (yield* BrowserProfileRegistry.BrowserProfileRegistry).list;
+  }),
+});
+
+export const createBrowserProfile = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_BROWSER_PROFILES_CREATE_CHANNEL,
+  payload: DesktopPreviewBrowserProfileNameInputSchema,
+  result: DesktopPreviewBrowserProfileSchema,
+  handler: Effect.fn("desktop.ipc.preview.createBrowserProfile")(function* ({ name }) {
+    return yield* (yield* BrowserProfileRegistry.BrowserProfileRegistry).create(name);
+  }),
+});
+
+export const renameBrowserProfile = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_BROWSER_PROFILES_RENAME_CHANNEL,
+  payload: DesktopPreviewBrowserProfileUpdateInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.renameBrowserProfile")(function* ({ profileId, name }) {
+    yield* (yield* BrowserProfileRegistry.BrowserProfileRegistry).rename(profileId, name);
+  }),
+});
+
+export const deleteBrowserProfile = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_BROWSER_PROFILES_DELETE_CHANNEL,
+  payload: DesktopPreviewBrowserProfileDeleteInputSchema,
+  result: DesktopPreviewBrowserProfileDeleteResultSchema,
+  handler: Effect.fn("desktop.ipc.preview.deleteBrowserProfile")(function* ({ profileId }) {
+    const profiles = yield* BrowserProfileRegistry.BrowserProfileRegistry;
+    const manager = yield* PreviewManager.PreviewManager;
+    const partitions = yield* profiles.partitions(profileId);
+    const clearResult = yield* manager.clearBrowserProfile(profileId, partitions).pipe(
+      Effect.as({ status: "deleted" } as const),
+      Effect.catch((error) => {
+        const cause = PreviewManager.isPreviewOperationError(error) ? error.cause : error;
+        return BrowserSession.isBrowserProfileInUseError(cause)
+          ? Effect.succeed({
+              status: "in-use" as const,
+              activeTabCount: cause.activeTabCount,
+            })
+          : Effect.fail(error);
+      }),
+    );
+    if (clearResult.status === "in-use") return clearResult;
+    yield* profiles.remove(profileId);
+    return clearResult;
+  }),
+});
+
+export const clearBrowserProfileEnvironment = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_BROWSER_PROFILES_CLEAR_ENVIRONMENT_CHANNEL,
+  payload: DesktopPreviewBrowserProfilesClearEnvironmentInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.clearBrowserProfileEnvironment")(function* ({
+    environmentId,
+  }) {
+    const profiles = yield* BrowserProfileRegistry.BrowserProfileRegistry;
+    const manager = yield* PreviewManager.PreviewManager;
+    const owners = [...(yield* profiles.environmentPartitions(environmentId))];
+    for (const legacy of yield* profiles.unownedPartitions) {
+      const namedProfileId =
+        legacy.profileId === DEFAULT_DESKTOP_PREVIEW_BROWSER_PROFILE_ID
+          ? undefined
+          : legacy.profileId;
+      const expectedPartition = yield* manager.getBrowserPartition(environmentId, namedProfileId);
+      if (expectedPartition !== legacy.partition) continue;
+      yield* profiles.recordPartition(legacy.profileId, legacy.partition, environmentId);
+      owners.push({ ...legacy, environmentId });
+    }
+    const partitionsByProfile = new Map<string, string[]>();
+    for (const owner of owners) {
+      const partitions = partitionsByProfile.get(owner.profileId) ?? [];
+      partitions.push(owner.partition);
+      partitionsByProfile.set(owner.profileId, partitions);
+    }
+    yield* Effect.forEach(
+      partitionsByProfile,
+      ([profileId, partitions]) => manager.clearBrowserProfile(profileId, partitions),
+      { concurrency: 2, discard: true },
+    );
+    yield* profiles.removeEnvironment(environmentId);
   }),
 });
 
@@ -387,6 +580,12 @@ export const methods = [
   clearCookies,
   clearCache,
   getPreviewConfig,
+  configureProxy,
+  listBrowserProfiles,
+  createBrowserProfile,
+  renameBrowserProfile,
+  deleteBrowserProfile,
+  clearBrowserProfileEnvironment,
   setAnnotationTheme,
   pickElement,
   cancelPickElement,

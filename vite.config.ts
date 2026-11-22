@@ -28,6 +28,7 @@ export default defineConfig({
     ignorePatterns: [
       ".reference",
       ".repos/**",
+      "native/erebus-web/**",
       ".alchemy",
       "dist",
       "dist-electron",
@@ -56,6 +57,7 @@ export default defineConfig({
     ignorePatterns: [
       ".repos",
       ".repos/**",
+      "native/erebus-web/**",
       "dist",
       "dist-electron",
       "node_modules",

@@ -31,7 +31,7 @@ export type FindingReviewStoreError =
 
 export interface SubmitFindingReviewInput {
   readonly commandId: CommandId;
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectId | null;
   readonly threadId: ThreadId;
   readonly submission: ResearchFindingReviewSubmission;
 }
@@ -65,7 +65,7 @@ export interface FindingReviewStoreShape {
     FindingReviewStoreError
   >;
   readonly recordEvaluation: (input: {
-    readonly projectId: ProjectId;
+    readonly projectId: ProjectId | null;
     readonly threadId: ThreadId;
     readonly evaluation: ResearchFindingReviewEvaluation;
   }) => Effect.Effect<ResearchFindingReviewRecord, FindingReviewStoreError>;

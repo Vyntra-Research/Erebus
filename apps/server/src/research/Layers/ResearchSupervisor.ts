@@ -12,9 +12,11 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -56,6 +58,8 @@ const makeResearchSupervisor = Effect.gen(function* () {
   const reviews = yield* FindingReviewStore;
   const evaluator = yield* ResearchEvaluator;
   const serverSettings = yield* ServerSettingsService;
+  const serverConfig = yield* ServerConfig;
+  const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const inFlight = new Set<string>();
   const deliveriesInFlight = new Set<ResearchEvaluationId>();
@@ -69,12 +73,19 @@ const makeResearchSupervisor = Effect.gen(function* () {
     threadId: ThreadId,
   ) {
     const thread = yield* snapshots.getThreadShellById(threadId).pipe(Effect.map(Option.getOrNull));
-    if (!thread || thread.projectId === null) return null;
-    const project = yield* snapshots
-      .getProjectShellById(thread.projectId)
-      .pipe(Effect.map(Option.getOrNull));
-    if (!project) return null;
-    return { thread, cwd: thread.worktreePath ?? project.workspaceRoot };
+    if (!thread) return null;
+    if (thread.worktreePath) return { thread, cwd: thread.worktreePath };
+    if (thread.projectId !== null) {
+      const project = yield* snapshots
+        .getProjectShellById(thread.projectId)
+        .pipe(Effect.map(Option.getOrNull));
+      if (!project) return null;
+      return { thread, cwd: project.workspaceRoot };
+    }
+    return {
+      thread,
+      cwd: path.join(serverConfig.stateDir, "standalone-workspaces", thread.id),
+    };
   });
 
   const appendJudgeActivity = Effect.fn("ResearchSupervisor.appendJudgeActivity")(function* (

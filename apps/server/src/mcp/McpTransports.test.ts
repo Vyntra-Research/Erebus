@@ -1,7 +1,13 @@
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ResearchFindingId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -12,6 +18,7 @@ import * as Schema from "effect/Schema";
 import { HttpBody, HttpClient, HttpRouter } from "effect/unstable/http";
 
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerConfig from "../config.ts";
 import {
   ResearchToolController,
   type ResearchToolControllerShape,
@@ -100,9 +107,20 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "erebus-fallback-test-" });
       const checkpointContextReads = yield* Ref.make(0);
+      const threadContextReads = yield* Ref.make(0);
+      const projectContextId = yield* Ref.make<ProjectId | null>(projectId);
+      const standaloneRoot = path.join(root, "userdata", "standalone-workspaces", threadId);
       yield* fileSystem.makeDirectory(path.join(root, "findings"));
       yield* fileSystem.makeDirectory(path.join(root, "pocs", "finding-1"), { recursive: true });
       yield* fileSystem.writeFileString(path.join(root, "findings", "finding-1.md"), "Finding");
+      yield* fileSystem.makeDirectory(path.join(standaloneRoot, "findings"), { recursive: true });
+      yield* fileSystem.makeDirectory(path.join(standaloneRoot, "pocs", "finding-standalone"), {
+        recursive: true,
+      });
+      yield* fileSystem.writeFileString(
+        path.join(standaloneRoot, "findings", "finding-standalone.md"),
+        "Standalone finding",
+      );
       const reviewContext = yield* Layer.build(
         ResearchToolControllerLive.pipe(
           Layer.provideMerge(FindingReviewStoreLive),
@@ -124,14 +142,25 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
       const controller: ResearchToolControllerShape = {
         principalInstructions: () => Effect.succeed(""),
         handle: (context, params) =>
-          Effect.sync(() => {
-            expect(context).toEqual({ projectId, threadId, cwd: root });
+          Effect.gen(function* () {
+            const expectedProjectId = yield* Ref.get(projectContextId);
+            expect(context).toEqual({
+              projectId: expectedProjectId,
+              threadId,
+              cwd:
+                params.tool === "calculate_cvss" || params.tool === "get_status"
+                  ? process.cwd()
+                  : expectedProjectId === null
+                    ? standaloneRoot
+                    : root,
+            });
             handled.push({
               tool: params.tool,
               namespace: params.namespace,
               threadId: context.threadId,
             });
-          }).pipe(Effect.andThen(realController!.handle(context, params))),
+            return yield* realController!.handle(context, params);
+          }),
       };
       const transports = Layer.mergeAll(
         McpHttpServer.layer,
@@ -146,13 +175,23 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
                 Effect.as(Option.none()),
               ),
             getThreadShellById: () =>
-              Effect.succeed(Option.some({ projectId, worktreePath: null } as never)),
+              Ref.update(threadContextReads, (count) => count + 1).pipe(
+                Effect.andThen(Ref.get(projectContextId)),
+                Effect.map((currentProjectId) =>
+                  Option.some({
+                    id: threadId,
+                    projectId: currentProjectId,
+                    worktreePath: null,
+                  } as never),
+                ),
+              ),
             getProjectShellById: () =>
               Effect.succeed(Option.some({ workspaceRoot: root } as never)),
           }),
         ),
         Layer.provide(Layer.succeed(ResearchToolController, controller)),
         Layer.provide(PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer))),
+        Layer.provide(ServerConfig.layerTest(root, root)),
       );
       yield* HttpRouter.serve(transports, { disableListenLog: true, disableLogger: true }).pipe(
         Layer.build,
@@ -210,6 +249,18 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
       expect(researchNames).toEqual(expect.arrayContaining(EREBUS_RESEARCH_TOOL_NAMES));
       expect(researchNames).toContain("threads_spawn");
       expect(researchNames.some((name) => name.startsWith("preview_"))).toBe(false);
+      const threadsWait = researchTools.find((tool) => tool.name === "threads_wait")
+        ?.inputSchema as
+        | {
+            readonly properties?: {
+              readonly timeoutMs?: { readonly maximum?: number; readonly description?: string };
+            };
+          }
+        | undefined;
+      expect(threadsWait?.properties?.timeoutMs).toMatchObject({
+        maximum: 60_000,
+        description: expect.stringContaining("cannot exceed 60000"),
+      });
       expect(
         requiredFields(researchTools.find((tool) => tool.name === "get_status")?.inputSchema)
           .required,
@@ -251,6 +302,7 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
       ).not.toBe(true);
       expect(handled).toEqual([{ tool: "submit_finding", namespace: "research", threadId }]);
       expect(yield* Ref.get(checkpointContextReads)).toBe(0);
+      expect(yield* Ref.get(threadContextReads)).toBe(1);
       const persisted = yield* reviews.listByThread(threadId);
       expect(persisted).toHaveLength(1);
       expect(persisted[0]?.submission.findingId).toBe("finding-1");
@@ -267,6 +319,68 @@ it.effect("isolates browser and research catalogs and routes authorized Judge ha
       );
       expect(handled).toEqual([{ tool: "submit_finding", namespace: "research", threadId }]);
       expect(yield* reviews.listByThread(threadId)).toHaveLength(1);
+
+      yield* Ref.set(projectContextId, null);
+      const calculated = yield* rpc(
+        "/research-mcp",
+        "research",
+        "tools/call",
+        {
+          name: "calculate_cvss",
+          arguments: {
+            vector: "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+          },
+        },
+        research.headers["mcp-session-id"],
+      );
+      expect(
+        (yield* Schema.decodeUnknownEffect(callResult)(calculated.body)).result.isError,
+      ).not.toBe(true);
+      const status = yield* rpc(
+        "/research-mcp",
+        "research",
+        "tools/call",
+        { name: "get_status", arguments: { findingId: "finding-1" } },
+        research.headers["mcp-session-id"],
+      );
+      expect((yield* Schema.decodeUnknownEffect(callResult)(status.body)).result.isError).not.toBe(
+        true,
+      );
+      const standaloneSubmission = yield* rpc(
+        "/research-mcp",
+        "research",
+        "tools/call",
+        {
+          name: "submit_finding",
+          arguments: {
+            findingId: "finding-standalone",
+            revision: 1,
+            supersedesEvaluationId: null,
+            title: "Standalone boundary confusion",
+            target: "Target 1.0 local test",
+            findingPath: "findings/finding-standalone.md",
+            pocPath: "pocs/finding-standalone",
+          },
+        },
+        research.headers["mcp-session-id"],
+      );
+      const standaloneSubmissionResult = yield* Schema.decodeUnknownEffect(callResult)(
+        standaloneSubmission.body,
+      );
+      expect(standaloneSubmissionResult.result.isError).not.toBe(true);
+      expect(handled.map(({ tool }) => tool)).toEqual([
+        "submit_finding",
+        "calculate_cvss",
+        "get_status",
+        "submit_finding",
+      ]);
+      expect(yield* Ref.get(threadContextReads)).toBe(2);
+      const standaloneReviews = yield* reviews.listByThread(
+        threadId,
+        ResearchFindingId.make("finding-standalone"),
+      );
+      expect(standaloneReviews).toHaveLength(1);
+      expect(standaloneReviews[0]?.projectId).toBeNull();
     }),
   ).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpServer.layerTest))),
 );

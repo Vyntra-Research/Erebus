@@ -175,6 +175,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          submodules: recursive
           sparse-checkout: |
             /*
             !/.repos/
@@ -247,6 +248,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          submodules: recursive
           sparse-checkout: |
             /*
             !/.repos/
@@ -293,6 +295,14 @@ jobs:
           "${appimages[0]}" --appimage-extract >/dev/null
           test -x squashfs-root/AppRun
           test -n "$(find squashfs-root -type f -name app.asar -print -quit)"
+          web_runtime="$(find squashfs-root -type f -path '*/resources/erebus-web/erebus-webd' -print -quit)"
+          test -n "$web_runtime"
+          test -x "$web_runtime"
+          extension_root="$(find squashfs-root -type f -path '*/resources/erebus-web/extension/manifest.json' -printf '%h\n' -quit)"
+          test -n "$extension_root"
+          for file in manifest.json background.js popup.html popup.js popup.css; do
+            test -f "$extension_root/$file"
+          done
           monitor_path="$(find squashfs-root -type f -name t3-resource-monitor -print -quit)"
           test -n "$monitor_path"
           test -x "$monitor_path"

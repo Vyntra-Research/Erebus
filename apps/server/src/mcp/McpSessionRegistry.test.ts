@@ -92,6 +92,56 @@ it.effect("issues a separate research endpoint only for fallback credentials", (
   }),
 );
 
+it.effect("records web capability separately from browser preview access", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry(() => 1_000);
+    const issued = yield* registry.issue({
+      threadId: ThreadId.make("thread-web-runtime"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      capabilities: new Set(["web"]),
+    });
+    const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, "");
+    const resolved = yield* registry.resolve(token);
+
+    expect(issued.config.webEnabled).toBe(true);
+    expect(issued.config.previewEnabled).toBe(false);
+    expect(resolved?.capabilities.has("web")).toBe(true);
+    expect(resolved?.capabilities.has("preview")).toBe(false);
+  }),
+);
+
+it.effect(
+  "shares the web runtime endpoint without sharing credentials between delegated threads",
+  () =>
+    Effect.gen(function* () {
+      const registry = yield* makeRegistry(() => 1_000);
+      const parentThreadId = ThreadId.make("thread-web-parent");
+      const childThreadId = ThreadId.make("thread-web-coagent");
+      const parent = yield* registry.issue({
+        threadId: parentThreadId,
+        providerInstanceId: ProviderInstanceId.make("codex-primary"),
+        capabilities: new Set(["web"]),
+      });
+      const child = yield* registry.issue({
+        threadId: childThreadId,
+        providerInstanceId: ProviderInstanceId.make("codex-coagent"),
+        capabilities: new Set(["web"]),
+      });
+      const parentToken = parent.config.authorizationHeader.replace(/^Bearer\s+/, "");
+      const childToken = child.config.authorizationHeader.replace(/^Bearer\s+/, "");
+
+      expect(child.config.endpoint).toBe(parent.config.endpoint);
+      expect(child.config.authorizationHeader).not.toBe(parent.config.authorizationHeader);
+      expect(child.config.providerSessionId).not.toBe(parent.config.providerSessionId);
+      expect((yield* registry.resolve(parentToken))?.threadId).toBe(parentThreadId);
+      expect((yield* registry.resolve(childToken))?.threadId).toBe(childThreadId);
+
+      yield* registry.revokeThread(parentThreadId);
+      expect(yield* registry.resolve(parentToken)).toBeUndefined();
+      expect((yield* registry.resolve(childToken))?.capabilities.has("web")).toBe(true);
+    }),
+);
+
 it.effect("expires credentials once their session stops showing signs of life", () =>
   Effect.gen(function* () {
     let timestamp = 1_000;

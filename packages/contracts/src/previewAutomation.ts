@@ -43,6 +43,18 @@ export const PREVIEW_AUTOMATION_OPERATIONS = [
   ...PREVIEW_AUTOMATION_V1_OPERATIONS,
   "resize",
   "setColorScheme",
+  "browserProfilesList",
+  "browserProfileCreate",
+  "browserProfileRename",
+  "browserProfileDelete",
+  "browserProfileSelect",
+  "browserProfileProxy",
+  "webRuntimeReachability",
+  "tabsList",
+  "tabClose",
+  "back",
+  "forward",
+  "reload",
 ] as const;
 
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_OPERATIONS);
@@ -537,12 +549,14 @@ export const PreviewAutomationSnapshot = Schema.Struct({
   consoleEntries: Schema.Array(PreviewAutomationConsoleEntry),
   networkEntries: Schema.Array(PreviewAutomationNetworkEntry),
   actionTimeline: Schema.Array(PreviewAutomationActionEvent),
-  screenshot: Schema.Struct({
-    mimeType: Schema.Literal("image/png"),
-    data: Schema.String,
-    width: Schema.Int,
-    height: Schema.Int,
-  }),
+  screenshot: Schema.optional(
+    Schema.Struct({
+      mimeType: Schema.Literal("image/png"),
+      data: Schema.String,
+      width: Schema.Int,
+      height: Schema.Int,
+    }),
+  ),
 });
 export type PreviewAutomationSnapshot = typeof PreviewAutomationSnapshot.Type;
 
@@ -756,9 +770,14 @@ export class PreviewAutomationExecutionError extends Schema.TaggedErrorClass<Pre
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
+    browserProfileInUseActiveTabCount: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
   },
 ) {
   override get message(): string {
+    if (this.browserProfileInUseActiveTabCount !== undefined) {
+      const count = this.browserProfileInUseActiveTabCount;
+      return `Close the ${count} open browser tab${count === 1 ? "" : "s"} using this profile before deleting it.`;
+    }
     return `Preview automation ${this.operation} failed on client ${this.clientId}.`;
   }
 }

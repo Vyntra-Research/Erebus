@@ -12,6 +12,7 @@ const VERSIONED_PACKAGE_FILES = new Set([
 
 const FULL_VALIDATION_FILES = new Set([
   ".gitattributes",
+  ".gitmodules",
   ".mcp.json",
   "package.json",
   "pnpm-lock.yaml",
@@ -148,6 +149,9 @@ export function classifyCiChanges(changes) {
       ]),
     );
   const rust = full || files.some((file) => file.startsWith("native/resource-monitor/"));
+  const webRuntime =
+    full ||
+    files.some((file) => file === "native/erebus-web" || file.startsWith("native/erebus-web/"));
   const serverOnly =
     node && !full && files.length > 0 && files.every((file) => file.startsWith("apps/server/"));
 
@@ -161,6 +165,7 @@ export function classifyCiChanges(changes) {
     server,
     serverOnly,
     web,
+    webRuntime,
     meaningfulFiles: files,
   };
 }
@@ -196,6 +201,7 @@ function outputPlan(plan) {
     `server=${String(plan.server)}`,
     `server_only=${String(plan.serverOnly)}`,
     `web=${String(plan.web)}`,
+    `web_runtime=${String(plan.webRuntime)}`,
   ].join("\n");
   NodeFS.appendFileSync(outputPath, `${output}\n`, "utf8");
 

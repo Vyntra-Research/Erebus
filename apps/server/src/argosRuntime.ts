@@ -21,6 +21,15 @@ const ARGOS_UPDATE_MAX_BYTES = 20 * 1024 * 1024;
 const ARGOS_UPDATE_TIMEOUT_MS = 30_000;
 const ARGOS_RETAINED_RUNTIME_VERSIONS = 2;
 const ARGOS_RETAINED_PLUGIN_VERSIONS = 2;
+const LEGACY_ARGOS_RESEARCH_SKILLS = [
+  "adaptive-fuzzing",
+  "chain-discovery",
+  "codebase-mapping",
+  "evidence-testing",
+  "exploit-validation",
+  "external-intel",
+  "finding-report",
+] as const;
 const ARGOS_MARKETPLACE_MANIFEST = `{
   "name": "argos-marketplace",
   "interface": {
@@ -149,6 +158,17 @@ async function copyFilesystemTree(source: string, destination: string): Promise<
   await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
   await NodeFSP.writeFile(destination, await NodeFSP.readFile(source));
   await NodeFSP.chmod(destination, sourceStat.mode).catch(() => undefined);
+}
+
+async function removeLegacyArgosResearchSkills(pluginRoot: string): Promise<void> {
+  await Promise.all(
+    LEGACY_ARGOS_RESEARCH_SKILLS.map((name) =>
+      NodeFSP.rm(NodePath.join(pluginRoot, "skills", name), {
+        recursive: true,
+        force: true,
+      }),
+    ),
+  );
 }
 
 function removeTomlTable(source: string, table: string): string {
@@ -710,6 +730,10 @@ export const installManagedArgosForCodex = Effect.fn("ArgosRuntime.installForCod
         "argos",
         runtime.version,
       );
+      await Promise.all([
+        removeLegacyArgosResearchSkills(installedPluginRoot),
+        removeLegacyArgosResearchSkills(cachedPluginRoot),
+      ]);
       const cachedManifestPath = NodePath.join(cachedPluginRoot, ".codex-plugin", "plugin.json");
       const cachedFilesExist = await Promise.all([
         NodeFSP.access(cachedManifestPath),
@@ -720,7 +744,7 @@ export const installManagedArgosForCodex = Effect.fn("ArgosRuntime.installForCod
       if (!cachedFilesExist) {
         // Codex normally hydrates this cache while its app-server starts. A new
         // session can finish skill discovery first on a cold home, leaving the
-        // initial turn without Argos skills even though its MCP loads later.
+        // initial turn without the Argos skill even though its MCP loads later.
         await copyFilesystemTree(installedPluginRoot, cachedPluginRoot);
       }
       await writeManagedArgosManifest(cachedManifestPath, runtime.version, runtime.mcpPath, true);

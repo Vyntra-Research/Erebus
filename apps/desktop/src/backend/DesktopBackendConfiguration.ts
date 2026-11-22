@@ -146,6 +146,10 @@ function resourceMonitorBinaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "t3-resource-monitor.exe" : "t3-resource-monitor";
 }
 
+function webRuntimeBinaryName(platform: NodeJS.Platform): string {
+  return platform === "win32" ? "erebus-webd.exe" : "erebus-webd";
+}
+
 const resolveResourceMonitorPath = Effect.fn(
   "desktop.backendConfiguration.resolveResourceMonitorPath",
 )(function* () {
@@ -179,6 +183,36 @@ const resolveResourceMonitorPath = Effect.fn(
 
   return Option.none<string>();
 });
+
+const resolveWebRuntimePath = Effect.fn("desktop.backendConfiguration.resolveWebRuntimePath")(
+  function* () {
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const binaryName = webRuntimeBinaryName(environment.platform);
+    const candidates = environment.isDevelopment
+      ? [
+          environment.path.join(
+            environment.rootDir,
+            "native/erebus-web/target/release",
+            binaryName,
+          ),
+          environment.path.join(environment.rootDir, "native/erebus-web/target/debug", binaryName),
+        ]
+      : environment.isPackaged
+        ? [environment.path.join(environment.resourcesPath, "erebus-web", binaryName)]
+        : environment.resolveResourcePathCandidates(
+            environment.path.join("erebus-web", binaryName),
+          );
+
+    for (const candidate of candidates) {
+      if (yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+        return Option.some(candidate);
+      }
+    }
+
+    return Option.fromUndefinedOr(candidates[0]);
+  },
+);
 
 const readPersistedBackendObservabilitySettings = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -367,6 +401,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
   function* (
     input: SharedBootstrapInput & {
       readonly resourceMonitorPath: Option.Option<string>;
+      readonly webRuntimePath: Option.Option<string>;
     },
   ): Effect.fn.Return<
     DesktopBackendManager.DesktopBackendStartConfig,
@@ -392,6 +427,10 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       ...Option.match(input.resourceMonitorPath, {
         onNone: () => ({}),
         onSome: (resourceMonitorPath) => ({ resourceMonitorPath }),
+      }),
+      ...Option.match(input.webRuntimePath, {
+        onNone: () => ({}),
+        onSome: (webRuntimePath) => ({ webRuntimePath }),
       }),
       ...buildObservabilityFragment(input.observabilitySettings),
     };
@@ -683,7 +722,15 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
-    return yield* resolvePrimaryStartConfig({ ...shared, resourceMonitorPath }).pipe(
+    const webRuntimePath = yield* resolveWebRuntimePath().pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
+    );
+    return yield* resolvePrimaryStartConfig({
+      ...shared,
+      resourceMonitorPath,
+      webRuntimePath,
+    }).pipe(
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
       Effect.provideService(DesktopServerExposure.DesktopServerExposure, serverExposure),
     );

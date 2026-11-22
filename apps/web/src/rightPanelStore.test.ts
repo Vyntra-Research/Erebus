@@ -252,6 +252,17 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("keeps the Web pentest panel as a singleton surface", () => {
+    useRightPanelStore.getState().open(refA, "web-security");
+    useRightPanelStore.getState().open(refA, "web-security");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "web-security",
+      surfaces: [{ id: "web-security", kind: "web-security" }],
+    });
+  });
+
   it("replaces the standalone explorer with peer file surfaces", () => {
     useRightPanelStore.getState().open(refA, "files");
     useRightPanelStore.getState().openFile(refA, "src/index.ts");

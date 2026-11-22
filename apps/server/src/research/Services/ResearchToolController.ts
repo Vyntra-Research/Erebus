@@ -4,15 +4,13 @@ import type * as Effect from "effect/Effect";
 import type * as CodexSchema from "effect-codex-app-server/schema";
 
 export interface ResearchToolContext {
-  readonly projectId: ProjectId;
+  readonly projectId: ProjectId | null;
   readonly threadId: ThreadId;
   readonly cwd: string;
 }
 
-export type ResearchInstructionContext = ResearchToolContext;
-
 export interface ResearchToolControllerShape {
-  readonly principalInstructions: (context: ResearchInstructionContext) => Effect.Effect<string>;
+  readonly principalInstructions: (context: ResearchToolContext) => Effect.Effect<string>;
   readonly handle: (
     context: ResearchToolContext,
     params: CodexSchema.DynamicToolCallParams,

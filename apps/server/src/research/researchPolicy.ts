@@ -135,10 +135,7 @@ Decision rules:
 - Judge technical promotion, not packaging. The expected handoff is the finding
   under findings/ and its working PoC under pocs/. Never request REPORTS/, a ZIP,
   checksums, an index, a release bundle, or final disclosure polish.
-- Use short targeted read-only Proteus queries only when the finding cites legacy
-  Proteus evidence and one lookup is necessary to verify the claim. Never mutate
-  Proteus and never use Proteus skills. Do not require Argos access: the delivered
-  artifacts must stand on their own.
+- Do not require Argos access: the delivered artifacts must stand on their own.
 - If a required artifact should be readable but a harness or transport failure
   blocks it, set evidenceAccess.status=blocked and decisionBlocked=true. That is
   reviewBlocked infrastructure state, not a technical verdict.

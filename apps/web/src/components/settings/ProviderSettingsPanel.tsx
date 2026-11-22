@@ -1071,7 +1071,7 @@ export function EnvironmentProviderSettings({
               onClick={() => setIsAddInstanceDialogOpen(true)}
             >
               <PlusIcon className="size-3.5" />
-              Add Codex account
+              Add provider
             </Button>
           ) : null
         }

@@ -2,14 +2,16 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { openExternalMock, writeTextMock } = vi.hoisted(() => ({
+const { openExternalMock, openPathMock, writeTextMock } = vi.hoisted(() => ({
   openExternalMock: vi.fn(),
+  openPathMock: vi.fn(),
   writeTextMock: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
   shell: {
     openExternal: openExternalMock,
+    openPath: openPathMock,
   },
   clipboard: {
     writeText: writeTextMock,
@@ -21,6 +23,7 @@ import * as ElectronShell from "./ElectronShell.ts";
 describe("ElectronShell", () => {
   beforeEach(() => {
     openExternalMock.mockReset();
+    openPathMock.mockReset();
     writeTextMock.mockReset();
   });
 
@@ -103,6 +106,20 @@ describe("ElectronShell", () => {
       const result = yield* electronShell.openExternal("https://example.com/path");
 
       assert.equal(result, false);
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  );
+
+  it.effect("opens a trusted local path and reports shell failures", () =>
+    Effect.gen(function* () {
+      openPathMock.mockResolvedValueOnce("").mockResolvedValueOnce("No application found");
+      const electronShell = yield* ElectronShell.ElectronShell;
+
+      assert.equal(yield* electronShell.openPath("C:\\trusted\\extension"), true);
+      assert.equal(yield* electronShell.openPath("C:\\trusted\\missing"), false);
+      assert.deepEqual(openPathMock.mock.calls, [
+        ["C:\\trusted\\extension"],
+        ["C:\\trusted\\missing"],
+      ]);
     }).pipe(Effect.provide(ElectronShell.layer)),
   );
 });

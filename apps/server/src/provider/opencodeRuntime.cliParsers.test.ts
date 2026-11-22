@@ -165,6 +165,7 @@ describe("parseAgentListCliOutput", () => {
 
     const result = parseAgentListCliOutput(stdout);
     NodeAssert.equal(result.length, 1);
+    NodeAssert.equal(result[0]!.id, "build");
     NodeAssert.equal(result[0]!.name, "build");
     NodeAssert.equal(result[0]!.mode, "primary");
     NodeAssert.equal(result[0]!.permission.length, 1);

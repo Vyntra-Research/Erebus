@@ -19,8 +19,8 @@ import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDi
 import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstallDialog";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
-import { ProteusUpdateLaunchNotification } from "../components/ProteusUpdateLaunchNotification";
 import { ArgosUpdateLaunchNotification } from "../components/ArgosUpdateLaunchNotification";
+import { PentestModuleInstallLaunchDialog } from "../components/PentestModuleInstallLaunchDialog";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { WallpaperBackdrop } from "../components/WallpaperBackdrop";
@@ -150,7 +150,7 @@ function RootRouteView() {
         {primaryEnvironmentAuthenticated ? <PlanAgentSelectionHeal /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
         {primaryEnvironmentAuthenticated ? <ArgosUpdateLaunchNotification /> : null}
-        {primaryEnvironmentAuthenticated ? <ProteusUpdateLaunchNotification /> : null}
+        {primaryEnvironmentAuthenticated ? <PentestModuleInstallLaunchDialog /> : null}
         {appShell}
         {/* Above the router: a theme draft is judged by walking the app, so the
             editor has to survive navigation away from settings. */}

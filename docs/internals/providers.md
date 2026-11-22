@@ -1,16 +1,18 @@
-# Codex provider runtime
+# Provider runtime
 
 > For maintainers. Using Erebus? See [docs/user](../user/).
 
-Current Erebus releases use Codex. The repository retains inherited Claude, Cursor, Grok, and OpenCode adapters as compatibility source.
+Current Erebus releases support Codex and OpenCode. Both implement the same provider adapter contract, while each driver owns its native process, model inventory, session protocol, and maintenance checks.
 
 ## Registry and sessions
 
-[`ProviderInstanceRegistry`][instances] owns configured Codex account instances. [`ProviderAdapterRegistry`][registry] resolves an instance to its live adapter. [`ProviderService`][service] routes task and turn operations by thread, so orchestration code does not need to know which account serves a request.
+[`ProviderInstanceRegistry`][instances] owns configured provider instances. [`ProviderAdapterRegistry`][registry] resolves an instance to its live adapter. [`ProviderService`][service] routes task and turn operations by thread, so orchestration code does not need to know which driver serves a request.
 
-The adapter starts the Codex app-server with the isolated Erebus profile. A resumed native Codex thread omits its stored turns because the orchestration projection already owns UI history. An imported thread without matching native history receives a bounded continuation seed instead of the full transcript.
+Codex starts an app-server with an isolated Erebus profile. OpenCode starts the installed CLI or connects to a configured server. A resumed native session omits turns already held by that runtime. A new provider session receives a bounded continuation seed instead of the full transcript.
 
-## Account routing
+Erebus keeps the durable thread, workspace, checkpoints, and normalized event stream outside either provider. This lets the user change provider for a later request without replacing the thread.
+
+## Codex account routing
 
 Codex accounts share the task and its durable thread state. A loopback request gateway selects an account for each new model request. Changing the primary account does not restart or detach the task.
 
@@ -21,6 +23,8 @@ Routing considers account priority, current quota, configured switch points, and
 `apps/server/src/provider/model-manifest.json` identifies current Codex model slugs. The model manifest service first tries the file on `main`, then the last successful cached copy, then the bundled copy. A failed refresh never fails the provider check.
 
 Capability data from the signed-in account decides which reasoning levels, speed options, and Daybreak controls the UI can offer. The picker keeps a selected legacy model visible without presenting every old alias as current.
+
+OpenCode reports its connected providers, models, variants, and agents through the v2 client. Erebus builds the picker from that live inventory and keeps one OpenCode instance because authentication and provider configuration belong to the local OpenCode installation.
 
 ## Request flow
 

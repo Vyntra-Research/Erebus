@@ -7,6 +7,7 @@ import {
   GitPullRequest,
   Globe2,
   Plus,
+  Shield,
   TerminalSquare,
   Volume2,
   VolumeOff,
@@ -74,12 +75,14 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddWeb: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
+  webAvailable: boolean;
   pullRequestStatuses?: Readonly<Record<string, PullRequestTabStatus>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
@@ -101,6 +104,7 @@ const SURFACE_DISABLED_REASONS = {
   diff: "Diff is only available for server threads in Git repositories.",
   pullRequest: "This thread's branch has no pull request yet.",
   agents: "Agents are only available from a thread.",
+  web: "Web pentest tools require the Erebus desktop runtime.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -123,6 +127,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   diff: "Available for Git repositories.",
   pullRequest: "No pull request on this branch yet.",
   agents: "Available from a thread.",
+  web: "Available in the desktop app.",
 } as const;
 
 type TabContextMenuAction =
@@ -252,18 +257,30 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddWeb: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   agentsAvailable: boolean;
+  webAvailable: boolean;
   liveAgentCount: number;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
   const actions = [
+    {
+      label: "Web",
+      description: "Capture and map web traffic.",
+      icon: Shield,
+      shortcut: "W",
+      available: props.webAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.web,
+      onClick: props.onAddWeb,
+      badgeCount: 0,
+    },
     {
       label: "Browser",
       description: "Open a local app or URL.",
@@ -508,6 +525,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "agents":
       return "Agents";
+    case "web-security":
+      return "Web";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -593,6 +612,8 @@ function SurfaceIcon({
     }
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "web-security":
+      return <Shield className="size-3 shrink-0" />;
   }
 }
 
@@ -603,6 +624,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
 
   const addSurfaceActions = [
+    {
+      label: "Web",
+      icon: Shield,
+      shortcut: "W",
+      available: props.webAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.web,
+      onClick: props.onAddWeb,
+    },
     {
       label: "Browser",
       icon: Globe2,
@@ -938,12 +967,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddAgents={props.onAddAgents}
+            onAddWeb={props.onAddWeb}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
             pullRequestAvailable={props.pullRequestAvailable}
             agentsAvailable={props.agentsAvailable}
+            webAvailable={props.webAvailable}
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

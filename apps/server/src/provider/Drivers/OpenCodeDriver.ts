@@ -17,14 +17,22 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import { CoagentToolController } from "../../coagents/Services/CoagentToolController.ts";
 import { ServerConfig } from "../../config.ts";
+import { ResearchToolController } from "../../research/Services/ResearchToolController.ts";
+import {
+  addErebusResearchSkillsToOpenCodeConfig,
+  materializeManagedErebusResearchSkills,
+} from "../../research/researchSkills.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { resolveAgentPersonaDeveloperInstructions } from "../AgentPersona.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
 import {
@@ -33,7 +41,7 @@ import {
 } from "../Layers/OpenCodeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import { OpenCodeRuntime } from "../opencodeRuntime.ts";
+import { OpenCodeRuntime, resolveOpenCodeConfigContent } from "../opencodeRuntime.ts";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -66,8 +74,8 @@ function isOpenCodeNativeCommandPath(commandPath: string): boolean {
 
 const UPDATE = makePackageManagedProviderMaintenanceResolver({
   provider: DRIVER_KIND,
-  npmPackageName: "opencode-ai",
-  homebrewFormula: "anomalyco/tap/opencode",
+  npmPackageName: "@opencode/cli",
+  homebrewFormula: "anomalyco/tap/opencode-v2",
   nativeUpdate: {
     executable: "opencode",
     args: ["upgrade"],
@@ -108,7 +116,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
   driverKind: DRIVER_KIND,
   metadata: {
     displayName: "OpenCode",
-    supportsMultipleInstances: true,
+    supportsMultipleInstances: false,
   },
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => decodeOpenCodeSettings({}),
@@ -119,7 +127,44 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const researchToolController = Option.getOrUndefined(
+        yield* Effect.serviceOption(ResearchToolController),
+      );
+      const coagentToolController = Option.getOrUndefined(
+        yield* Effect.serviceOption(CoagentToolController),
+      );
+      const baseProcessEnv = mergeProviderInstanceEnvironment(environment);
+      const managedResearchSkills = enabled
+        ? yield* materializeManagedErebusResearchSkills(serverConfig.stateDir).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderDriverError({
+                  driver: DRIVER_KIND,
+                  instanceId,
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          )
+        : null;
+      const processEnv = managedResearchSkills
+        ? yield* Effect.try({
+            try: () => ({
+              ...baseProcessEnv,
+              OPENCODE_CONFIG_CONTENT: addErebusResearchSkillsToOpenCodeConfig(
+                resolveOpenCodeConfigContent(baseProcessEnv),
+                managedResearchSkills,
+              ),
+            }),
+            catch: (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: `Failed to add Erebus research skills to OpenCode: ${String(cause)}`,
+                cause,
+              }),
+          })
+        : baseProcessEnv;
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -140,6 +185,15 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        ...(researchToolController ? { researchToolController } : {}),
+        ...(coagentToolController ? { coagentToolController } : {}),
+        getAgentPersonaDeveloperInstructions: () =>
+          serverSettings.getSettings.pipe(
+            Effect.map((settings) =>
+              resolveAgentPersonaDeveloperInstructions(settings.agentPersonaPreset),
+            ),
+            Effect.orDie,
+          ),
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);
 

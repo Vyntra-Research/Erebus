@@ -5,11 +5,13 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import { McpProtocol, McpSchema, McpServer } from "effect/unstable/ai";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { CoagentToolController } from "../coagents/Services/CoagentToolController.ts";
 import { EREBUS_THREADS_DYNAMIC_TOOL } from "../coagents/coagentTools.ts";
+import { ServerConfig } from "../config.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ResearchToolController } from "../research/Services/ResearchToolController.ts";
 import { EREBUS_RESEARCH_DYNAMIC_TOOL } from "../research/researchTools.ts";
@@ -28,6 +30,8 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
     const projectionQuery = yield* ProjectionSnapshotQuery;
     const researchToolController = yield* ResearchToolController;
     const coagentToolController = yield* CoagentToolController;
+    const serverConfig = yield* ServerConfig;
+    const path = yield* Path.Path;
 
     const resolveToolContext = Effect.fn("ResearchFallbackMcpHttpServer.resolveToolContext")(
       function* (threadId: ThreadIdType) {
@@ -45,7 +49,10 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
         if (thread.projectId !== null && !project) return Option.none();
         return Option.some({
           projectId: thread.projectId,
-          cwd: thread.worktreePath ?? project?.workspaceRoot ?? process.cwd(),
+          cwd:
+            thread.worktreePath ??
+            project?.workspaceRoot ??
+            path.join(serverConfig.stateDir, "standalone-workspaces", thread.id),
         });
       },
     );
@@ -72,22 +79,19 @@ const registerResearchFallbackTools = Effect.fn("ResearchFallbackMcpHttpServer.r
               );
             }
 
-            return resolveToolContext(invocation.threadId).pipe(
+            const projectIndependent = tool.name === "calculate_cvss" || tool.name === "get_status";
+            const contextEffect = projectIndependent
+              ? Effect.succeed(Option.some({ projectId: null, cwd: process.cwd() }))
+              : resolveToolContext(invocation.threadId);
+            return contextEffect.pipe(
               Effect.flatMap((contextOption) => {
                 const threadContext = Option.getOrUndefined(contextOption);
-                if (!threadContext || threadContext.projectId === null) {
-                  return Effect.succeed(
-                    failureResult(
-                      "The Erebus project context for this task could not be resolved.",
-                    ),
-                  );
-                }
                 return researchToolController
                   .handle(
                     {
-                      projectId: threadContext.projectId,
+                      projectId: threadContext?.projectId ?? null,
                       threadId: invocation.threadId,
-                      cwd: threadContext.cwd,
+                      cwd: threadContext?.cwd ?? process.cwd(),
                     },
                     {
                       namespace: EREBUS_RESEARCH_DYNAMIC_TOOL.name,

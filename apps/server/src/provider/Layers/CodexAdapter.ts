@@ -46,6 +46,7 @@ import {
   getCodexServiceTierOptionValue,
 } from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { EREBUS_MICROVM_INSTRUCTIONS } from "../../microVm/instructions.ts";
 import type { CoagentToolControllerShape } from "../../coagents/Services/CoagentToolController.ts";
 import {
   EREBUS_THREADS_DYNAMIC_TOOL,
@@ -1796,7 +1797,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const appServerArgs: string[] = options?.requestGateway
           ? [...codexRequestGatewayAppServerArgs(options.requestGateway.endpoint)]
           : [];
-        if (mcpSession?.previewEnabled) {
+        if (mcpSession) {
           appServerArgs.push(
             "-c",
             `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
@@ -1827,23 +1828,19 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { resumeCursor: input.resumeCursor }
             : {}),
           runtimeMode: input.runtimeMode,
+          browserToolsAvailable: mcpSession?.previewEnabled ?? false,
+          webToolsAvailable: mcpSession?.webEnabled ?? false,
           ...(input.modelSelection?.instanceId === boundInstanceId
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
-          ...(mcpSession?.researchFallbackEndpoint
-            ? {
-                onProteusHealth: (health) =>
-                  McpProviderSession.setMcpProviderSessionProteusHealth(input.threadId, health),
-              }
-            : {}),
-          ...((projectId && researchToolController) || coagentToolController
+          ...(researchToolController || coagentToolController
             ? {
                 dynamicTools: [
-                  ...(projectId && researchToolController ? [EREBUS_RESEARCH_DYNAMIC_TOOL] : []),
+                  ...(researchToolController ? [EREBUS_RESEARCH_DYNAMIC_TOOL] : []),
                   ...(coagentToolController ? [EREBUS_THREADS_DYNAMIC_TOOL] : []),
                 ],
-                handleDynamicTool: (params, _proteus) =>
+                handleDynamicTool: (params) =>
                   isErebusThreadsToolCall(params) && coagentToolController
                     ? coagentToolController.handle(
                         {
@@ -1853,7 +1850,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                         },
                         params,
                       )
-                    : projectId && researchToolController
+                    : researchToolController
                       ? researchToolController.handle(
                           {
                             projectId,
@@ -1873,13 +1870,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                         }),
               }
             : {}),
-          ...(mcpSession?.researchFallbackEndpoint ||
-          (projectId && researchToolController) ||
-          coagentToolController
+          ...(mcpSession || researchToolController || coagentToolController
             ? {
                 getAdditionalDeveloperInstructions: () =>
                   Effect.all([
-                    projectId && researchToolController
+                    Effect.succeed(mcpSession ? EREBUS_MICROVM_INSTRUCTIONS : ""),
+                    researchToolController
                       ? researchToolController.principalInstructions({
                           projectId,
                           threadId: input.threadId,

@@ -1,7 +1,7 @@
 import * as NodeAssert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { OpenCodeCompatClient as OpencodeClient } from "./opencodeClient.ts";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

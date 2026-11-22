@@ -259,16 +259,24 @@ function restoreUsedProviders(
     ),
   );
   const providerInstances = Object.fromEntries(
-    Object.entries(settings.providerInstances).map(([instanceId, instance]) => [
-      instanceId,
-      instance.enabled === undefined &&
-      (instance.driver === "cursor" ||
+    Object.entries(settings.providerInstances).map(([instanceId, instance]) => {
+      const config = instance.config;
+      const configHasEnabledKey =
+        config !== null &&
+        typeof config === "object" &&
+        !Array.isArray(config) &&
+        Object.hasOwn(config, "enabled");
+      const isOptionalDriver =
+        instance.driver === "cursor" ||
         instance.driver === "grok" ||
-        instance.driver === "opencode") &&
-      usedProviderInstances.has(instanceId)
-        ? { ...instance, enabled: true }
-        : instance,
-    ]),
+        instance.driver === "opencode";
+      return [
+        instanceId,
+        instance.enabled === undefined && isOptionalDriver && !configHasEnabledKey
+          ? { ...instance, enabled: usedProviderInstances.has(instanceId) }
+          : instance,
+      ];
+    }),
   );
 
   return {

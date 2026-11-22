@@ -29,9 +29,9 @@ export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   // Erebus resolves Argos' CLI, MCP runtime, plugin, and skills by filesystem
   // path. The package must remain on disk beside the bundled server.
   "@rafabd1/argos",
-  // Erebus resolves the package's CLI, MCP runtime, plugin, and skills by
-  // filesystem path and copies the plugin into each isolated Codex home.
-  "@vyntra-research/proteus",
+  "microsandbox",
+  "@microsandbox/",
+  "@superradcompany/microsandbox-",
   "node-pty",
   "ffi-rs",
   "@yuuang/",

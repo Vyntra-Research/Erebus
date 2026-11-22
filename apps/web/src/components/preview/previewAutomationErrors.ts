@@ -113,6 +113,23 @@ export class PreviewAutomationRecordingNotActiveError extends Schema.TaggedError
   }
 }
 
+export class PreviewAutomationRemoteProxyUnavailableError extends Schema.TaggedErrorClass<PreviewAutomationRemoteProxyUnavailableError>()(
+  "PreviewAutomationRemoteProxyUnavailableError",
+  {
+    requestId: TrimmedNonEmptyString,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationExecutionError" as const;
+  }
+
+  override get message(): string {
+    return `The web capture proxy for environment ${this.environmentId} is on a remote loopback address. Configure a tunnel before binding it to this device.`;
+  }
+}
+
 export class PreviewAutomationTargetNotEditableHostError extends Schema.TaggedErrorClass<PreviewAutomationTargetNotEditableHostError>()(
   "PreviewAutomationTargetNotEditableHostError",
   {
@@ -168,6 +185,50 @@ const targetNotEditableDiagnostics = (
   };
 };
 
+const browserProfileInUseDiagnostics = (
+  cause: unknown,
+): { readonly activeTabCount: number } | null => {
+  const visited = new Set<unknown>();
+  let current = cause;
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (typeof current !== "object" || current === null || visited.has(current)) return null;
+    visited.add(current);
+    if (
+      "_tag" in current &&
+      current._tag === "BrowserProfileInUseError" &&
+      "activeTabCount" in current &&
+      typeof current.activeTabCount === "number" &&
+      Number.isInteger(current.activeTabCount) &&
+      current.activeTabCount > 0
+    ) {
+      return { activeTabCount: current.activeTabCount };
+    }
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return null;
+};
+
+export class PreviewAutomationBrowserProfileInUseHostError extends Schema.TaggedErrorClass<PreviewAutomationBrowserProfileInUseHostError>()(
+  "PreviewAutomationBrowserProfileInUseHostError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: Schema.NullOr(PreviewTabId),
+    reason: Schema.Literal("browser-profile-in-use"),
+    activeTabCount: Schema.Int.check(Schema.isGreaterThan(0)),
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationExecutionError" as const;
+  }
+
+  override get message(): string {
+    return `Close the ${this.activeTabCount} open browser tab${this.activeTabCount === 1 ? "" : "s"} using this profile before deleting it.`;
+  }
+}
+
 export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<PreviewAutomationOperationError>()(
   "PreviewAutomationOperationError",
   {
@@ -183,15 +244,27 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
     input: PreviewAutomationOperationContext & { readonly cause: unknown },
   ): PreviewAutomationHostError {
     if (isPreviewAutomationHostError(input.cause)) return input.cause;
-    const diagnostics = targetNotEditableDiagnostics(input.cause);
-    return diagnostics
-      ? new PreviewAutomationTargetNotEditableHostError({
+    const targetDiagnostics = targetNotEditableDiagnostics(input.cause);
+    if (targetDiagnostics) {
+      return new PreviewAutomationTargetNotEditableHostError({
+        requestId: input.requestId,
+        operation: input.operation,
+        environmentId: input.environmentId,
+        threadId: input.threadId,
+        tabId: input.tabId,
+        ...targetDiagnostics,
+      });
+    }
+    const profileDiagnostics = browserProfileInUseDiagnostics(input.cause);
+    return profileDiagnostics
+      ? new PreviewAutomationBrowserProfileInUseHostError({
           requestId: input.requestId,
           operation: input.operation,
           environmentId: input.environmentId,
           threadId: input.threadId,
           tabId: input.tabId,
-          ...diagnostics,
+          reason: "browser-profile-in-use",
+          ...profileDiagnostics,
         })
       : new PreviewAutomationOperationError(input);
   }
@@ -210,8 +283,10 @@ export const PreviewAutomationHostError = Schema.Union([
   PreviewAutomationNavigationTimeoutError,
   PreviewAutomationViewportTimeoutError,
   PreviewAutomationTargetUnavailableError,
+  PreviewAutomationRemoteProxyUnavailableError,
   PreviewAutomationRecordingNotActiveError,
   PreviewAutomationTargetNotEditableHostError,
+  PreviewAutomationBrowserProfileInUseHostError,
   PreviewAutomationOperationError,
 ]);
 export type PreviewAutomationHostError = typeof PreviewAutomationHostError.Type;

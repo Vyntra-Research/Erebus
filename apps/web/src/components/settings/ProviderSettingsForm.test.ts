@@ -38,10 +38,21 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
-  it("exposes only Codex in the current build", () => {
-    expect(Object.keys(DRIVER_OPTION_BY_VALUE)).toEqual(["codex"]);
+  it("exposes the provider drivers shipped in the current build", () => {
+    expect(Object.keys(DRIVER_OPTION_BY_VALUE)).toEqual(["codex", "opencode"]);
     expect(DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("claudeAgent")]).toBeUndefined();
-    expect(DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")]).toBeUndefined();
+    expect(DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")]).toBeDefined();
+  });
+
+  it("derives the OpenCode V2 connection fields from its settings schema", () => {
+    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
+
+    expect(opencode).toBeDefined();
+    expect(deriveProviderSettingsFields(opencode!).map((field) => field.key)).toEqual([
+      "binaryPath",
+      "serverUrl",
+      "serverPassword",
+    ]);
   });
 
   it("preserves unknown config keys while omitting empty configurable fields", () => {

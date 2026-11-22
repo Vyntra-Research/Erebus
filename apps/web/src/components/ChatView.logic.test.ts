@@ -465,6 +465,9 @@ describe("getStartedThreadModelChangeBlockReason", () => {
       instanceId: ProviderInstanceId.make("grok"),
       requiresNewThreadForModelChange: true,
     },
+    {
+      instanceId: ProviderInstanceId.make("opencode"),
+    },
   ];
 
   it("allows model changes before a provider session has started", () => {
@@ -496,6 +499,23 @@ describe("getStartedThreadModelChangeBlockReason", () => {
         nextModelSelection: {
           instanceId: ProviderInstanceId.make("grok"),
           model: "grok-build",
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("allows a started thread to switch between providers that support handoff", () => {
+    expect(
+      getStartedThreadModelChangeBlockReason({
+        providers,
+        hasStartedSession: true,
+        currentModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-6-sol",
+        },
+        nextModelSelection: {
+          instanceId: ProviderInstanceId.make("opencode"),
+          model: "deepseek-v3.2",
         },
       }),
     ).toBeNull();

@@ -40,7 +40,7 @@ const decodeArgosPluginManifest = Schema.decodeUnknownEffect(
 );
 
 it.layer(NodeServices.layer)("managed Argos runtime", (it) => {
-  it.effect("installs the pinned MCP and skills into an isolated Codex home", () =>
+  it.effect("installs the pinned MCP and Argos skills into an isolated Codex home", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -93,10 +93,15 @@ it.layer(NodeServices.layer)("managed Argos runtime", (it) => {
         yield* fileSystem.exists(
           path.join(first.installedPluginRoot, "skills", "chain-discovery", "SKILL.md"),
         ),
-      ).toBe(true);
+      ).toBe(false);
       expect(
         yield* fileSystem.exists(path.join(cachedPluginRoot, "skills", "argos", "SKILL.md")),
       ).toBe(true);
+      expect(
+        yield* fileSystem.exists(
+          path.join(cachedPluginRoot, "skills", "chain-discovery", "SKILL.md"),
+        ),
+      ).toBe(false);
       expect(
         yield* fileSystem.exists(path.join(first.marketplaceRoot, ".erebus-managed.json")),
       ).toBe(true);

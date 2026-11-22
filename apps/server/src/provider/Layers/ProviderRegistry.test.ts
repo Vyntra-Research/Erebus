@@ -311,15 +311,6 @@ function makeCodexProbeSnapshot(
       message: null,
       checkedAt: "2026-09-01T12:00:00.000Z",
     },
-    proteus: {
-      runtime: "unknown",
-      plugin: "unknown",
-      skills: "unknown",
-      mcp: "unknown",
-      version: null,
-      message: null,
-      checkedAt: "2026-08-27T12:00:00.000Z",
-    },
     ...input,
   };
 }
@@ -1650,7 +1641,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 }
                 yield* TestClock.adjust("50 millis");
                 // Rebuilding a Codex instance also repairs its managed Argos
-                // and Proteus profiles through real filesystem promises. A
+                // profile through real filesystem promises. A
                 // TestClock-only loop can exhaust every virtual retry before
                 // libuv completes that bounded work on a busy CI runner.
                 yield* Effect.promise(() => NodeTimersPromises.setTimeout(25));
@@ -1807,7 +1798,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
 
             assert.deepStrictEqual(
               providers.map((provider) => provider.instanceId),
-              ["codex"],
+              ["codex", "opencode"],
             );
             assert.strictEqual(cursorProvider, undefined);
             assert.strictEqual(cursorSpawned, false);

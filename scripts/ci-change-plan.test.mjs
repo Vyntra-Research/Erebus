@@ -51,6 +51,7 @@ describe("CI change plan", () => {
       rust: false,
       server: false,
       web: false,
+      webRuntime: false,
     });
   });
 
@@ -110,6 +111,16 @@ describe("CI change plan", () => {
       libraries: false,
       node: false,
       rust: true,
+      webRuntime: false,
+    });
+  });
+
+  it("validates the web runtime and extension when the submodule changes", () => {
+    expect(classifyCiChanges([change("native/erebus-web")])).toMatchObject({
+      build: false,
+      node: false,
+      rust: false,
+      webRuntime: true,
     });
   });
 
@@ -123,6 +134,7 @@ describe("CI change plan", () => {
       rust: true,
       server: true,
       web: true,
+      webRuntime: true,
     });
   });
 });

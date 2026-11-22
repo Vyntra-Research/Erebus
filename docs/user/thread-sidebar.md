@@ -16,7 +16,7 @@ Pin a thread to keep it above other work. Drag pinned threads to change their or
 
 ## Co-agent threads
 
-Co-agents appear beneath their parent while they work. Releasing or deleting a co-agent removes its stored Codex conversation and the history of native subagents it started. Collect the handback first. The parent and other threads remain intact.
+Co-agents appear beneath their parent while they work. Releasing or deleting a co-agent removes its stored provider conversation and the history of native subagents it started. Collect the handback first. The parent and other threads remain intact.
 
 Standalone threads can create co-agents. Their child workspaces remain isolated from unrelated standalone threads.
 

@@ -10,6 +10,7 @@ This is a living glossary for Erebus. It explains what common terms mean in this
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
+- [Web and microVM runtimes](#web-and-microvm-runtimes)
 - [Checkpointing](#checkpointing)
 
 ## Concepts
@@ -94,7 +95,7 @@ The live backend agent implementation and its event stream. The main service is 
 
 #### Provider
 
-The backend agent runtime that performs work. Current Erebus releases use Codex. Inherited adapters for Claude, Cursor, Grok, and OpenCode remain in the tree as compatibility source. See [ProviderService.ts][14], [ProviderAdapter.ts][15], and [CodexAdapter.ts][17].
+The backend agent runtime that performs work. Current Erebus releases support Codex and OpenCode. See [ProviderService.ts][14], [ProviderAdapter.ts][15], [CodexAdapter.ts][17], and [OpenCodeAdapter.ts][25].
 
 #### Session
 
@@ -119,6 +120,28 @@ A point-in-time view of state. The word is used in multiple layers, including or
 #### Model manifest
 
 The per-driver list of current model slugs that decides which models land in the model picker's legacy section. Bundled at `apps/server/src/provider/model-manifest.json` and refreshed at runtime from the same file on `main`, so classification updates ship as commits instead of releases. See the [provider architecture][16] model manifest section.
+
+### Web and microVM runtimes
+
+#### Browser profile
+
+A named Chromium session with its own cookies, storage, cache, service workers, and proxy settings. The desktop registry owns profiles and their partitions.
+
+#### Capture session
+
+One durable web-traffic collection with a source, scope profile, TLS policy, HTTP exchanges, WebSocket events, notes, and gap records. Capture sessions are independent from browser profiles.
+
+#### Site map
+
+A deduplicated graph derived from captured evidence. It connects hosts, origins, routes, operations, parameters, body shapes, and WebSocket endpoints without replacing raw traffic history.
+
+#### MicroVM
+
+A persistent local Microsandbox guest managed by Erebus. Its disk and configuration survive until removal; commands and detached jobs run inside the guest. See [Persistent microVMs][26].
+
+#### Pentest module
+
+A separately released command-line tool managed by Erebus. The current modules are SecretHound, Katana, and Subfinder. The agent receives native arguments and bounded raw output.
 
 ### Checkpointing
 
@@ -183,3 +206,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
+[25]: ../../apps/server/src/provider/Layers/OpenCodeAdapter.ts
+[26]: ../user/microvms.md

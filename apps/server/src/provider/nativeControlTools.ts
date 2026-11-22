@@ -5,7 +5,7 @@ import type * as CodexSchema from "effect-codex-app-server/schema";
 import { EREBUS_THREADS_DYNAMIC_TOOL } from "../coagents/coagentTools.ts";
 import { EREBUS_RESEARCH_DYNAMIC_TOOL } from "../research/researchTools.ts";
 
-export const EREBUS_NATIVE_CONTROL_VERSION = 4;
+export const EREBUS_NATIVE_CONTROL_VERSION = 5;
 const encodeTools = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 export function fingerprintNativeControlTools(
