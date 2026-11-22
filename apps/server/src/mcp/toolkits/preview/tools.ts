@@ -157,6 +157,15 @@ export const PreviewBrowserTabsResult = Schema.Struct({
 });
 export type PreviewBrowserTabsResult = typeof PreviewBrowserTabsResult.Type;
 
+export const ExtensionBrowserOpenInput = Schema.Struct({
+  browserId: Schema.String.annotate({
+    description: "Exact external browser id returned by extension_browser_list.",
+  }),
+  url: Schema.optional(Schema.String).annotate({
+    description: "Optional initial http or https URL. Omit to open a blank controlled tab.",
+  }),
+});
+
 export const PreviewBrowserTabCloseInput = Schema.Struct(PreviewBrowserTabTargetFields);
 export const PreviewBrowserTabCloseResult = Schema.Struct({
   closedTabId: PreviewTabId,
@@ -261,6 +270,28 @@ export const PreviewBrowserTabsTool = readonlyBrowserTool(
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "List browser tabs"),
+);
+
+export const ExtensionBrowserListTool = readonlyBrowserTool(
+  Tool.make("extension_browser_list", {
+    description:
+      "List Brave, Chrome, Firefox, and other browsers connected through the Erebus extension, including browserId and every controlled tab. This is the entry point for external-browser automation and capture.",
+    parameters: PreviewBrowserTabsInput,
+    success: PreviewBrowserTabsResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "List connected extension browsers"),
+);
+
+export const ExtensionBrowserOpenTool = safeBrowserTool(
+  Tool.make("extension_browser_open", {
+    description:
+      "Open the first controlled tab in a browser connected through the Erebus extension. Get browserId from extension_browser_list, then use the returned tabId with preview_navigate, preview_snapshot, preview_click, preview_type, and the other preview tools.",
+    parameters: ExtensionBrowserOpenInput,
+    success: PreviewAutomationStatus,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Open extension browser tab"),
 );
 
 export const PreviewBrowserTabCloseTool = browserTool(
@@ -465,6 +496,8 @@ export const PreviewToolkit = Toolkit.make(
   PreviewBrowserProfileSelectTool,
   PreviewBrowserProfileProxyTool,
   PreviewBrowserTabsTool,
+  ExtensionBrowserListTool,
+  ExtensionBrowserOpenTool,
   PreviewBrowserTabCloseTool,
   PreviewBrowserBackTool,
   PreviewBrowserForwardTool,
@@ -493,6 +526,8 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewBrowserProfileSelectTool,
   PreviewBrowserProfileProxyTool,
   PreviewBrowserTabsTool,
+  ExtensionBrowserListTool,
+  ExtensionBrowserOpenTool,
   PreviewBrowserTabCloseTool,
   PreviewBrowserBackTool,
   PreviewBrowserForwardTool,

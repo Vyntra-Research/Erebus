@@ -93,6 +93,19 @@ const handlers = {
   preview_browser_profile_proxy: (input) =>
     invoke<PreviewBrowserProfileProxyResult>("browserProfileProxy", input),
   preview_tabs: () => invoke<PreviewBrowserTabsResult>("tabsList", {}),
+  extension_browser_list: () =>
+    invoke<PreviewBrowserTabsResult>("tabsList", {}).pipe(
+      Effect.map((result) => ({
+        browsers: result.browsers.filter((browser) => browser.kind === "extension"),
+        tabs: result.tabs.filter((tab) => tab.tabId.startsWith("extension:")),
+      })),
+    ),
+  extension_browser_open: (input) =>
+    invoke<PreviewAutomationStatus>("open", {
+      browserId: input.browserId,
+      ...(input.url === undefined ? {} : { url: input.url }),
+      reuseExistingTab: false,
+    }),
   preview_tab_close: (input) =>
     invokeTargeted<PreviewBrowserTabCloseResult>("tabClose", input ?? {}),
   preview_back: (input) => invokeTargeted<PreviewAutomationStatus>("back", input, input.timeoutMs),
