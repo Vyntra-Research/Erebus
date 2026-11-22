@@ -135,11 +135,7 @@ export function webRuntimeExecutableName(platform: typeof BuildPlatform.Type): s
   return platform === "win" ? "erebus-webd.exe" : "erebus-webd";
 }
 
-export const WEB_CAPTURE_EXTENSION_INSTALL_ARGS = [
-  "install",
-  "--frozen-lockfile",
-  "--ignore-workspace",
-] as const;
+export const WEB_CAPTURE_EXTENSION_INSTALL_ARGS = ["install", "--frozen-lockfile"] as const;
 export const WEB_CAPTURE_EXTENSION_REQUIRED_FILES = [
   "manifest.json",
   "background.js",

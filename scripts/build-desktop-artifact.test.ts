@@ -1660,11 +1660,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resourceMonitorExecutableName("win"), "t3-resource-monitor.exe");
     assert.equal(webRuntimeExecutableName("linux"), "erebus-webd");
     assert.equal(webRuntimeExecutableName("win"), "erebus-webd.exe");
-    assert.deepStrictEqual(WEB_CAPTURE_EXTENSION_INSTALL_ARGS, [
-      "install",
-      "--frozen-lockfile",
-      "--ignore-workspace",
-    ]);
+    assert.deepStrictEqual(WEB_CAPTURE_EXTENSION_INSTALL_ARGS, ["install", "--frozen-lockfile"]);
   });
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {
