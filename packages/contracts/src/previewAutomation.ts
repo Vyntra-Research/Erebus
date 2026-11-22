@@ -91,6 +91,15 @@ export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type;
 
 export const PreviewAutomationOpenInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
+  browserId: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "Connected browser returned by preview_tabs. Pass it to open the first tab in an external browser extension; omit it to use the current Erebus browser.",
+    }),
+  ).annotate({
+    description:
+      "Connected browser returned by preview_tabs. Pass it to open the first tab in an external browser extension; omit it to use the current Erebus browser.",
+  }),
   url: Schema.optional(BoundedUrl).annotate({
     description: `Optional initial page URL. ${URL_GUIDANCE} Omit to open a blank tab.`,
   }),
@@ -114,7 +123,7 @@ export const PreviewAutomationOpenInput = Schema.Struct({
   ),
 }).annotate({
   description:
-    "Opens the collaborative browser for the current thread. Use preview_navigate afterward when readiness waiting matters.",
+    "Opens the collaborative browser for the current thread, including a connected external browser selected by browserId. Use preview_navigate afterward when readiness waiting matters.",
 });
 export type PreviewAutomationOpenInput = typeof PreviewAutomationOpenInput.Type;
 

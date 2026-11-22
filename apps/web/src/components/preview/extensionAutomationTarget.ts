@@ -1,10 +1,26 @@
 import type { WebRuntimeExtensionAutomationClient } from "@t3tools/contracts";
 
 const PREFIX = "extension:";
+const BROWSER_PREFIX = "extension-client:";
 
 export interface ExtensionAutomationTarget {
   readonly producerId: string;
   readonly tabId: number;
+}
+
+export function extensionAutomationBrowserId(producerId: string): string {
+  return `${BROWSER_PREFIX}${encodeURIComponent(producerId)}`;
+}
+
+export function parseExtensionAutomationBrowserId(value: string | undefined): string | null {
+  if (!value?.startsWith(BROWSER_PREFIX)) return null;
+  const encoded = value.slice(BROWSER_PREFIX.length);
+  if (encoded.length === 0) return null;
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
 }
 
 export function extensionAutomationTabId(producerId: string, tabId: number): string {
@@ -45,6 +61,21 @@ export function extensionAutomationTabs(
         canGoForward: false,
       })),
     );
+}
+
+export function extensionAutomationBrowsers(
+  clients: ReadonlyArray<WebRuntimeExtensionAutomationClient>,
+) {
+  return clients
+    .filter((client) => client.connected)
+    .map((client) => ({
+      browserId: extensionAutomationBrowserId(client.producerId),
+      kind: "extension" as const,
+      browser: client.browser,
+      version: client.version,
+      connected: true,
+      tabCount: client.tabs.length,
+    }));
 }
 
 export function rewriteExtensionAutomationResult(producerId: string, value: unknown): unknown {

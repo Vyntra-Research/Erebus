@@ -133,6 +133,16 @@ export const PreviewBrowserTabsInput = Schema.Record(Schema.String, Schema.Never
   description: "No input is required.",
 });
 export const PreviewBrowserTabsResult = Schema.Struct({
+  browsers: Schema.Array(
+    Schema.Struct({
+      browserId: Schema.String,
+      kind: Schema.Literals(["internal", "extension"]),
+      browser: Schema.String,
+      version: Schema.NullOr(Schema.String),
+      connected: Schema.Boolean,
+      tabCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    }),
+  ),
   tabs: Schema.Array(
     Schema.Struct({
       tabId: PreviewTabId,
@@ -245,7 +255,7 @@ export const PreviewBrowserProfileProxyTool = browserTool(
 export const PreviewBrowserTabsTool = readonlyBrowserTool(
   Tool.make("preview_tabs", {
     description:
-      "List collaborative browser tabs for the current thread, including the active tab, URL, title, loading state, and history availability.",
+      "List every connected browser and collaborative tab, including browserId, active tab, URL, title, loading state, and history availability. Use a returned browserId with preview_open to create the first controlled tab in Brave, Chrome, Firefox, or another connected extension browser.",
     parameters: PreviewBrowserTabsInput,
     success: PreviewBrowserTabsResult,
     failure: PreviewAutomationError,
@@ -300,7 +310,7 @@ export const PreviewBrowserReloadTool = safeBrowserTool(
 export const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Show this agent session's current collaborative browser tab in the thread-bound inline preview. open=true controls visibility and does not create another tab. Set open=false for background-only automation, pass tabId to reuse a specific tab, or set reuseExistingTab=false to create a new tab.",
+      "Open or show a collaborative browser tab. Pass browserId from preview_tabs to create the first controlled tab in an external browser extension. Without browserId it uses the Erebus browser. open=true controls inline visibility only, tabId reuses an exact tab, and reuseExistingTab=false creates a new tab.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
     failure: PreviewAutomationError,

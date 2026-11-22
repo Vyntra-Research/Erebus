@@ -34,6 +34,12 @@ const decodeAutomationError = Schema.decodeUnknownSync(PreviewAutomationError);
 const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus);
 
 describe("PreviewAutomationOpenInput", () => {
+  it("accepts a connected external browser target", () => {
+    expect(decodeOpenInput({ browserId: "extension-client:brave" })).toEqual({
+      browserId: "extension-client:brave",
+    });
+  });
+
   it("accepts the inline preview visibility flag", () => {
     expect(decodeOpenInput({ open: false })).toEqual({ open: false });
   });

@@ -91,7 +91,9 @@ import { isPreviewViewportReady } from "./previewViewportReadiness";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
 import { runtimeRestartCleanup } from "../web-security/webSecurityPanelLogic";
 import {
+  extensionAutomationBrowsers,
   extensionAutomationTabs,
+  parseExtensionAutomationBrowserId,
   parseExtensionAutomationTabId,
   rewriteExtensionAutomationResult,
 } from "./extensionAutomationTarget";
@@ -510,12 +512,15 @@ function PreviewAutomationHost(props: {
       let tabId = request.tabId ?? null;
       try {
         const externalTarget = parseExtensionAutomationTabId(tabId);
-        if (externalTarget) {
+        const openInput =
+          request.operation === "open" ? (request.input as PreviewAutomationOpenInput) : null;
+        const externalBrowserProducerId = parseExtensionAutomationBrowserId(openInput?.browserId);
+        if (externalTarget || externalBrowserProducerId) {
           const clientsResult = await listExtensionClients({ environmentId, input: {} });
           if (clientsResult._tag === "Failure") return raiseAtomCommandFailure(clientsResult);
+          const producerId = externalTarget?.producerId ?? externalBrowserProducerId!;
           const client = clientsResult.value.find(
-            (candidate) =>
-              candidate.connected && candidate.producerId === externalTarget.producerId,
+            (candidate) => candidate.connected && candidate.producerId === producerId,
           );
           if (!client) throw new Error("The selected browser extension is no longer connected.");
 
@@ -528,16 +533,16 @@ function PreviewAutomationHost(props: {
             );
             input = { ...navigateInput, url: resolution.resolvedUrl, target: undefined };
           } else if (request.operation === "open") {
-            const openInput = request.input as PreviewAutomationOpenInput;
-            input = openInput.url
+            const { browserId: _browserId, ...extensionOpenInput } = openInput!;
+            input = extensionOpenInput.url
               ? {
-                  ...openInput,
+                  ...extensionOpenInput,
                   url: resolveBrowserNavigationTarget(environmentId, {
                     kind: "url",
-                    url: openInput.url,
+                    url: extensionOpenInput.url,
                   }).resolvedUrl,
                 }
-              : openInput;
+              : extensionOpenInput;
           }
 
           const invocation = await invokeExtension({
@@ -545,7 +550,7 @@ function PreviewAutomationHost(props: {
             input: {
               sessionId: client.sessionId,
               producerId: client.producerId,
-              tabId: externalTarget.tabId,
+              ...(externalTarget ? { tabId: externalTarget.tabId } : {}),
               operation: request.operation,
               input,
               timeoutMs: Math.min(request.timeoutMs, 60_000),
@@ -623,6 +628,21 @@ function PreviewAutomationHost(props: {
               listExtensionClients({ environmentId, input: {} }),
             ]);
             return {
+              browsers: [
+                {
+                  browserId: "internal",
+                  kind: "internal" as const,
+                  browser: "erebus",
+                  version: null,
+                  connected: Boolean(previewBridge),
+                  tabCount: internalTabs.length,
+                },
+                ...(extensionClientsResult._tag === "Success"
+                  ? extensionAutomationBrowsers(
+                      extensionClientsResult.value as ReadonlyArray<WebRuntimeExtensionAutomationClient>,
+                    )
+                  : []),
+              ],
               tabs: [
                 ...internalTabs,
                 ...(extensionClientsResult._tag === "Success"

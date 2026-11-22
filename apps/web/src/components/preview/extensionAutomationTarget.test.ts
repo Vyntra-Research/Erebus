@@ -1,12 +1,45 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  extensionAutomationBrowserId,
+  extensionAutomationBrowsers,
   extensionAutomationTabId,
+  parseExtensionAutomationBrowserId,
   parseExtensionAutomationTabId,
   rewriteExtensionAutomationResult,
 } from "./extensionAutomationTarget";
 
 describe("extension automation targets", () => {
+  it("round-trips extension browser ids", () => {
+    const id = extensionAutomationBrowserId("producer:one");
+    expect(parseExtensionAutomationBrowserId(id)).toBe("producer:one");
+  });
+
+  it("lists connected extension browsers even before they have a controlled tab", () => {
+    expect(
+      extensionAutomationBrowsers([
+        {
+          sessionId: "session",
+          producerId: "brave",
+          browser: "chromium",
+          version: "1.0.0",
+          lastSeenMs: 1,
+          connected: true,
+          tabs: [],
+        },
+      ]),
+    ).toEqual([
+      {
+        browserId: "extension-client:brave",
+        kind: "extension",
+        browser: "chromium",
+        version: "1.0.0",
+        connected: true,
+        tabCount: 0,
+      },
+    ]);
+  });
+
   it("round-trips producer and tab ids", () => {
     const id = extensionAutomationTabId("producer:one", 17);
     expect(parseExtensionAutomationTabId(id)).toEqual({ producerId: "producer:one", tabId: 17 });
