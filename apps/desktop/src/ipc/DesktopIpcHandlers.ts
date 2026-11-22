@@ -100,6 +100,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(installUpdate);
   yield* ipc.handle(checkForUpdate);
   yield* ipc.handle(PreviewIpc.openCaptureExtensionFolder);
+  yield* ipc.handle(PreviewIpc.downloadCaptureExtension);
   for (const previewMethod of PreviewIpc.methods) {
     yield* ipc.handle(previewMethod);
   }

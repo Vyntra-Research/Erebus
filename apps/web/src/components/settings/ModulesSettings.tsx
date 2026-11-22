@@ -7,7 +7,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { BoxesIcon, RefreshCwIcon } from "lucide-react";
+import { BoxesIcon, DownloadIcon, PuzzleIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
@@ -15,6 +15,7 @@ import { usePrimaryEnvironment } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { previewBridge } from "~/components/preview/previewBridge";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -205,8 +206,76 @@ export function ModulesSettings() {
 
   const queryError = errorMessage(modulesError);
 
+  const downloadExtension = useCallback(async (browser: "chromium" | "firefox") => {
+    if (!previewBridge) {
+      toastManager.add({ type: "error", title: "Browser extension requires the desktop app" });
+      return;
+    }
+    try {
+      const destination = await previewBridge.downloadCaptureExtension(browser);
+      if (!destination) {
+        toastManager.add({
+          type: "error",
+          title: "Browser extension is not available in this build",
+        });
+        return;
+      }
+      toastManager.add({
+        type: "success",
+        title: `${browser === "chromium" ? "Chromium" : "Firefox"} extension saved`,
+        description: destination,
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not save the browser extension",
+        description: errorMessage(error) ?? "The operation failed.",
+      });
+    }
+  }, []);
+
   return (
     <SettingsPageContainer>
+      <SettingsSection title="Browser control" icon={<PuzzleIcon className="size-4" />}>
+        <SettingsRow
+          {...searchableSetting("browser-extension")}
+          description="Control and capture an existing signed-in Chrome, Edge, Brave, or Firefox session."
+          control={
+            <>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!previewBridge}
+                onClick={() => void downloadExtension("chromium")}
+              >
+                <DownloadIcon className="size-3.5" />
+                Chrome / Edge
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!previewBridge}
+                onClick={() => void downloadExtension("firefox")}
+              >
+                <DownloadIcon className="size-3.5" />
+                Firefox
+              </Button>
+            </>
+          }
+        >
+          <div className="mt-3 grid gap-2 border-t border-border/40 py-3 text-[11px] text-muted-foreground sm:grid-cols-2">
+            <p>
+              <span className="font-medium text-foreground">Chrome, Edge, Brave:</span> enable
+              Developer mode, extract <code>erebus-chromium-extension.zip</code>, then choose Load
+              unpacked and select the extracted folder.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Firefox:</span> load the packaged XPI or
+              its manifest. The capture panel provides pairing and certificate data.
+            </p>
+          </div>
+        </SettingsRow>
+      </SettingsSection>
       <SettingsSection
         title="Modules"
         icon={<BoxesIcon className="size-4" />}

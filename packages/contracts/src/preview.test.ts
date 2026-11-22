@@ -154,7 +154,10 @@ describe("preview automation tab targeting", () => {
       tabId: "tab-app",
       reuseExistingTab: true,
     });
-    expect(() => decodeOpenInput({ tabId: "tab-app", reuseExistingTab: false })).toThrow();
+    expect(decodeOpenInput({ tabId: "tab-app", reuseExistingTab: false })).toMatchObject({
+      tabId: "tab-app",
+      reuseExistingTab: false,
+    });
   });
 });
 

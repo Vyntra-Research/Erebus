@@ -65,6 +65,8 @@ export const PREVIEW_CLEAR_CACHE_CHANNEL = "desktop:preview-clear-cache";
 export const PREVIEW_GET_CONFIG_CHANNEL = "desktop:preview-get-config";
 export const PREVIEW_OPEN_CAPTURE_EXTENSION_FOLDER_CHANNEL =
   "desktop:preview-open-capture-extension-folder";
+export const PREVIEW_DOWNLOAD_CAPTURE_EXTENSION_CHANNEL =
+  "desktop:preview-download-capture-extension";
 export const PREVIEW_CONFIGURE_PROXY_CHANNEL = "desktop:preview-configure-proxy";
 export const PREVIEW_BROWSER_PROFILES_LIST_CHANNEL = "desktop:preview-browser-profiles-list";
 export const PREVIEW_BROWSER_PROFILES_CREATE_CHANNEL = "desktop:preview-browser-profiles-create";

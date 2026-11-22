@@ -1,8 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
+import { ProviderInstanceId, type SelectProviderOptionDescriptor } from "@t3tools/contracts";
 import {
+  DEFAULT_RESEARCH_EVALUATOR_INSTANCE_ID,
   DEFAULT_RESEARCH_EVALUATOR_MODEL,
   DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT,
-  type ResearchEvaluatorReasoningEffort,
 } from "@t3tools/contracts/settings";
 import { ScaleIcon } from "lucide-react";
 import { useMemo } from "react";
@@ -19,14 +20,29 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
-const EFFORT_LABELS: Readonly<Record<ResearchEvaluatorReasoningEffort, string>> = {
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "Extra high",
-  max: "Max",
-  ultra: "Ultra",
-};
+const MODEL_KEY_SEPARATOR = "\u001f";
+
+function modelKey(instanceId: string, model: string): string {
+  return `${instanceId}${MODEL_KEY_SEPARATOR}${model}`;
+}
+
+function splitModelKey(value: string): { instanceId: ProviderInstanceId; model: string } | null {
+  const separator = value.indexOf(MODEL_KEY_SEPARATOR);
+  if (separator < 1 || separator === value.length - 1) return null;
+  return {
+    instanceId: ProviderInstanceId.make(value.slice(0, separator)),
+    model: value.slice(separator + 1),
+  };
+}
+
+interface EvaluatorModelOption {
+  readonly key: string;
+  readonly instanceId: ProviderInstanceId;
+  readonly model: string;
+  readonly label: string;
+  readonly providerLabel: string;
+  readonly option: SelectProviderOptionDescriptor | undefined;
+}
 
 export function ResearchSettings() {
   const research = usePrimarySettings((settings) => settings.researchSupervision);
@@ -35,42 +51,108 @@ export function ResearchSettings() {
   const updateResearch = (patch: Partial<typeof research>) =>
     updateSettings({ researchSupervision: patch });
   const evaluatorModels = useMemo(() => {
-    const models = new Map<string, string>();
+    const models: EvaluatorModelOption[] = [];
     for (const provider of providers) {
-      if (provider.driver !== "codex") continue;
-      for (const model of provider.models) models.set(model.slug, model.name);
+      if (
+        (provider.driver !== "codex" && provider.driver !== "opencode") ||
+        !provider.enabled ||
+        !provider.installed ||
+        provider.availability === "unavailable"
+      ) {
+        continue;
+      }
+      for (const model of provider.models) {
+        const option = model.capabilities?.optionDescriptors?.find(
+          (candidate): candidate is SelectProviderOptionDescriptor =>
+            candidate.type === "select" &&
+            (candidate.id === "reasoningEffort" || candidate.id === "variant"),
+        );
+        models.push({
+          key: modelKey(provider.instanceId, model.slug),
+          instanceId: provider.instanceId,
+          model: model.slug,
+          label: model.name,
+          providerLabel:
+            provider.displayName ?? (provider.driver === "opencode" ? "OpenCode" : "Codex"),
+          option,
+        });
+      }
     }
-    if (!models.has(DEFAULT_RESEARCH_EVALUATOR_MODEL)) {
-      models.set(DEFAULT_RESEARCH_EVALUATOR_MODEL, DEFAULT_RESEARCH_EVALUATOR_MODEL);
+    const selectedKey = modelKey(research.evaluatorInstanceId, research.evaluatorModel);
+    if (!models.some((model) => model.key === selectedKey)) {
+      models.push({
+        key: selectedKey,
+        instanceId: research.evaluatorInstanceId,
+        model: research.evaluatorModel,
+        label: research.evaluatorModel,
+        providerLabel: research.evaluatorInstanceId,
+        option: undefined,
+      });
     }
-    if (!models.has(research.evaluatorModel)) {
-      models.set(research.evaluatorModel, research.evaluatorModel);
-    }
-    return [...models].map(([value, label]) => ({ value, label }));
-  }, [providers, research.evaluatorModel]);
-  const evaluatorModelLabel =
-    evaluatorModels.find((model) => model.value === research.evaluatorModel)?.label ??
-    research.evaluatorModel;
+    return models;
+  }, [providers, research.evaluatorInstanceId, research.evaluatorModel]);
+  const selectedModelKey = modelKey(research.evaluatorInstanceId, research.evaluatorModel);
+  const selectedModel = evaluatorModels.find((model) => model.key === selectedModelKey);
+  const evaluatorModelLabel = selectedModel?.label ?? research.evaluatorModel;
+  const effortOptions = selectedModel?.option?.options ?? [];
+  const effortLabel =
+    effortOptions.find((option) => option.id === research.evaluatorReasoningEffort)?.label ??
+    research.evaluatorReasoningEffort;
+  const defaultEffort =
+    selectedModel?.option?.currentValue ??
+    effortOptions.find((option) => option.isDefault)?.id ??
+    effortOptions[0]?.id ??
+    DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT;
 
   return (
     <SettingsPageContainer>
       <SettingsSection title="Independent Judge" icon={<ScaleIcon className="size-4" />}>
         <SettingsRow
           {...searchableSetting("research-evaluator-model")}
-          description="Codex model used for independent finding reviews. The Judge runs only after a finding is submitted."
+          description="Model used for independent finding reviews. The Judge runs only after a finding is submitted."
           resetAction={
+            research.evaluatorInstanceId !== DEFAULT_RESEARCH_EVALUATOR_INSTANCE_ID ||
             research.evaluatorModel !== DEFAULT_RESEARCH_EVALUATOR_MODEL ? (
               <SettingResetButton
                 label="Judge model"
-                onClick={() => updateResearch({ evaluatorModel: DEFAULT_RESEARCH_EVALUATOR_MODEL })}
+                onClick={() =>
+                  updateResearch({
+                    evaluatorInstanceId: DEFAULT_RESEARCH_EVALUATOR_INSTANCE_ID,
+                    evaluatorModel: DEFAULT_RESEARCH_EVALUATOR_MODEL,
+                    evaluatorOptionId: "reasoningEffort",
+                    evaluatorReasoningEffort: DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT,
+                  })
+                }
               />
             ) : null
           }
           control={
             <Select
-              value={research.evaluatorModel}
-              onValueChange={(evaluatorModel) => {
-                if (evaluatorModel) updateResearch({ evaluatorModel });
+              value={selectedModelKey}
+              onValueChange={(value) => {
+                if (!value) return;
+                const selection = splitModelKey(value);
+                const model = evaluatorModels.find((candidate) => candidate.key === value);
+                if (!selection || !model) return;
+                const optionId =
+                  model.option?.id === "variant"
+                    ? "variant"
+                    : model.option?.id === "reasoningEffort"
+                      ? "reasoningEffort"
+                      : "default";
+                const optionValue =
+                  model.option?.currentValue ??
+                  model.option?.options.find((option) => option.isDefault)?.id ??
+                  model.option?.options[0]?.id ??
+                  (optionId === "reasoningEffort"
+                    ? DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT
+                    : "default");
+                updateResearch({
+                  evaluatorInstanceId: selection.instanceId,
+                  evaluatorModel: selection.model,
+                  evaluatorOptionId: optionId,
+                  evaluatorReasoningEffort: optionValue,
+                });
               }}
             >
               <SelectTrigger className="w-full sm:w-64" aria-label="Judge model">
@@ -78,14 +160,12 @@ export function ResearchSettings() {
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 {evaluatorModels.map((model) => (
-                  <SelectItem hideIndicator key={model.value} value={model.value}>
+                  <SelectItem hideIndicator key={model.key} value={model.key}>
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate">{model.label}</span>
-                      {model.label !== model.value ? (
-                        <code className="truncate text-[10px] text-muted-foreground">
-                          {model.value}
-                        </code>
-                      ) : null}
+                      <code className="truncate text-[10px] text-muted-foreground">
+                        {model.providerLabel} · {model.model}
+                      </code>
                     </span>
                   </SelectItem>
                 ))}
@@ -95,39 +175,41 @@ export function ResearchSettings() {
         />
         <SettingsRow
           {...searchableSetting("research-evaluator-effort")}
-          description="Reasoning effort used by the independent Judge. Model support is validated by Codex."
+          description="Reasoning mode supported by the selected model and provider."
           resetAction={
-            research.evaluatorReasoningEffort !== DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT ? (
+            research.evaluatorReasoningEffort !== defaultEffort ? (
               <SettingResetButton
                 label="Judge reasoning effort"
                 onClick={() =>
                   updateResearch({
-                    evaluatorReasoningEffort: DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT,
+                    evaluatorReasoningEffort: defaultEffort,
                   })
                 }
               />
             ) : null
           }
           control={
-            <Select
-              value={research.evaluatorReasoningEffort}
-              onValueChange={(value) =>
-                updateResearch({
-                  evaluatorReasoningEffort: value as ResearchEvaluatorReasoningEffort,
-                })
-              }
-            >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Judge reasoning effort">
-                <SelectValue>{EFFORT_LABELS[research.evaluatorReasoningEffort]}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {Object.entries(EFFORT_LABELS).map(([value, label]) => (
-                  <SelectItem hideIndicator key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            effortOptions.length > 0 ? (
+              <Select
+                value={research.evaluatorReasoningEffort}
+                onValueChange={(value) => {
+                  if (value) updateResearch({ evaluatorReasoningEffort: value });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-40" aria-label="Judge reasoning effort">
+                  <SelectValue>{effortLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {effortOptions.map((option) => (
+                    <SelectItem hideIndicator key={option.id} value={option.id}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            ) : (
+              <span className="text-xs text-muted-foreground">Provider default</span>
+            )
           }
         />
       </SettingsSection>

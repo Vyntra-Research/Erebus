@@ -38,6 +38,11 @@ export function createWebRuntimeEnvironmentAtoms<R, E>(
       tag: WS_METHODS.webRuntimeListSessions,
       staleTimeMs: 2_000,
     }),
+    extensionClients: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:web-runtime:extension-clients",
+      tag: WS_METHODS.webRuntimeListExtensionClients,
+      staleTimeMs: 500,
+    }),
     scopes: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:web-runtime:scopes",
       tag: WS_METHODS.webRuntimeListScopes,
@@ -109,6 +114,16 @@ export function createWebRuntimeEnvironmentAtoms<R, E>(
       tag: WS_METHODS.webRuntimeCreateExtensionPairing,
       scheduler: sessionScheduler,
       concurrency: serialPerSession,
+    }),
+    invokeExtension: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:web-runtime:invoke-extension",
+      tag: WS_METHODS.webRuntimeInvokeExtension,
+      scheduler: sessionScheduler,
+      concurrency: {
+        mode: "serial" as const,
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.producerId, input.tabId ?? null]),
+      },
     }),
     endSession: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:web-runtime:end-session",

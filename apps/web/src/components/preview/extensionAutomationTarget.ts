@@ -1,0 +1,65 @@
+import type { WebRuntimeExtensionAutomationClient } from "@t3tools/contracts";
+
+const PREFIX = "extension:";
+
+export interface ExtensionAutomationTarget {
+  readonly producerId: string;
+  readonly tabId: number;
+}
+
+export function extensionAutomationTabId(producerId: string, tabId: number): string {
+  return `${PREFIX}${encodeURIComponent(producerId)}:${tabId}`;
+}
+
+export function parseExtensionAutomationTabId(
+  value: string | null,
+): ExtensionAutomationTarget | null {
+  if (!value?.startsWith(PREFIX)) return null;
+  const separator = value.lastIndexOf(":");
+  if (separator <= PREFIX.length) return null;
+  const tabId = Number(value.slice(separator + 1));
+  if (!Number.isInteger(tabId)) return null;
+  try {
+    return {
+      producerId: decodeURIComponent(value.slice(PREFIX.length, separator)),
+      tabId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function extensionAutomationTabs(
+  clients: ReadonlyArray<WebRuntimeExtensionAutomationClient>,
+) {
+  return clients
+    .filter((client) => client.connected)
+    .flatMap((client) =>
+      client.tabs.map((tab) => ({
+        tabId: extensionAutomationTabId(client.producerId, tab.tabId),
+        active: tab.active,
+        url: tab.url ?? null,
+        title: tab.title ?? null,
+        loading: tab.status === "loading",
+        canGoBack: false,
+        canGoForward: false,
+      })),
+    );
+}
+
+export function rewriteExtensionAutomationResult(producerId: string, value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteExtensionAutomationResult(producerId, item));
+  }
+  if (typeof value !== "object" || value === null) return value;
+  const source = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(source)) {
+    if ((key === "tabId" || key === "closedTabId") && typeof item === "number") {
+      result[key] = extensionAutomationTabId(producerId, item);
+    } else {
+      result[key] = rewriteExtensionAutomationResult(producerId, item);
+    }
+  }
+  return result;
+}

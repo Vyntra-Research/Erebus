@@ -61,6 +61,34 @@ it("records the campaign-free policy revision and pinned evaluator", () => {
     options: [{ id: "reasoningEffort", value: "low" }],
   });
   assert.equal(selection.model, RESEARCH_EVALUATOR_MODEL);
+  assert.equal(selection.instanceId, ProviderInstanceId.make("codex"));
   assert.equal(RESEARCH_EVALUATOR_REASONING_EFFORT, "xhigh");
   assert.deepEqual(selection.options, [{ id: "reasoningEffort", value: "xhigh" }]);
+
+  const openCodeSelection = buildResearchEvaluatorModelSelection(
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6-sol",
+      options: [],
+    },
+    {
+      evaluatorInstanceId: ProviderInstanceId.make("opencode"),
+      evaluatorModel: "opencode/deepseek-v4.1-flash",
+      evaluatorOptionId: "variant",
+      evaluatorReasoningEffort: "high",
+    },
+  );
+  assert.deepEqual(openCodeSelection, {
+    instanceId: ProviderInstanceId.make("opencode"),
+    model: "opencode/deepseek-v4.1-flash",
+    options: [{ id: "variant", value: "high" }],
+  });
+
+  const defaultProviderSelection = buildResearchEvaluatorModelSelection(selection, {
+    evaluatorInstanceId: ProviderInstanceId.make("opencode"),
+    evaluatorModel: "provider/model-without-variants",
+    evaluatorOptionId: "default",
+    evaluatorReasoningEffort: "default",
+  });
+  assert.deepEqual(defaultProviderSelection.options, []);
 });

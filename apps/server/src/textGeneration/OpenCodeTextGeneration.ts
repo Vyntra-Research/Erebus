@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -39,6 +40,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generatePrContent",
   "generateBranchName",
   "generateThreadTitle",
+  "generateStructured",
 ]);
 
 type OpenCodeTextGenerationOperation = typeof OpenCodeTextGenerationOperation.Type;
@@ -249,11 +251,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
 
   const acquireSharedServer = (input: {
     readonly binaryPath: string;
-    readonly operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle";
+    readonly operation: OpenCodeTextGenerationOperation;
   }) =>
     sharedServerMutex.withPermit(
       Effect.gen(function* () {
@@ -365,6 +363,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     readonly outputSchemaJson: S;
     readonly modelSelection: ModelSelection;
     readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
+    readonly timeoutMs?: number | undefined;
   }) {
     const parsedModel = OpenCodeRuntime.parseOpenCodeModelSlug(input.modelSelection.model);
     if (!parsedModel) {
@@ -498,16 +497,34 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       }),
     );
 
-    const rawOutput =
+    const request =
       openCodeSettings.serverUrl.length > 0
-        ? yield* runAgainstServer({ url: openCodeSettings.serverUrl })
-        : yield* Effect.acquireUseRelease(
+        ? runAgainstServer({ url: openCodeSettings.serverUrl })
+        : Effect.acquireUseRelease(
             acquireSharedServer({
               binaryPath: openCodeSettings.binaryPath,
               operation: input.operation,
             }),
             runAgainstServer,
             releaseSharedServer,
+          );
+    const rawOutput =
+      input.timeoutMs === undefined
+        ? yield* request
+        : yield* request.pipe(
+            Effect.timeoutOption(input.timeoutMs),
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(
+                    new TextGenerationError({
+                      operation: input.operation,
+                      detail: "OpenCode structured generation timed out.",
+                    }),
+                  ),
+                onSome: Effect.succeed,
+              }),
+            ),
           );
 
     const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(input.outputSchemaJson));
@@ -617,10 +634,24 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       };
     });
 
+  const generateStructured: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateStructured"]
+  > = Effect.fn("OpenCodeTextGeneration.generateStructured")(function* (input) {
+    return yield* runOpenCodeJson({
+      operation: "generateStructured",
+      cwd: input.cwd,
+      prompt: input.prompt,
+      outputSchemaJson: input.outputSchema,
+      modelSelection: input.modelSelection,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    });
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateStructured,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

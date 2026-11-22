@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.0.0-beta.2 - 2026-11-22
+
+### Added
+
+- Expose the browser-control extension in Modules settings with Chromium and Firefox install steps.
+- Allow the independent Judge to use available OpenCode models and their supported reasoning variants.
+
+### Fixed
+
+- Run OpenCode Judge reviews through the provider's structured generation path.
+- Include browser extension files in Windows and Linux desktop artifacts.
+
+## 2.0.0-beta.1 - 2026-11-22
+
+### Added
+
+- Add agent-controlled browser sessions with HTTP, WebSocket, replay, scope, annotation, and site-map tools.
+- Add installable Chromium and Firefox extensions for controlling selected real-browser tabs and capturing their traffic.
+- Add persistent local microVMs for isolated builds, fuzzing, services, and exploit tests.
+- Add OpenCode as a provider and expose SecretHound, Katana, and Subfinder as managed web research modules.
+- Add focused offensive research skills for code, web, evidence, chaining, fuzzing, exploit validation, intelligence, and reports.
+
+### Changed
+
+- Remove Proteus from the Erebus runtime.
+- Keep standalone research findings and their artifacts in the thread workspace when no project is linked.
+
 ## 1.1.4 - 2026-11-17
 
 ### Fixed

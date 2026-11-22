@@ -1,4 +1,6 @@
-import { fromVector } from "ae-cvss-calculator";
+import cvssCalculator from "ae-cvss-calculator";
+
+const { fromVector } = cvssCalculator;
 
 export type CvssSeverity = "none" | "low" | "medium" | "high" | "critical";
 

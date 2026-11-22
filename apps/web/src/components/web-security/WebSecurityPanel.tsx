@@ -25,6 +25,7 @@ import {
   Braces,
   CircleStop,
   Copy,
+  Download,
   ExternalLink,
   Filter,
   FolderOpen,
@@ -129,6 +130,15 @@ function copyText(value: string, title = "Copied"): void {
     () => toastManager.add({ type: "success", title }),
     () => toastManager.add({ type: "error", title: "Could not copy to the clipboard" }),
   );
+}
+
+function downloadTextFile(name: string, value: string): void {
+  const url = URL.createObjectURL(new Blob([value], { type: "application/x-pem-file" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function useMeasuredHeight<T extends HTMLElement>() {
@@ -466,6 +476,8 @@ export function WebSecurityPanel({ environmentId }: WebSecurityPanelProps) {
   const [profileId, setProfileId] = useState<DesktopPreviewBrowserProfileId | null>(
     DEFAULT_DESKTOP_PREVIEW_BROWSER_PROFILE_ID,
   );
+  const [extensionBrowser, setExtensionBrowser] = useState<"chromium" | "firefox">("chromium");
+  const [extensionHelpOpen, setExtensionHelpOpen] = useState(false);
   const [captureLabel, setCaptureLabel] = useState("Web capture");
   const [upstreamTlsMode, setUpstreamTlsMode] = useState<UpstreamTlsMode>("verify");
   const [upstreamCaPem, setUpstreamCaPem] = useState("");
@@ -947,7 +959,7 @@ export function WebSecurityPanel({ environmentId }: WebSecurityPanelProps) {
     }
     setBusy(true);
     try {
-      const captureSource = captureSourceConfiguration(profileId);
+      const captureSource = captureSourceConfiguration(profileId, extensionBrowser);
       const result = await createSession({
         environmentId,
         input: {
@@ -1501,16 +1513,25 @@ export function WebSecurityPanel({ environmentId }: WebSecurityPanelProps) {
             className="h-7 text-xs"
           />
           <select
-            value={profileId ?? ""}
-            onChange={(event) =>
-              setProfileId(
-                event.target.value ? (event.target.value as DesktopPreviewBrowserProfileId) : null,
-              )
-            }
+            value={profileId ?? `extension:${extensionBrowser}`}
+            onChange={(event) => {
+              if (event.target.value === "extension:chromium") {
+                setProfileId(null);
+                setExtensionBrowser("chromium");
+                return;
+              }
+              if (event.target.value === "extension:firefox") {
+                setProfileId(null);
+                setExtensionBrowser("firefox");
+                return;
+              }
+              setProfileId(event.target.value as DesktopPreviewBrowserProfileId);
+            }}
             className="h-7 rounded-md border border-input bg-background px-2 text-xs"
             aria-label="Capture source"
           >
-            <option value="">Extension only</option>
+            <option value="extension:chromium">Chrome / Edge extension</option>
+            <option value="extension:firefox">Firefox extension</option>
             {(profiles.length > 0
               ? profiles
               : [
@@ -1534,7 +1555,7 @@ export function WebSecurityPanel({ environmentId }: WebSecurityPanelProps) {
               setUpstreamTlsMode(event.target.value as UpstreamTlsMode);
               setUpstreamTlsOverrideDirty(true);
             }}
-            disabled={profileId === null}
+            disabled={profileId === null && extensionBrowser === "chromium"}
             className="h-7 rounded-md border border-input bg-background px-2 text-xs"
             aria-label="Upstream HTTPS trust"
           >
@@ -1568,7 +1589,9 @@ export function WebSecurityPanel({ environmentId }: WebSecurityPanelProps) {
             {profileCaptureState.kind === "resume" ? "Resume" : "Capture"}
           </Button>
         </div>
-        {profileId !== null && upstreamTlsMode === "customCa" && upstreamTlsOverrideDirty ? (
+        {(profileId !== null || extensionBrowser === "firefox") &&
+        upstreamTlsMode === "customCa" &&
+        upstreamTlsOverrideDirty ? (
           <Textarea
             value={upstreamCaPem}
             onChange={(event) => setUpstreamCaPem(event.target.value)}
@@ -1576,14 +1599,15 @@ export function WebSecurityPanel({ environmentId }: WebSecurityPanelProps) {
             className="min-h-16 font-mono text-[11px]"
             aria-label="Upstream CA PEM"
           />
-        ) : profileId !== null &&
+        ) : (profileId !== null || extensionBrowser === "firefox") &&
           upstreamTlsMode === "customCa" &&
           profileCaptureState.kind === "resume" ? (
           <p className="text-[11px] text-muted-foreground">
             This capture will reuse its stored upstream CA.
           </p>
         ) : null}
-        {profileId !== null && upstreamTlsMode === "insecure" ? (
+        {(profileId !== null || extensionBrowser === "firefox") &&
+        upstreamTlsMode === "insecure" ? (
           <div className="text-[11px] text-warning">
             This capture accepts invalid upstream certificates.
           </div>
@@ -1594,6 +1618,70 @@ export function WebSecurityPanel({ environmentId }: WebSecurityPanelProps) {
             Browser and extension capture need a local environment. Remote loopback proxies are not
             applied without a tunnel.
           </p>
+        ) : null}
+
+        <div className="flex items-center gap-2 text-[11px]">
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            className="gap-1"
+            onClick={() => setExtensionHelpOpen((current) => !current)}
+          >
+            <FolderOpen className="size-3" />
+            Install browser extension
+          </Button>
+          <span className="text-muted-foreground">
+            Use an existing signed-in browser session as an agent-controlled capture source.
+          </span>
+        </div>
+        {extensionHelpOpen ? (
+          <div className="grid gap-3 rounded-md border border-border/60 bg-muted/20 p-3 text-[11px] md:grid-cols-2">
+            <div className="space-y-1.5">
+              <div className="font-semibold">Chrome, Edge, Brave</div>
+              <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
+                <li>Open the extensions page and enable Developer mode.</li>
+                <li>Choose Load unpacked and select the folder opened by Erebus.</li>
+                <li>
+                  Start a Chrome / Edge extension capture, copy its pairing record, and import it in
+                  the extension.
+                </li>
+              </ol>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold">Firefox</div>
+              <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
+                <li>Open about:debugging, choose This Firefox, then Load Temporary Add-on.</li>
+                <li>Select firefox/manifest.json or the packaged XPI.</li>
+                <li>
+                  Start a Firefox extension capture, import its CA under Certificate Authorities,
+                  then import the pairing record.
+                </li>
+              </ol>
+            </div>
+            <div className="flex gap-2 md:col-span-2">
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                onClick={() => void openExtensionFolder()}
+              >
+                <FolderOpen className="mr-1 size-3" />
+                Open extension files
+              </Button>
+              {pairing?.caPem ? (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => downloadTextFile("erebus-capture-ca.pem", pairing.caPem!)}
+                >
+                  <Download className="mr-1 size-3" />
+                  Download capture CA
+                </Button>
+              ) : null}
+            </div>
+          </div>
         ) : null}
 
         <div className="flex items-center gap-2">
@@ -1682,6 +1770,18 @@ export function WebSecurityPanel({ environmentId }: WebSecurityPanelProps) {
             <Copy className="size-3" />
             Copy
           </Button>
+          {pairing.caPem ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="gap-1"
+              onClick={() => downloadTextFile("erebus-capture-ca.pem", pairing.caPem!)}
+            >
+              <Download className="size-3" />
+              CA
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="xs"

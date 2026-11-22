@@ -187,6 +187,32 @@ const advanceIdleClock = Effect.gen(function* () {
 });
 
 it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
+  it.effect("supports provider-private structured generation for the Judge", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: { parts: [{ type: "text", text: '{"verdict":"pass"}' }] },
+        };
+        const generateStructured = textGeneration.generateStructured;
+        expect(generateStructured).toBeDefined();
+        if (!generateStructured) return;
+
+        const result = yield* generateStructured({
+          cwd: process.cwd(),
+          prompt: "Review this finding.",
+          outputSchema: Schema.Struct({ verdict: Schema.Literal("pass") }),
+          modelSelection: {
+            ...DEFAULT_TEST_MODEL_SELECTION,
+            options: [{ id: "variant", value: "high" }],
+          },
+          timeoutMs: 5_000,
+        });
+
+        expect(result).toEqual({ verdict: "pass" });
+      }),
+    ),
+  );
+
   it.effect("reuses a warm server across back-to-back requests and closes it after idling", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {

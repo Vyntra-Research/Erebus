@@ -68,6 +68,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.webRuntimeListSessions]: AuthOrchestrationReadScope,
   [WS_METHODS.webRuntimeCreateSession]: AuthOrchestrationOperateScope,
   [WS_METHODS.webRuntimeCreateExtensionPairing]: AuthOrchestrationOperateScope,
+  [WS_METHODS.webRuntimeListExtensionClients]: AuthOrchestrationReadScope,
+  [WS_METHODS.webRuntimeInvokeExtension]: AuthOrchestrationOperateScope,
   [WS_METHODS.webRuntimeEndSession]: AuthOrchestrationOperateScope,
   [WS_METHODS.webRuntimeDeleteSession]: AuthOrchestrationOperateScope,
   [WS_METHODS.webRuntimeStartProxy]: AuthOrchestrationOperateScope,

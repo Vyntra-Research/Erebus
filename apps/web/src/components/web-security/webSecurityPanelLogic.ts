@@ -67,12 +67,17 @@ export function browserCaptureSource(profileId: DesktopPreviewBrowserProfileId):
   return webRuntimeBrowserCaptureSource(profileId);
 }
 
-export function captureSourceConfiguration(profileId: DesktopPreviewBrowserProfileId | null): {
+export function captureSourceConfiguration(
+  profileId: DesktopPreviewBrowserProfileId | null,
+  extensionBrowser: "chromium" | "firefox" = "chromium",
+): {
   readonly source: string;
   readonly proxy: boolean;
 } {
   return profileId === null
-    ? { source: "extension", proxy: false }
+    ? extensionBrowser === "firefox"
+      ? { source: "extension:firefox", proxy: true }
+      : { source: "extension:chromium", proxy: false }
     : { source: browserCaptureSource(profileId), proxy: true };
 }
 

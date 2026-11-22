@@ -112,18 +112,10 @@ export const PreviewAutomationOpenInput = Schema.Struct({
         "Reuse tabId when supplied, otherwise this agent session's current tab. Defaults to true; set false to create a new tab.",
     }),
   ),
-})
-  .check(
-    Schema.makeFilter(
-      (input) =>
-        !(input.tabId !== undefined && input.reuseExistingTab === false) ||
-        "tabId cannot be combined with reuseExistingTab=false.",
-    ),
-  )
-  .annotate({
-    description:
-      "Opens the collaborative browser for the current thread. Use preview_navigate afterward when readiness waiting matters.",
-  });
+}).annotate({
+  description:
+    "Opens the collaborative browser for the current thread. Use preview_navigate afterward when readiness waiting matters.",
+});
 export type PreviewAutomationOpenInput = typeof PreviewAutomationOpenInput.Type;
 
 export const BrowserNavigationTarget = Schema.Union([

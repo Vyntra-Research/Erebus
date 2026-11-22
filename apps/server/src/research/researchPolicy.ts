@@ -76,13 +76,16 @@ export const RESEARCH_JUDGE_GATES = [
 ] as const;
 
 export function buildResearchEvaluatorModelSelection(
-  principalSelection: ModelSelection,
+  _principalSelection: ModelSelection,
   settings: ResearchSupervisionSettings = DEFAULT_SERVER_SETTINGS.researchSupervision,
 ): ModelSelection {
   return {
-    instanceId: principalSelection.instanceId,
+    instanceId: settings.evaluatorInstanceId,
     model: settings.evaluatorModel,
-    options: [{ id: "reasoningEffort", value: settings.evaluatorReasoningEffort }],
+    options:
+      settings.evaluatorOptionId === "default"
+        ? []
+        : [{ id: settings.evaluatorOptionId, value: settings.evaluatorReasoningEffort }],
   };
 }
 

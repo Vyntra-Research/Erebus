@@ -15,6 +15,7 @@ import * as BrowserProfileRegistry from "../../preview/BrowserProfileRegistry.ts
 import * as BrowserSession from "../../preview/BrowserSession.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronShell from "../../electron/ElectronShell.ts";
+import * as ElectronApp from "../../electron/ElectronApp.ts";
 import * as PreviewIpc from "./preview.ts";
 
 const { fromPartition } = vi.hoisted(() => ({
@@ -331,6 +332,62 @@ describe("preview IPC methods", () => {
 
         expect(result).toBe(true);
         expect(openPath).toHaveBeenCalledWith(extensionDirectory);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  effectIt.effect("copies each browser extension package to Downloads", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const rootDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "erebus-web-extension-download-",
+        });
+        const extensionDirectory = path.join(rootDir, "native", "erebus-web", "extension", "dist");
+        const downloadsDirectory = path.join(rootDir, "Downloads");
+        yield* fileSystem.makeDirectory(extensionDirectory, { recursive: true });
+        yield* fileSystem.writeFileString(
+          path.join(extensionDirectory, "erebus-chromium-extension.zip"),
+          "chromium-package",
+        );
+        yield* fileSystem.writeFileString(
+          path.join(extensionDirectory, "erebus-firefox-extension.xpi"),
+          "firefox-package",
+        );
+
+        const environment = {
+          path,
+          rootDir,
+          resourcesPath: path.join(rootDir, "resources"),
+          homeDirectory: rootDir,
+          isDevelopment: true,
+          isPackaged: false,
+          resolveResourcePathCandidates: () => [],
+        } as never;
+        const electronApp = {
+          getPath: () => Effect.succeed(downloadsDirectory),
+        } as never;
+
+        const chromium = yield* PreviewIpc.downloadCaptureExtension
+          .handler({ browser: "chromium" })
+          .pipe(
+            Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
+            Effect.provideService(ElectronApp.ElectronApp, electronApp),
+          );
+        const firefox = yield* PreviewIpc.downloadCaptureExtension
+          .handler({ browser: "firefox" })
+          .pipe(
+            Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
+            Effect.provideService(ElectronApp.ElectronApp, electronApp),
+          );
+
+        const chromiumPath = path.join(downloadsDirectory, "erebus-chromium-extension.zip");
+        const firefoxPath = path.join(downloadsDirectory, "erebus-firefox-extension.xpi");
+        expect(chromium).toBe(chromiumPath);
+        expect(firefox).toBe(firefoxPath);
+        expect(yield* fileSystem.readFileString(chromiumPath)).toBe("chromium-package");
+        expect(yield* fileSystem.readFileString(firefoxPath)).toBe("firefox-package");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );

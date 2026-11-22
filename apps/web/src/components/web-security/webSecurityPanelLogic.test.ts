@@ -84,7 +84,14 @@ describe("web security panel logic", () => {
       source: "browser:profile-a",
       proxy: true,
     });
-    expect(captureSourceConfiguration(null)).toEqual({ source: "extension", proxy: false });
+    expect(captureSourceConfiguration(null)).toEqual({
+      source: "extension:chromium",
+      proxy: false,
+    });
+    expect(captureSourceConfiguration(null, "firefox")).toEqual({
+      source: "extension:firefox",
+      proxy: true,
+    });
   });
 
   it("does not clear a shared proxy while another capture still uses its source", () => {

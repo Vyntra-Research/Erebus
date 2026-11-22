@@ -1751,12 +1751,48 @@ const makeWsRpcLayer = (
               const connection = yield* webRuntime.connection.pipe(
                 Effect.mapError((error) => webRuntimeRpcFailure("create extension pairing", error)),
               );
+              const sessions = yield* requestWebRuntimeJson(
+                "read extension capture session",
+                Schema.Array(WebRuntimeContract.WebRuntimeCaptureSession),
+                "/v1/sessions",
+              );
+              const session = sessions.find((candidate) => candidate.id === input.sessionId);
+              const caPem = session?.proxy
+                ? yield* requestWebRuntimeText("read capture CA", "/v1/proxy/ca")
+                : undefined;
               return {
                 serverUrl: connection.baseUrl,
                 sessionId: input.sessionId,
                 token: pairing.token,
+                ...(session?.proxy ? { proxyUrl: session.proxy.url } : {}),
+                ...(caPem ? { caPem } : {}),
               };
             }),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeListExtensionClients]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeListExtensionClients,
+            requestWebRuntimeJson(
+              "list connected browser extensions",
+              Schema.Array(WebRuntimeContract.WebRuntimeExtensionAutomationClient),
+              "/v1/extension/clients",
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeInvokeExtension]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeInvokeExtension,
+            requestWebRuntimeJson(
+              "control connected browser extension",
+              WebRuntimeContract.WebRuntimeExtensionAutomationResult,
+              "/v1/extension/commands",
+              {
+                method: "POST",
+                body: input,
+                timeoutMs: input.timeoutMs + 2_000,
+              },
+            ),
             { "rpc.aggregate": "webRuntime" },
           ),
         [WS_METHODS.webRuntimeEndSession]: (input) =>
