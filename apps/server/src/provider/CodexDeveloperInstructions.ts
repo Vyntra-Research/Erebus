@@ -48,7 +48,7 @@ const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 You are running inside Erebus. The \`t3-code\` MCP server is the product-native collaborative browser shared with the user. When it exposes \`preview_*\` tools, prefer those tools for browser navigation, inspection, interaction, screenshots, and recordings.
 
-For an external browser connected through the Erebus extension, call \`extension_browser_list\`, then pass its \`browserId\` to \`extension_browser_open\`. Use the returned \`tabId\` with \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. For the Erebus browser, call \`preview_tabs\` and \`preview_open\`. Prefer snapshot-provided locators over coordinates.
+For an external browser connected through the Erebus extension, call \`extension_browser_list\`, then pass its \`browserId\` to \`extension_browser_open\`. Use the returned \`tabId\` with \`preview_status\`, \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. For the Erebus browser, call \`preview_tabs\` and \`preview_open\`. Prefer snapshot-provided locators over coordinates.
 
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;
