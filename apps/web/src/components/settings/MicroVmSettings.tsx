@@ -33,6 +33,7 @@ import {
 import { Input } from "../ui/input";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { buildMicroVmModifyInput } from "./microVmModify";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) return error.message;
@@ -226,16 +227,15 @@ function MicroVmEditDialog({
     setPending(true);
     const result = await modify({
       environmentId,
-      input: {
-        name: vm.name,
-        cpus: Number(cpus),
-        memoryMiB: Number(memory),
-        maxCpus: Number(maxCpus),
-        maxMemoryMiB: Number(maxMemory),
-        ...(rootDisk.trim() ? { rootDiskMiB: Number(rootDisk) } : {}),
-        workdir: workdir.trim() || vm.workdir,
+      input: buildMicroVmModifyInput(vm, {
+        cpus,
+        memoryMiB: memory,
+        maxCpus,
+        maxMemoryMiB: maxMemory,
+        rootDiskMiB: rootDisk,
+        workdir,
         apply,
-      },
+      }),
     });
     setPending(false);
     if (result._tag === "Success") {

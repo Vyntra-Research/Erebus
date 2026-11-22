@@ -17,6 +17,63 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 type MicrosandboxModule = typeof import("microsandbox");
 
+export function buildMicroVmModifyOptions(
+  current: MicroVmInfo,
+  input: MicroVmModifyInput,
+): Microsandbox.ModifyOptions | null {
+  const cpus = input.cpus === undefined ? current.cpus : positiveInt(input.cpus, 0, "cpus");
+  const memory =
+    input.memoryMiB === undefined
+      ? current.memoryMiB
+      : positiveInt(input.memoryMiB, 0, "memoryMiB");
+  const maxCpus =
+    input.maxCpus === undefined ? current.maxCpus : positiveInt(input.maxCpus, 0, "maxCpus");
+  const maxMemory =
+    input.maxMemoryMiB === undefined
+      ? current.maxMemoryMiB
+      : positiveInt(input.maxMemoryMiB, 0, "maxMemoryMiB");
+
+  if (cpus > maxCpus) {
+    throw new Error(`cpus (${cpus}) cannot exceed maxCpus (${maxCpus}).`);
+  }
+  if (memory > maxMemory) {
+    throw new Error(`memoryMiB (${memory}) cannot exceed maxMemoryMiB (${maxMemory}).`);
+  }
+  if (
+    input.rootDiskMiB !== undefined &&
+    current.rootDiskMiB !== null &&
+    input.rootDiskMiB < current.rootDiskMiB
+  ) {
+    throw new Error(
+      `rootDiskMiB cannot shrink from ${current.rootDiskMiB} to ${input.rootDiskMiB}; only growth is supported.`,
+    );
+  }
+
+  const options: Microsandbox.ModifyOptions = {
+    ...(input.cpus !== undefined && cpus !== current.cpus ? { cpus } : {}),
+    ...(input.memoryMiB !== undefined && memory !== current.memoryMiB ? { memory } : {}),
+    ...(input.maxCpus !== undefined && maxCpus !== current.maxCpus ? { maxCpus } : {}),
+    ...(input.maxMemoryMiB !== undefined && maxMemory !== current.maxMemoryMiB
+      ? { maxMemory }
+      : {}),
+    ...(input.rootDiskMiB !== undefined && input.rootDiskMiB !== current.rootDiskMiB
+      ? { rootDiskSize: positiveInt(input.rootDiskMiB, 0, "rootDiskMiB") }
+      : {}),
+    ...(input.workdir !== undefined && input.workdir !== current.workdir
+      ? { workdir: input.workdir }
+      : {}),
+    ...(input.env !== undefined ? { env: { ...input.env } } : {}),
+  };
+  if (Object.keys(options).length === 0) return null;
+  options.policy =
+    input.apply === "restart"
+      ? "restart"
+      : input.apply === "next-start"
+        ? "next_start"
+        : "no_restart";
+  return options;
+}
+
 const WINDOWS_GUI_SUBSYSTEM = 2;
 const WINDOWS_CONSOLE_SUBSYSTEM = 3;
 const PE_POINTER_OFFSET = 0x3c;
@@ -398,30 +455,11 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
     getHandle(input.name).pipe(
       Effect.flatMap((handle) =>
         attempt("modify", async () => {
-          await handle.modify({
-            ...(input.cpus !== undefined ? { cpus: positiveInt(input.cpus, 0, "cpus") } : {}),
-            ...(input.memoryMiB !== undefined
-              ? { memory: positiveInt(input.memoryMiB, 0, "memoryMiB") }
-              : {}),
-            ...(input.maxCpus !== undefined
-              ? { maxCpus: positiveInt(input.maxCpus, 0, "maxCpus") }
-              : {}),
-            ...(input.maxMemoryMiB !== undefined
-              ? { maxMemory: positiveInt(input.maxMemoryMiB, 0, "maxMemoryMiB") }
-              : {}),
-            ...(input.rootDiskMiB !== undefined
-              ? { rootDiskSize: positiveInt(input.rootDiskMiB, 0, "rootDiskMiB") }
-              : {}),
-            ...(input.workdir !== undefined ? { workdir: input.workdir } : {}),
-            ...(input.env !== undefined ? { env: { ...input.env } } : {}),
-            policy:
-              input.apply === "restart"
-                ? "restart"
-                : input.apply === "next-start"
-                  ? "next_start"
-                  : "no_restart",
-          });
-          return toInfo(await handle.refresh());
+          const refreshed = await handle.refresh();
+          const current = await toInfo(refreshed);
+          const options = buildMicroVmModifyOptions(current, input);
+          if (options !== null) await refreshed.modify(options);
+          return toInfo(await refreshed.refresh());
         }),
       ),
     );

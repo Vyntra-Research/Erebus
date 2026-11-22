@@ -747,6 +747,11 @@ export const ServerModulesStatus = Schema.Struct({
 });
 export type ServerModulesStatus = typeof ServerModulesStatus.Type;
 
+export const ServerModulesStatusInput = Schema.Struct({
+  forceUpdateCheck: Schema.optionalKey(Schema.Boolean),
+});
+export type ServerModulesStatusInput = typeof ServerModulesStatusInput.Type;
+
 export const ServerModuleUpdateInput = Schema.Struct({
   id: ServerModuleId,
 });

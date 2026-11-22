@@ -130,13 +130,19 @@ export function ModulesSettings() {
   const environmentId = usePrimaryEnvironment()?.environmentId ?? null;
   const pentestModules = usePrimarySettings((settings) => settings.pentestModules);
   const updateSettings = useUpdatePrimarySettings();
+  const [forceUpdateChecks, setForceUpdateChecks] = useState(false);
   const {
     data: modulesResult,
     error: modulesError,
     isPending,
     refresh,
   } = useEnvironmentQuery(
-    environmentId === null ? null : serverEnvironment.modulesStatus({ environmentId, input: {} }),
+    environmentId === null
+      ? null
+      : serverEnvironment.modulesStatus({
+          environmentId,
+          input: forceUpdateChecks ? { forceUpdateCheck: true } : {},
+        }),
   );
   const updateModule = useAtomCommand(serverEnvironment.updateModule, { reportFailure: false });
   const [updatingModule, setUpdatingModule] = useState<ServerModuleId | null>(null);
@@ -189,6 +195,14 @@ export function ModulesSettings() {
     [environmentId, refresh, updateModule, updatingModule],
   );
 
+  const handleCheck = useCallback(() => {
+    if (forceUpdateChecks) {
+      refresh();
+    } else {
+      setForceUpdateChecks(true);
+    }
+  }, [forceUpdateChecks, refresh]);
+
   const queryError = errorMessage(modulesError);
 
   return (
@@ -222,13 +236,15 @@ export function ModulesSettings() {
           const updateLabel =
             updatingModule === id
               ? "Updating…"
-              : usesExternalBinary
-                ? "External executable"
-                : status?.updateAvailable && status.latestVersion
-                  ? `Update to ${status.latestVersion}`
-                  : status?.state === "missing"
-                    ? "Install"
-                    : "Check for updates";
+              : isPending
+                ? "Checking…"
+                : usesExternalBinary
+                  ? "External executable"
+                  : status?.updateAvailable && status.latestVersion
+                    ? `Update to ${status.latestVersion}`
+                    : status?.state === "missing"
+                      ? "Install"
+                      : "Check for updates";
           const statusText = moduleStatusText(status) ?? queryError;
 
           return (
@@ -262,7 +278,13 @@ export function ModulesSettings() {
                     size="xs"
                     variant="outline"
                     disabled={updateDisabled}
-                    onClick={() => void handleUpdate(id)}
+                    onClick={() => {
+                      if (status?.updateAvailable || status?.state === "missing") {
+                        void handleUpdate(id);
+                      } else {
+                        handleCheck();
+                      }
+                    }}
                   >
                     {updateLabel}
                   </Button>

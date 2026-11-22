@@ -184,6 +184,7 @@ import {
   ServerModulesStatus,
   ServerModuleUpdateInput,
   ServerModuleUpdateResult,
+  ServerModulesStatusInput,
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
@@ -692,7 +693,7 @@ export const WsServerUpdateArgosRpc = Rpc.make(WS_METHODS.serverUpdateArgos, {
 });
 
 export const WsServerGetModulesStatusRpc = Rpc.make(WS_METHODS.serverGetModulesStatus, {
-  payload: Schema.Struct({}),
+  payload: ServerModulesStatusInput,
   success: ServerModulesStatus,
   error: Schema.Union([ServerModuleError, EnvironmentAuthorizationError]),
 });

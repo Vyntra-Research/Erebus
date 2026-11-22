@@ -5,7 +5,66 @@ import * as NodeFSP from "node:fs/promises";
 
 import { describe, expect, it } from "@effect/vitest";
 
-import { materializeWindowlessWindowsExecutable } from "./MicroVmRuntime.ts";
+import {
+  buildMicroVmModifyOptions,
+  materializeWindowlessWindowsExecutable,
+} from "./MicroVmRuntime.ts";
+
+const crashedVm = {
+  id: "local:13",
+  name: "capri-host-shutdown-check",
+  status: "crashed" as const,
+  image: "debian:bookworm-slim",
+  cpus: 1,
+  memoryMiB: 512,
+  maxCpus: 2,
+  maxMemoryMiB: 1024,
+  rootDiskMiB: 4096,
+  workdir: "/workspace",
+  projectId: null,
+  threadId: null,
+  createdAt: null,
+  updatedAt: null,
+  storageBytes: null,
+};
+
+describe("buildMicroVmModifyOptions", () => {
+  it("omits unchanged resources and changes only the requested CPU", () => {
+    expect(
+      buildMicroVmModifyOptions(crashedVm, {
+        name: crashedVm.name,
+        cpus: 2,
+        memoryMiB: 512,
+        maxCpus: 2,
+        maxMemoryMiB: 1024,
+        rootDiskMiB: 4096,
+        workdir: "/workspace",
+        apply: "now",
+      }),
+    ).toEqual({ cpus: 2, policy: "no_restart" });
+  });
+
+  it("returns no operation when every requested value is unchanged", () => {
+    expect(
+      buildMicroVmModifyOptions(crashedVm, {
+        name: crashedVm.name,
+        rootDiskMiB: 4096,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects resource limits and disk shrink before calling Microsandbox", () => {
+    expect(() => buildMicroVmModifyOptions(crashedVm, { name: crashedVm.name, cpus: 3 })).toThrow(
+      "cpus (3) cannot exceed maxCpus (2)",
+    );
+    expect(() =>
+      buildMicroVmModifyOptions(crashedVm, { name: crashedVm.name, memoryMiB: 2048 }),
+    ).toThrow("memoryMiB (2048) cannot exceed maxMemoryMiB (1024)");
+    expect(() =>
+      buildMicroVmModifyOptions(crashedVm, { name: crashedVm.name, rootDiskMiB: 2048 }),
+    ).toThrow("rootDiskMiB cannot shrink from 4096 to 2048");
+  });
+});
 
 function consoleExecutable(): Buffer {
   const bytes = Buffer.alloc(512);

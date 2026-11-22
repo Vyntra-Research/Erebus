@@ -2115,7 +2115,7 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "server" },
           ),
-        [WS_METHODS.serverGetModulesStatus]: (_input) =>
+        [WS_METHODS.serverGetModulesStatus]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverGetModulesStatus,
             serverSettings.getSettings.pipe(
@@ -2128,7 +2128,15 @@ const makeWsRpcLayer = (
                     cause,
                   }),
               ),
-              Effect.flatMap((settings) => getModulesStatus(config.stateDir, settings)),
+              Effect.flatMap((settings) =>
+                getModulesStatus(
+                  config.stateDir,
+                  settings,
+                  input.forceUpdateCheck === undefined
+                    ? {}
+                    : { forceUpdateCheck: input.forceUpdateCheck },
+                ),
+              ),
             ),
             { "rpc.aggregate": "server" },
           ),
