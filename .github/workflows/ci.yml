@@ -384,7 +384,7 @@ jobs:
         run: corepack enable && corepack prepare pnpm@11.10.0 --activate
 
       - name: Install capture extension dependencies
-        run: pnpm --dir native/erebus-web/extension install --frozen-lockfile --ignore-workspace
+        run: pnpm --dir native/erebus-web/extension install --frozen-lockfile
 
       - name: Check capture extension
         run: pnpm --dir native/erebus-web/extension run typecheck
