@@ -18,7 +18,7 @@ import { checkOpenCodeProviderStatus } from "./OpenCodeProvider.ts";
 import type { OpenCodeInventory } from "../opencodeRuntime.ts";
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
-const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
+const DEFAULT_VERSION_STDOUT = "opencode v2.3.2\n";
 
 /**
  * The legacy `OpenCodeProviderLive` Layer + `OpenCodeProvider` service tag
@@ -87,8 +87,10 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           }),
         )
       : Effect.succeed({ stdout: runtimeMock.state.versionStdout, stderr: "", code: 0 }),
-  createOpenCodeSdkClient: () =>
-    ({}) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
+  createOpenCodeSdkClient: ({ directory }) => {
+    runtimeMock.state.inventoryCwd = directory;
+    return {} as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>;
+  },
   loadOpenCodeInventory: () =>
     runtimeMock.state.inventoryError
       ? Effect.fail(
@@ -185,8 +187,8 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
           default: {},
         },
         agents: [
-          { name: "build", hidden: false, mode: "primary" },
-          { name: "plan", hidden: false, mode: "primary" },
+          { id: "build", name: "Build", hidden: false, mode: "primary" },
+          { id: "plan", name: "Plan", hidden: false, mode: "primary" },
         ],
       };
 
@@ -280,11 +282,11 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
-  it.effect("does not spawn a local server for health check (uses CLI instead)", () =>
+  it.effect("uses a scoped local V2 server for the provider health check", () =>
     Effect.gen(function* () {
       yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
 
-      NodeAssert.equal(runtimeMock.state.closeCalls, 0);
+      NodeAssert.equal(runtimeMock.state.closeCalls, 1);
       NodeAssert.equal(runtimeMock.state.inventoryCwd, process.cwd());
     }),
   );

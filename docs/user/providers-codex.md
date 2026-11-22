@@ -1,8 +1,20 @@
-# Codex profiles
+# Providers and accounts
+
+Erebus supports Codex and OpenCode. Both use the same Erebus thread, workspace, checkpoints, research tools, and co-agent tools. The provider supplies the model runtime; Erebus owns the durable task state around it.
+
+## OpenCode
+
+Add one OpenCode instance from **Settings → Providers → Add provider**. Erebus starts the installed OpenCode CLI by default, reads its connected providers and models, and exposes each model's variants and agent modes in the composer. A custom executable, server URL, password, and environment variables are available in the provider settings.
+
+OpenCode authentication remains in the OpenCode configuration on the device. Use the OpenCode CLI to add or change model-provider credentials, then refresh the provider in Erebus. Erebus installs its research skills and native tools into the OpenCode session without replacing that configuration.
+
+Switching between Codex and OpenCode keeps the Erebus thread and workspace. The next request starts or resumes a session for the selected provider with the bounded conversation context needed to continue.
+
+## Codex profiles
 
 Erebus uses an isolated Codex profile by default. This prevents its app-server, sessions, configuration, plugins, and background work from contending with the Codex desktop app.
 
-## Default profile
+### Default profile
 
 Leave **CODEX_HOME path** empty in the Codex provider settings. Erebus resolves it to its managed provider directory, normally:
 
@@ -32,7 +44,7 @@ On Linux, the default packaged command is:
 CODEX_HOME="$HOME/.erebus/userdata/providers/codex" codex login
 ```
 
-## GPT-6 Sol and Daybreak
+### GPT-6 Sol and Daybreak
 
 Select **GPT-6 Sol** as the model. If the signed-in account has Daybreak access for it, open the options beside the composer and choose **Daybreak Blue** under **Daybreak**. The choice applies to the next turn and stays separate from the model and speed settings. Choose **Standard** to turn it off.
 
@@ -42,13 +54,9 @@ Older tasks that already use the Daybreak Blue model alias keep that selection. 
 
 Choose an agent persona under **Settings → General**. **Standard** keeps the usual Erebus behavior. **Capri** uses a stronger, more direct operating style: it favors high-value work, challenges weak premises, cuts repeated work, and keeps conclusions tied to evidence.
 
-The choice applies to the next Codex request, including requests in an open thread or co-agent thread. Thread history, model, reasoning effort, permission mode, and hard safety limits stay unchanged.
+The choice applies to the next provider request, including requests in an open thread or co-agent thread. Thread history, model, reasoning effort, permission mode, and hard safety limits stay unchanged.
 
-## Proteus integration
-
-Erebus manages Proteus inside this isolated profile. It ships a tested fallback, checks official stable releases once per day when the Codex environment starts, and accepts an update after its package digest and runtime layout pass validation. Erebus retains the active and one previous managed runtime and plugin copy. Its configuration and cleanup stay within sections and version directories marked as Erebus-managed.
-
-## More than one account
+### More than one Codex account
 
 Use **Add Codex account** to add another login. Erebus creates its account profile and keeps `auth.json` separate. Sessions, configuration, skills, plugins, MCPs, and memories continue to use the default Erebus Codex home. Erebus uses symbolic links on Linux, and directory junctions plus verified hard links on Windows. The Windows setup runs in a standard user session.
 

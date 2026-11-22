@@ -50,13 +50,15 @@ describe("shouldBundleCliDependency", () => {
       "@clerk/electron-passkeys",
       "msgpackr-extract",
       "@msgpackr-extract/msgpackr-extract-win32-x64",
+      "microsandbox",
+      "@superradcompany/microsandbox-win32-x64-msvc",
     ]) {
       assert.strictEqual(shouldBundleCliDependency(id), false, id);
     }
   });
 
   it("leaves filesystem-distributed research runtimes external", () => {
-    for (const id of ["@rafabd1/argos", "@vyntra-research/proteus"]) {
+    for (const id of ["@rafabd1/argos"]) {
       assert.strictEqual(shouldBundleCliDependency(id), false, id);
     }
   });
@@ -81,10 +83,12 @@ describe("selectCliRuntimeExternalDependencies", () => {
         "@effect/platform-bun": "1.0.0",
         "@ff-labs/fff-node": "2.0.0",
         effect: "3.0.0",
+        microsandbox: "0.7.16",
         "node-pty": "4.0.0",
       }),
       {
         "@ff-labs/fff-node": "2.0.0",
+        microsandbox: "0.7.16",
         "node-pty": "4.0.0",
       },
     );
@@ -93,13 +97,7 @@ describe("selectCliRuntimeExternalDependencies", () => {
   it("selects every external root declared by the server", () => {
     assert.deepStrictEqual(
       Object.keys(selectCliRuntimeExternalDependencies(serverPackageJson.dependencies)).sort(),
-      [
-        "@ff-labs/fff-node",
-        "@rafabd1/argos",
-        "@vyntra-research/proteus",
-        "msgpackr-extract",
-        "node-pty",
-      ],
+      ["@ff-labs/fff-node", "@rafabd1/argos", "microsandbox", "msgpackr-extract", "node-pty"],
     );
   });
 });

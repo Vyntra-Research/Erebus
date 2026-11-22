@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId } from "@t3tools/contracts";
+import { DesktopPreviewBrowserProfileIdSchema, EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import {
@@ -53,6 +53,29 @@ describe("loadPreviewWebviewConfig", () => {
 
       expect(requestedEnvironmentId).toBe(environmentId);
       expect(result).toEqual(config);
+    }),
+  );
+
+  it.effect("forwards the selected browser profile", () =>
+    Effect.gen(function* () {
+      const profileId = DesktopPreviewBrowserProfileIdSchema.make("profile-1");
+      let requestedProfileId: typeof profileId | undefined;
+      yield* loadPreviewWebviewConfig(
+        environmentId,
+        {
+          getPreviewConfig: (_environmentId, inputProfileId) => {
+            requestedProfileId = inputProfileId;
+            return Promise.resolve({
+              partition: "persist:test-profile",
+              webPreferences: "sandbox=yes",
+              preloadUrl: null,
+            });
+          },
+        },
+        profileId,
+      );
+
+      expect(requestedProfileId).toBe(profileId);
     }),
   );
 });

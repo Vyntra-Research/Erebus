@@ -8,13 +8,13 @@ the task commands.
 ## apps
 
 - `apps/server` (`erebus`): the execution runtime and bundled server CLI. Owns orchestration, provider
-  drivers, checkpointing, VCS, terminals, filesystem access, auth, and the HTTP + WebSocket surface.
-  Also serves the built web app.
+  drivers, checkpointing, VCS, terminals, filesystem access, auth, web capture, managed modules,
+  microVMs, and the HTTP + WebSocket surface. Also serves the built web app.
 - `apps/web` (`@t3tools/web`): React + Vite UI. Consumes the shared client runtime and adds routing,
   components, and web-specific platform layers.
 - `apps/desktop` (`@t3tools/desktop`): Electron shell. Supervises a desktop-scoped server, loads the
-  web bundle over the compatibility `t3code://` protocol, hosts the browser preview, and manages
-  desktop updates.
+  web bundle over the compatibility `t3code://` protocol, owns browser profiles and preview
+  partitions, and manages desktop updates.
 - `apps/mobile` (`@t3tools/mobile`): inherited Expo/React Native client kept as compatibility source.
 
 ## packages
@@ -48,6 +48,10 @@ the task commands.
 - `oxlint-plugin-t3code/`: repo-specific lint rules.
 - `experiments/`: throwaway prototypes. Not part of the shipped build.
 - `docs/`: this documentation tree.
+- `native/erebus-web/`: web capture, replay, scope, evidence, and site-map runtime, tracked as a
+  submodule.
+- `.agents/skills/`: Erebus research skills materialized for supported providers at runtime.
+- `.repos/`: read-only reference checkouts used during development. They are not shipped.
 
 ## Import conventions
 

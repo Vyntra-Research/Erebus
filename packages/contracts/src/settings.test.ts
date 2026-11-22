@@ -261,19 +261,20 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
 });
 
 describe("provider enabled defaults", () => {
-  it("enables only Codex by default", () => {
+  it("enables locally discovered providers by default", () => {
     const decoded = decodeServerSettings({});
     expect(decoded.providers.codex.enabled).toBe(true);
     expect(decoded.providers.claudeAgent.enabled).toBe(false);
     expect(decoded.providers.cursor.enabled).toBe(false);
     expect(decoded.providers.grok.enabled).toBe(false);
-    expect(decoded.providers.opencode.enabled).toBe(false);
+    expect(decoded.providers.opencode.enabled).toBe(true);
   });
 
   it("derives per-driver defaults from the settings schemas", () => {
     expect(defaultEnabledForDriver(ProviderDriverKind.make("codex"))).toBe(true);
     expect(defaultEnabledForDriver(ProviderDriverKind.make("cursor"))).toBe(false);
     expect(defaultEnabledForDriver(ProviderDriverKind.make("grok"))).toBe(false);
+    expect(defaultEnabledForDriver(ProviderDriverKind.make("opencode"))).toBe(true);
     // Unknown fork drivers stay enabled; their own build decides otherwise.
     expect(defaultEnabledForDriver(ProviderDriverKind.make("ollama"))).toBe(true);
   });
@@ -449,6 +450,35 @@ describe("ServerSettingsPatch.providerInstances", () => {
     });
     const ollamaId = ProviderInstanceId.make("ollama_local");
     expect(patch.providerInstances?.[ollamaId]?.driver).toBe("ollama");
+  });
+});
+
+describe("ServerSettings pentest modules", () => {
+  it("defaults managed modules on without host-specific paths", () => {
+    expect(decodeServerSettings({}).pentestModules).toEqual({
+      secrethound: { enabled: true, binaryPath: "", patternsPath: "" },
+      katana: { enabled: true, binaryPath: "", configPath: "" },
+      subfinder: {
+        enabled: true,
+        binaryPath: "",
+        configPath: "",
+        providerConfigPath: "",
+      },
+    });
+  });
+
+  it("trims module paths in partial patches", () => {
+    const patch = decodeServerSettingsPatch({
+      pentestModules: {
+        secrethound: { patternsPath: "  C:/pentest/patterns.json  " },
+        katana: { configPath: "  C:/pentest/katana.yaml  " },
+        subfinder: { providerConfigPath: "  C:/pentest/providers.yaml  " },
+      },
+    });
+
+    expect(patch.pentestModules?.secrethound?.patternsPath).toBe("C:/pentest/patterns.json");
+    expect(patch.pentestModules?.katana?.configPath).toBe("C:/pentest/katana.yaml");
+    expect(patch.pentestModules?.subfinder?.providerConfigPath).toBe("C:/pentest/providers.yaml");
   });
 });
 

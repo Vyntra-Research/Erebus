@@ -16,6 +16,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { beforeEach } from "vite-plus/test";
 
 import {
+  EnvironmentId,
   OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -24,6 +25,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
@@ -64,10 +66,15 @@ const runtimeMock = {
     closeCalls: [] as string[],
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
     promptCalls: [] as Array<unknown>,
+    waitCalls: [] as string[],
+    mcpAddCalls: [] as Array<Record<string, unknown>>,
     promptAsyncError: null as Error | null,
+    waitResolves: false,
     closeError: null as Error | null,
     messages: [] as MessageEntry[],
+    messagesAfterPrompt: null as MessageEntry[] | null,
     subscribedEvents: [] as unknown[],
+    eventStreamWaitsForAbort: false,
     sessionGetIds: [] as string[],
     missingSessionIds: new Set<string>(),
     transientErrorSessionIds: new Set<string>(),
@@ -84,10 +91,15 @@ const runtimeMock = {
     this.state.closeCalls.length = 0;
     this.state.revertCalls.length = 0;
     this.state.promptCalls.length = 0;
+    this.state.waitCalls.length = 0;
+    this.state.mcpAddCalls.length = 0;
     this.state.promptAsyncError = null;
+    this.state.waitResolves = false;
     this.state.closeError = null;
     this.state.messages = [];
+    this.state.messagesAfterPrompt = null;
     this.state.subscribedEvents = [];
+    this.state.eventStreamWaitsForAbort = false;
     this.state.sessionGetIds.length = 0;
     this.state.missingSessionIds.clear();
     this.state.transientErrorSessionIds.clear();
@@ -177,10 +189,26 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         abort: async ({ sessionID }: { sessionID: string }) => {
           runtimeMock.state.abortCalls.push(sessionID);
         },
+        wait: async ({ sessionID }: { sessionID: string }, options?: { signal?: AbortSignal }) => {
+          runtimeMock.state.waitCalls.push(sessionID);
+          if (!runtimeMock.state.waitResolves) {
+            await new Promise<void>((resolve) => {
+              const signal = options?.signal;
+              if (!signal || signal.aborted) {
+                resolve();
+                return;
+              }
+              signal.addEventListener("abort", () => resolve(), { once: true });
+            });
+          }
+        },
         promptAsync: async (input: unknown) => {
           runtimeMock.state.promptCalls.push(input);
           if (runtimeMock.state.promptAsyncError) {
             throw runtimeMock.state.promptAsyncError;
+          }
+          if (runtimeMock.state.messagesAfterPrompt !== null) {
+            runtimeMock.state.messages = runtimeMock.state.messagesAfterPrompt;
           }
         },
         messages: async () => ({ data: runtimeMock.state.messages }),
@@ -204,13 +232,29 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
       },
       event: {
-        subscribe: async () => ({
+        subscribe: async (_input?: unknown, options?: { signal?: AbortSignal }) => ({
           stream: (async function* () {
             for (const event of runtimeMock.state.subscribedEvents) {
               yield event;
             }
+            if (runtimeMock.state.eventStreamWaitsForAbort) {
+              await new Promise<void>((resolve) => {
+                const signal = options?.signal;
+                if (!signal || signal.aborted) {
+                  resolve();
+                  return;
+                }
+                signal.addEventListener("abort", () => resolve(), { once: true });
+              });
+            }
           })(),
         }),
+      },
+      mcp: {
+        add: async (input: Record<string, unknown>) => {
+          runtimeMock.state.mcpAddCalls.push(input);
+          return { data: true };
+        },
       },
     }) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
   loadOpenCodeInventory: () =>
@@ -251,6 +295,9 @@ const openCodeAdapterTestSettings = Schema.decodeSync(OpenCodeSettings)({
   binaryPath: "fake-opencode",
   serverUrl: "http://127.0.0.1:9999",
   serverPassword: "secret-password",
+});
+const localOpenCodeAdapterTestSettings = Schema.decodeSync(OpenCodeSettings)({
+  binaryPath: "fake-opencode",
 });
 
 const OpenCodeAdapterTestLayer = Layer.effect(
@@ -629,6 +676,38 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("cancels long-lived OpenCode requests before session scope cleanup", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-blocked-event-stream");
+      runtimeMock.state.eventStreamWaitsForAbort = true;
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Keep the upstream wait open",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/deepseek-v4.1-flash-free",
+        ),
+      });
+      yield* Effect.yieldNow;
+
+      const stopFiber = yield* adapter.stopSession(threadId).pipe(Effect.forkChild);
+      for (let index = 0; index < 10; index += 1) {
+        yield* Effect.yieldNow;
+      }
+      const stopped = yield* Effect.sync(() => stopFiber.pollUnsafe());
+
+      NodeAssert.notEqual(stopped, undefined);
+      NodeAssert.deepEqual(yield* adapter.listSessions(), []);
+    }),
+  );
+
   it.effect("clears session state even when cleanup finalizers throw", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
@@ -731,6 +810,72 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("reconciles a completed turn when the OpenCode event stream misses its events", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-reconcile");
+      const sessionID = "http://127.0.0.1:9999/session";
+      runtimeMock.state.waitResolves = true;
+      runtimeMock.state.messagesAfterPrompt = [
+        {
+          info: { id: "msg-reconciled", role: "assistant" },
+          parts: [
+            {
+              id: "part-reconciled",
+              sessionID,
+              messageID: "msg-reconciled",
+              type: "text",
+              text: "Recovered response",
+              time: { start: 1, end: 2 },
+            },
+          ],
+        },
+      ];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(6),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Recover this turn",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/deepseek-v4.1-flash-free",
+        ),
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        [
+          "session.started",
+          "thread.started",
+          "turn.started",
+          "content.delta",
+          "item.completed",
+          "turn.completed",
+        ],
+      );
+      const content = events.find((event) => event.type === "content.delta");
+      NodeAssert.equal(
+        content?.type === "content.delta" ? content.payload.delta : undefined,
+        "Recovered response",
+      );
+      NodeAssert.deepEqual(runtimeMock.state.waitCalls, [sessionID]);
+      const sessions = yield* adapter.listSessions();
+      NodeAssert.equal(sessions[0]?.status, "ready");
+      NodeAssert.equal(sessions[0]?.activeTurnId, undefined);
+    }),
+  );
+
   it.effect("steers a running turn instead of opening a new one on mid-turn sendTurn", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
@@ -810,6 +955,133 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("delivers Erebus instructions and scoped MCP tools to standalone OpenCode", () => {
+    const threadId = asThreadId("thread-opencode-erebus-runtime");
+    let personaInstructions = "persona:capri:first";
+    const adapterLayer = Layer.effect(
+      OpenCodeAdapter,
+      makeOpenCodeAdapter(localOpenCodeAdapterTestSettings, {
+        getAgentPersonaDeveloperInstructions: () => Effect.sync(() => personaInstructions),
+        researchToolController: {
+          principalInstructions: () => Effect.succeed("research:principal"),
+          handle: () => Effect.die("unused"),
+        },
+        coagentToolController: {
+          instructions: () => Effect.succeed("coagents:available"),
+          handle: () => Effect.die("unused"),
+        },
+      }),
+    ).pipe(
+      Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("local"),
+        threadId,
+        providerSessionId: "provider-session-opencode",
+        providerInstanceId: ProviderInstanceId.make("opencode"),
+        endpoint: "http://127.0.0.1:4310/mcp",
+        previewEnabled: true,
+        webEnabled: true,
+        researchFallbackEndpoint: "http://127.0.0.1:4310/research-mcp",
+        authorizationHeader: "Bearer scoped-token",
+      });
+
+      const adapter = yield* OpenCodeAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Map the target",
+        interactionMode: "default",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/deepseek-v4.1-flash-free",
+          [{ id: "variant", value: "high" }],
+        ),
+      });
+
+      NodeAssert.deepEqual(
+        runtimeMock.state.mcpAddCalls.map((call) => call.name),
+        ["t3-code", "erebus-research"],
+      );
+      NodeAssert.deepEqual(
+        runtimeMock.state.mcpAddCalls.map(
+          (call) => (call.config as { url?: string } | undefined)?.url,
+        ),
+        ["http://127.0.0.1:4310/mcp", "http://127.0.0.1:4310/research-mcp"],
+      );
+      const prompt = runtimeMock.state.promptCalls.at(-1) as { system?: string };
+      const system = prompt.system ?? "";
+      NodeAssert.match(system, /OpenCode harness/);
+      NodeAssert.match(system, /deepseek-v4\.1-flash-free/);
+      NodeAssert.match(system, /persona:capri:first/);
+      NodeAssert.match(system, /research:principal/);
+      NodeAssert.match(system, /coagents:available/);
+      NodeAssert.match(system, /erebus-research MCP server/);
+      NodeAssert.match(system, /## Erebus collaborative browser/);
+      NodeAssert.match(system, /## Erebus web testing/);
+      NodeAssert.equal(system.match(/persona:capri:first/g)?.length, 1);
+
+      personaInstructions = "persona:capri:updated";
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Continue with the next model",
+        interactionMode: "default",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/tidepool-alpha-free",
+        ),
+      });
+
+      const steeredPrompt = runtimeMock.state.promptCalls.at(-1) as {
+        system?: string;
+        model?: { providerID?: string; modelID?: string };
+      };
+      NodeAssert.equal(steeredPrompt.model?.providerID, "opencode");
+      NodeAssert.equal(steeredPrompt.model?.modelID, "tidepool-alpha-free");
+      NodeAssert.match(steeredPrompt.system ?? "", /persona:capri:updated/);
+      NodeAssert.equal(steeredPrompt.system?.match(/persona:capri:updated/g)?.length, 1);
+      NodeAssert.doesNotMatch(steeredPrompt.system ?? "", /persona:capri:first/);
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
+      Effect.provide(adapterLayer),
+    );
+  });
+
+  it.effect("normalizes legacy OpenCode agent display labels to canonical ids", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-legacy-agent-label");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Continue",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/deepseek-v4.1-flash-free",
+          [{ id: "agent", value: "Build" }],
+        ),
+      });
+
+      const prompt = runtimeMock.state.promptCalls.at(-1) as { agent?: string };
+      NodeAssert.equal(prompt.agent, "build");
+    }).pipe(Effect.provide(OpenCodeAdapterTestLayer)),
+  );
+
   it.effect("passes agent and variant options for the adapter's bound custom instance id", () => {
     const instanceId = ProviderInstanceId.make("opencode_zen");
     const adapterLayer = Layer.effect(
@@ -844,7 +1116,9 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         ),
       });
 
-      NodeAssert.deepEqual(runtimeMock.state.promptCalls.at(-1), {
+      const prompt = runtimeMock.state.promptCalls.at(-1) as Record<string, unknown>;
+      const { system, ...request } = prompt;
+      NodeAssert.deepEqual(request, {
         sessionID: "http://127.0.0.1:9999/session",
         model: {
           providerID: "anthropic",
@@ -852,8 +1126,11 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         },
         agent: "github-copilot",
         variant: "high",
+        delivery: "queue",
         parts: [{ type: "text", text: "Fix it" }],
       });
+      NodeAssert.match(String(system), /OpenCode harness/);
+      NodeAssert.match(String(system), /claude-sonnet-4-5/);
     }).pipe(Effect.provide(adapterLayer));
   });
 
@@ -888,14 +1165,18 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         input: "Fix it",
       });
 
-      NodeAssert.deepEqual(runtimeMock.state.promptCalls.at(-1), {
+      const prompt = runtimeMock.state.promptCalls.at(-1) as Record<string, unknown>;
+      const { system, ...request } = prompt;
+      NodeAssert.deepEqual(request, {
         sessionID: "http://127.0.0.1:9999/session",
         model: {
           providerID: "anthropic",
           modelID: "claude-sonnet-4-5",
         },
+        delivery: "queue",
         parts: [{ type: "text", text: "Fix it" }],
       });
+      NodeAssert.match(String(system), /OpenCode harness/);
     }).pipe(Effect.provide(adapterLayer));
   });
 
@@ -998,6 +1279,8 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.equal(isOpenCodeNotFound({ statusCode: 404 }), true);
       // OpenCode NotFoundError body name with no status.
       NodeAssert.equal(isOpenCodeNotFound({ body: { name: "NotFoundError" } }), true);
+      // OpenCode V2 uses a typed session-specific tag.
+      NodeAssert.equal(isOpenCodeNotFound({ _tag: "SessionNotFoundError" }), true);
 
       // NOT a miss: only structured signals count, never free text. A non-404
       // error whose message/detail merely contains "not found" must propagate,

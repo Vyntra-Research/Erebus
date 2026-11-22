@@ -6,6 +6,14 @@ const IDENTITY_STEP = 1;
 
 export const ADD_PROVIDER_WIZARD_STEPS = ["Driver", "Identity", "Config"] as const;
 
+export function canAddProviderDriver(
+  driver: string,
+  supportsMultipleInstances: boolean,
+  existingDrivers: ReadonlySet<string>,
+): boolean {
+  return supportsMultipleInstances || !existingDrivers.has(driver);
+}
+
 function slugifyProviderLabel(value: string): string {
   return value
     .trim()

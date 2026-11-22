@@ -120,8 +120,6 @@ const makeResearchEvaluator = Effect.gen(function* () {
           outputReserveSeconds: RESEARCH_INTERNAL_POLICY.judgeOutputReserveSeconds,
           practicalRevalidationAllowed: false,
           artifactManifest,
-          proteusReadPolicy:
-            "Legacy Proteus access is optional and read-only. Use only exposed query or record-reading tools for one directly cited fact. Never mutate state and never load Proteus skills.",
           argosPolicy:
             "Do not require Argos access and do not mutate Argos. The delivered finding and PoC must stand on their own.",
         });

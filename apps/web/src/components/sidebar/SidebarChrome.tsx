@@ -64,19 +64,29 @@ export const SidebarAccountMenu = memo(function SidebarAccountMenu() {
   const providers = useAtomValue(primaryServerProvidersAtom);
   const settings = useAtomValue(primaryServerSettingsAtom);
   const { environments } = useEnvironments();
-  const codexAccounts = useMemo(
+  const providerEntries = useMemo(
     () =>
       deriveProviderInstanceEntries(providers)
-        .filter((entry) => entry.driverKind === "codex")
+        .filter((entry) => entry.enabled)
         .map((entry) => ({
           ...entry,
-          isPrimary: entry.instanceId === settings.codexAccountRouting.primaryInstanceId,
+          isPrimary:
+            entry.driverKind === "codex" &&
+            entry.instanceId === settings.codexAccountRouting.primaryInstanceId,
           remainingPercent: entry.snapshot.accountUsage?.remainingPercent ?? null,
         }))
-        .toSorted((a, b) => Number(b.isPrimary) - Number(a.isPrimary)),
+        .toSorted(
+          (a, b) =>
+            Number(b.isPrimary) - Number(a.isPrimary) || a.displayName.localeCompare(b.displayName),
+        ),
     [providers, settings.codexAccountRouting.primaryInstanceId],
   );
-  const primaryAccount = codexAccounts.find((account) => account.isPrimary) ?? codexAccounts[0];
+  const leadingProvider =
+    providerEntries.find((provider) => provider.isPrimary) ?? providerEntries[0];
+  const providerDriverCount = new Set(providerEntries.map((provider) => provider.driverKind)).size;
+  const triggerLabel =
+    providerDriverCount > 1 ? "Providers" : (leadingProvider?.displayName ?? "Providers");
+  const hasUsage = providerEntries.some((provider) => provider.remainingPercent !== null);
   // The page reads every connected server, so one of them offering pull requests is enough for
   // the link to lead somewhere.
   const pullRequestsSupported = environments.some(
@@ -106,14 +116,14 @@ export const SidebarAccountMenu = memo(function SidebarAccountMenu() {
             render={
               <SidebarMenuButton className="bg-sidebar-row-hover text-sidebar-foreground">
                 <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-semibold">
-                  {primaryAccount?.displayName.charAt(0).toUpperCase() ?? "C"}
+                  {providerDriverCount > 1
+                    ? "P"
+                    : (leadingProvider?.displayName.charAt(0).toUpperCase() ?? "P")}
                 </span>
-                <span className="min-w-0 flex-1 truncate">
-                  {primaryAccount?.displayName ?? "Codex accounts"}
-                </span>
-                {codexAccounts.length > 1 ? (
+                <span className="min-w-0 flex-1 truncate">{triggerLabel}</span>
+                {providerEntries.length > 1 ? (
                   <span className="text-[10px] tabular-nums text-muted-foreground">
-                    {codexAccounts.length}
+                    {providerEntries.length}
                   </span>
                 ) : null}
                 <ChevronUpIcon className="size-3.5 text-muted-foreground" />
@@ -123,50 +133,67 @@ export const SidebarAccountMenu = memo(function SidebarAccountMenu() {
           <PopoverPopup align="start" className="w-72" side="top" sideOffset={6}>
             <div className="space-y-3">
               <div>
-                <p className="text-sm font-semibold">Codex accounts</p>
-                <p className="text-xs text-muted-foreground">The primary account is used first.</p>
+                <p className="text-sm font-semibold">Providers</p>
+                <p className="text-xs text-muted-foreground">
+                  Enabled providers and account status.
+                </p>
               </div>
               <div className="space-y-3">
-                {codexAccounts.map((account) => {
-                  const remaining = account.remainingPercent;
+                {providerEntries.map((provider) => {
+                  const remaining = provider.remainingPercent;
+                  const statusLabel = !provider.installed
+                    ? "Missing"
+                    : provider.snapshot.auth.status === "unauthenticated"
+                      ? "Sign in"
+                      : provider.status === "ready"
+                        ? "Ready"
+                        : provider.status === "warning"
+                          ? "Warning"
+                          : provider.status === "error"
+                            ? "Error"
+                            : "Off";
                   return (
-                    <div className="space-y-1.5" key={account.instanceId}>
+                    <div className="space-y-1.5" key={provider.instanceId}>
                       <div className="flex items-center gap-2 text-xs">
                         <span
                           className="size-2 shrink-0 rounded-full"
                           style={{
-                            backgroundColor: account.accentColor ?? "var(--muted-foreground)",
+                            backgroundColor: provider.accentColor ?? "var(--muted-foreground)",
                           }}
                         />
-                        <span className="min-w-0 flex-1 truncate">{account.displayName}</span>
-                        {account.isPrimary ? (
+                        <span className="min-w-0 flex-1 truncate">{provider.displayName}</span>
+                        {provider.isPrimary ? (
                           <span className="text-muted-foreground">Primary</span>
                         ) : null}
                         <span className="tabular-nums text-muted-foreground">
-                          {remaining === null ? "—" : `${Math.round(remaining)}%`}
+                          {remaining === null ? statusLabel : `${Math.round(remaining)}%`}
                         </span>
                       </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-foreground/75 transition-[width]"
-                          style={{ width: `${Math.max(0, Math.min(100, remaining ?? 0))}%` }}
-                        />
-                      </div>
+                      {remaining === null ? null : (
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-foreground/75 transition-[width]"
+                            style={{ width: `${Math.max(0, Math.min(100, remaining))}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
-                {codexAccounts.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No Codex account is configured.</p>
+                {providerEntries.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No provider is enabled.</p>
                 ) : null}
               </div>
               <div className="border-t border-border pt-2">
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
-                  onClick={handleUsageClick}
-                  type="button"
-                >
-                  <ChartNoAxesColumnIcon className="size-4" /> Usage
-                </button>
+                {hasUsage ? (
+                  <button
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                    onClick={handleUsageClick}
+                    type="button"
+                  >
+                    <ChartNoAxesColumnIcon className="size-4" /> Usage
+                  </button>
+                ) : null}
                 {pullRequestsSupported ? (
                   <button
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"

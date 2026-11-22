@@ -308,7 +308,12 @@ layer("CoagentToolController", (it) => {
       assert.match(assignment.text, /Keep read-only work read-only/);
       assert.match(assignment.text, /only when a concrete writable test needs it/);
       assert.match(assignment.text, /do not inherit ownership of the parent's native goal/);
-      assert.match(assignment.text, /Proteus is read-only legacy lookup and supplies no skills/);
+      assert.match(assignment.text, /web_capture_list/);
+      assert.match(
+        assignment.text,
+        /never ask the parent to copy the web database or its credentials/i,
+      );
+      assert.match(assignment.text, /Use Argos as connected canonical memory when available/);
 
       const sent = yield* call(
         controller,

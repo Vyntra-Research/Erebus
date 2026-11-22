@@ -50,6 +50,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as ResearchFallbackMcpHttpServer from "./mcp/ResearchFallbackMcpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
+import * as PentestModuleRuntime from "./mcp/PentestModuleRuntime.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -117,6 +118,8 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as ThreadSync from "./threadSync/ThreadSyncService.ts";
 import * as ThreadSyncGit from "./threadSync/ThreadSyncGit.ts";
+import * as WebRuntimeBinary from "./webRuntime/WebRuntimeBinary.ts";
+import * as WebRuntimeClient from "./webRuntime/WebRuntimeClient.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -165,6 +168,7 @@ const ServerSettingsLayerLive = ServerSettings.layer.pipe(
 const NativeTelemetryLayerLive = NativeTelemetryClient.layer.pipe(
   Layer.provide(ResourceMonitorBinary.layer),
 );
+const WebRuntimeLayerLive = WebRuntimeClient.layer.pipe(Layer.provide(WebRuntimeBinary.layer));
 const DesktopTelemetryReceiverLayerLive = DesktopTelemetryReceiver.layer.pipe(
   Layer.provideMerge(ServerSettingsLayerLive),
 );
@@ -365,6 +369,10 @@ const CheckpointingLayerLive = Layer.empty.pipe(
 );
 
 const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
+const PentestModuleRuntimeLayerLive = PentestModuleRuntime.layer.pipe(
+  Layer.provide(ProcessRunner.layer),
+  Layer.provide(ServerSettingsLayerLive),
+);
 
 const TerminalLayerLive = TerminalManager.layer.pipe(
   Layer.provide(PtyAdapterLive),
@@ -484,6 +492,8 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
+  Layer.provideMerge(WebRuntimeLayerLive),
+  Layer.provideMerge(PentestModuleRuntimeLayerLive),
   Layer.provideMerge(UsageLayerLive),
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(AnalyticsService.layer),

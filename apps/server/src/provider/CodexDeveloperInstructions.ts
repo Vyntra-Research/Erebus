@@ -63,6 +63,20 @@ Do not switch to global browser skills, Chrome, Node REPL browser automation, st
 const browserToolInstructions = (browserToolsAvailable: boolean): string =>
   browserToolsAvailable ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : "";
 
+const EREBUS_WEB_TOOL_INSTRUCTIONS = `
+
+## Erebus web testing
+
+The \`web_*\` and \`preview_*\` tools let you manage capture sessions, scope, browser profiles and tabs, extension pairing, HTTP and WebSocket evidence, the deduplicated web map, notes, and replay. For the built-in browser, start a capture with its browser profile so Erebus binds the proxy and CA to that profile. Upstream HTTPS verifies certificates by default; select a private CA or invalid-certificate mode only for a capture that needs it. For an existing signed-in Chromium session, create a session-bound extension pairing. Give delegated agents the capture session ID; they query the same runtime with their own scoped credential. Load full bodies only when their hash matters. If capture gaps appear, keep conclusions within the recorded evidence.
+
+Use each surface for its job: Subfinder discovers hosts, Katana crawls URL space, SecretHound scans chosen sources, \`preview_*\` drives the live browser, and capture tools preserve HTTP and WebSocket evidence. Run each installed CLI through \`web_module_exec\`, passing its native arguments and stdin directly. Read stdout and stderr as raw process output and check the truncation fields before treating it as complete. Discovery output is a lead, not proof of a security claim; confirm the useful edge against an exact request, response, or other direct artifact. Share relevant output files and capture session IDs with delegated agents instead of repeating the same work.
+
+Run a module only when its result can change the next move. Do not enumerate to fill coverage or run every module as a ritual. If a module is unavailable, inspect it once and install or update it through Erebus module controls; never invoke the CLI's own updater during a research run.
+`;
+
+const webToolInstructions = (webToolsAvailable: boolean): string =>
+  webToolsAvailable ? EREBUS_WEB_TOOL_INSTRUCTIONS : "";
+
 export const codexPlanModeDeveloperInstructions = (
   browserToolsAvailable: boolean,
 ): string => `<collaboration_mode># Plan Mode (Conversational)
@@ -212,33 +226,54 @@ In Default mode, strongly prefer making reasonable assumptions and executing the
 ${browserToolInstructions(browserToolsAvailable)}
 </collaboration_mode>`;
 
-export interface CodexRuntimeInfo {
+export interface ErebusRuntimeInfo {
+  readonly harness: string;
   readonly model: string;
   readonly reasoningEffort: string;
 }
+
+export type CodexRuntimeInfo = Omit<ErebusRuntimeInfo, "harness">;
 
 // Values come from trusted config, but keep the block single-line regardless.
 function toSingleLine(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
 }
 
-export function buildCodexDeveloperInstructions(
+export function buildErebusDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
-  runtime: CodexRuntimeInfo,
+  runtime: ErebusRuntimeInfo,
   /**
-   * Whether the `t3-code` MCP server is attached to this turn. Callers derive
-   * it from the session's actual MCP configuration rather than re-reading the
-   * setting, so the prompt cannot claim tools the turn doesn't have.
+   * Whether browser controls are attached to this turn. Callers derive this
+   * from the session's actual MCP configuration, so the prompt cannot claim
+   * tools the turn does not have.
    */
   browserToolsAvailable = true,
   additionalInstructions?: string,
+  /** Whether the scoped web evidence toolkit is attached to this turn. */
+  webToolsAvailable = false,
 ): string {
   const base =
     interactionMode === "plan"
       ? codexPlanModeDeveloperInstructions(browserToolsAvailable)
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
   const additional = additionalInstructions?.trim();
-  return `${base}${EREBUS_COMMAND_SAFETY_INSTRUCTIONS}${EREBUS_SKILL_USE_INSTRUCTIONS}${EREBUS_RESPONSE_POSTURE_INSTRUCTIONS}${EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS}${additional ? `\n\n${additional}` : ""}
+  return `${base}${webToolInstructions(webToolsAvailable)}${EREBUS_COMMAND_SAFETY_INSTRUCTIONS}${EREBUS_SKILL_USE_INSTRUCTIONS}${EREBUS_RESPONSE_POSTURE_INSTRUCTIONS}${EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS}${additional ? `\n\n${additional}` : ""}
 
-<runtime_info>In case you're asked: you are running in Erebus through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
+<runtime_info>In case you're asked: you are running in Erebus through the ${toSingleLine(runtime.harness)} harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
+}
+
+export function buildCodexDeveloperInstructions(
+  interactionMode: ProviderInteractionMode,
+  runtime: CodexRuntimeInfo,
+  browserToolsAvailable = true,
+  additionalInstructions?: string,
+  webToolsAvailable = false,
+): string {
+  return buildErebusDeveloperInstructions(
+    interactionMode,
+    { harness: "Codex", ...runtime },
+    browserToolsAvailable,
+    additionalInstructions,
+    webToolsAvailable,
+  );
 }

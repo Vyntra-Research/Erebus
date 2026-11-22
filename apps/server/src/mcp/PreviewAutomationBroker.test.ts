@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
   PreviewAutomationClientDisconnectedError,
+  PreviewAutomationExecutionError,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
   PreviewAutomationNoAvailableHostError,
@@ -123,6 +124,42 @@ it.effect("targets multiple tabs explicitly while retaining a default tab", () =
       expect(routedRequests[3]?.tabId).toBe(appTabId);
       expect(routedRequests[3]?.tabIdExplicit).toBe(true);
       expect(routedRequests[4]?.tabId).toBe(appTabId);
+    }),
+  ),
+);
+
+it.effect("clears the default tab after the active tab is closed", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const openedTabId = PreviewTabId.make("tab-to-close");
+      const routedRequests: RoutedRequest[] = [];
+      const requests = requestsFrom(
+        yield* broker.connect(makeHost({ supportedOperations: ["open", "tabClose", "snapshot"] })),
+      );
+      yield* Stream.runForEach(requests, (request) => {
+        routedRequests.push(request);
+        return broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: true,
+          result:
+            request.operation === "open"
+              ? { available: true, tabId: openedTabId }
+              : request.operation === "tabClose"
+                ? { closedTabId: openedTabId, tabId: null }
+                : { url: "http://localhost:3200" },
+        });
+      }).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      yield* broker.invoke({ scope, operation: "open", input: {} });
+      yield* broker.invoke({ scope, operation: "tabClose", input: {} });
+      yield* broker.invoke({ scope, operation: "snapshot", input: {} });
+
+      expect(routedRequests[1]?.tabId).toBe(openedTabId);
+      expect(routedRequests[2]?.tabId).toBeUndefined();
     }),
   ),
 );
@@ -400,6 +437,43 @@ it.effect("classifies a remote non-editable target without collapsing it to exec
         remoteTag: "PreviewAutomationTargetNotEditableError",
       });
       expect(error.message).toBe("Preview automation type requires an editable focused element.");
+    }),
+  );
+});
+
+it.effect("preserves a safe browser-profile-in-use reason", () => {
+  const remoteError = {
+    _tag: "PreviewAutomationExecutionError",
+    message: "remote profile details",
+    detail: { reason: "browser-profile-in-use", activeTabCount: 2 },
+  } as const;
+
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(
+        yield* broker.connect(makeHost({ supportedOperations: ["browserProfileDelete"] })),
+      );
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: remoteError,
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const error = yield* broker
+        .invoke<void>({ scope, operation: "browserProfileDelete", input: {} })
+        .pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(PreviewAutomationExecutionError);
+      expect(error).toMatchObject({ browserProfileInUseActiveTabCount: 2 });
+      expect(error.message).toBe(
+        "Close the 2 open browser tabs using this profile before deleting it.",
+      );
     }),
   );
 });

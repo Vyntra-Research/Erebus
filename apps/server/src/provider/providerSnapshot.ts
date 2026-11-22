@@ -2,7 +2,6 @@ import type {
   ProviderDriverKind,
   ModelCapabilities,
   ResearchArgosHealth,
-  ResearchProteusHealth,
   ServerProvider,
   ServerProviderAccountUsage,
   ServerProviderAuth,
@@ -138,7 +137,7 @@ export function extractAuthBoolean(value: unknown): boolean | undefined {
 }
 
 export function parseGenericCliVersion(output: string): string | null {
-  const match = output.match(/\b(\d+\.\d+\.\d+)\b/);
+  const match = output.match(/\bv?(\d+\.\d+\.\d+)\b/i);
   return match?.[1] ?? null;
 }
 
@@ -226,7 +225,6 @@ export function buildServerProvider(input: {
   slashCommands?: ReadonlyArray<ServerProviderSlashCommand>;
   skills?: ReadonlyArray<ServerProviderSkill>;
   argos?: ResearchArgosHealth;
-  proteus?: ResearchProteusHealth;
   probe: ProviderProbeResult;
 }): ServerProviderDraft {
   const versionAdvisory = input.driver
@@ -257,7 +255,6 @@ export function buildServerProvider(input: {
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],
     ...(input.argos ? { argos: input.argos } : {}),
-    ...(input.proteus ? { proteus: input.proteus } : {}),
     ...(versionAdvisory ? { versionAdvisory } : {}),
   };
 }

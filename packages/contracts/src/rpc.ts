@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
+import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import {
   AuthAccessStreamError,
@@ -60,6 +61,15 @@ import {
   ReviewDiffPreviewResult,
 } from "./review.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
+import {
+  MicroVmControlInput,
+  MicroVmCreateInput,
+  MicroVmError,
+  MicroVmInfo,
+  MicroVmListResult,
+  MicroVmModifyInput,
+  MicroVmRemoveInput,
+} from "./microVm.ts";
 import {
   ClientOrchestrationCommand,
   ORCHESTRATION_WS_METHODS,
@@ -170,15 +180,16 @@ import {
   ServerArgosError,
   ServerArgosStatus,
   ServerArgosUpdateResult,
+  ServerModuleError,
+  ServerModulesStatus,
+  ServerModuleUpdateInput,
+  ServerModuleUpdateResult,
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
   ServerRemoveKeybindingInput,
   ServerRemoveKeybindingResult,
   ServerProviderUpdatedPayload,
-  ServerProteusError,
-  ServerProteusStatus,
-  ServerProteusUpdateResult,
   ServerSelfUpdateError,
   ServerSelfUpdateInput,
   ServerSelfUpdateProgressEvent,
@@ -234,6 +245,7 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import * as WebRuntime from "./webRuntime.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -306,8 +318,13 @@ export const WS_METHODS = {
   serverUpdateProvider: "server.updateProvider",
   serverGetArgosStatus: "server.getArgosStatus",
   serverUpdateArgos: "server.updateArgos",
-  serverGetProteusStatus: "server.getProteusStatus",
-  serverUpdateProteus: "server.updateProteus",
+  serverGetModulesStatus: "server.getModulesStatus",
+  serverUpdateModule: "server.updateModule",
+  serverListMicroVms: "server.listMicroVms",
+  serverCreateMicroVm: "server.createMicroVm",
+  serverControlMicroVm: "server.controlMicroVm",
+  serverModifyMicroVm: "server.modifyMicroVm",
+  serverRemoveMicroVm: "server.removeMicroVm",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
   serverUpsertKeybinding: "server.upsertKeybinding",
@@ -329,6 +346,35 @@ export const WS_METHODS = {
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
+
+  // Web capture and mapping runtime
+  webRuntimeGetStatus: "webRuntime.getStatus",
+  webRuntimeListSessions: "webRuntime.listSessions",
+  webRuntimeCreateSession: "webRuntime.createSession",
+  webRuntimeCreateExtensionPairing: "webRuntime.createExtensionPairing",
+  webRuntimeEndSession: "webRuntime.endSession",
+  webRuntimeDeleteSession: "webRuntime.deleteSession",
+  webRuntimeStartProxy: "webRuntime.startProxy",
+  webRuntimeStopProxy: "webRuntime.stopProxy",
+  webRuntimeListScopes: "webRuntime.listScopes",
+  webRuntimeGetScope: "webRuntime.getScope",
+  webRuntimeSaveScope: "webRuntime.saveScope",
+  webRuntimeUpdateScope: "webRuntime.updateScope",
+  webRuntimeDeleteScope: "webRuntime.deleteScope",
+  webRuntimeListTraffic: "webRuntime.listTraffic",
+  webRuntimeGetExchange: "webRuntime.getExchange",
+  webRuntimeReadBody: "webRuntime.readBody",
+  webRuntimeListWebSockets: "webRuntime.listWebSockets",
+  webRuntimeGetWebSocket: "webRuntime.getWebSocket",
+  webRuntimeListGaps: "webRuntime.listGaps",
+  webRuntimeGetMap: "webRuntime.getMap",
+  webRuntimeGetNeighborhood: "webRuntime.getNeighborhood",
+  webRuntimeListAnnotations: "webRuntime.listAnnotations",
+  webRuntimeGetAnnotation: "webRuntime.getAnnotation",
+  webRuntimeAnnotate: "webRuntime.annotate",
+  webRuntimeUpdateAnnotation: "webRuntime.updateAnnotation",
+  webRuntimeDeleteAnnotation: "webRuntime.deleteAnnotation",
+  webRuntimeReplay: "webRuntime.replay",
 
   // Thread-only Git sync methods
   threadSyncGetStatus: "threadSync.getStatus",
@@ -405,6 +451,179 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
 });
 
+const WebRuntimeRpcError = Schema.Union([
+  WebRuntime.WebRuntimeRpcError,
+  EnvironmentAuthorizationError,
+]);
+
+export const WsWebRuntimeGetStatusRpc = Rpc.make(WS_METHODS.webRuntimeGetStatus, {
+  payload: Schema.Struct({}),
+  success: WebRuntime.WebRuntimeHealth,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeListSessionsRpc = Rpc.make(WS_METHODS.webRuntimeListSessions, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(WebRuntime.WebRuntimeCaptureSession),
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeCreateSessionRpc = Rpc.make(WS_METHODS.webRuntimeCreateSession, {
+  payload: WebRuntime.WebRuntimeCreateSessionInput,
+  success: WebRuntime.WebRuntimeCaptureSessionWithCa,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeCreateExtensionPairingRpc = Rpc.make(
+  WS_METHODS.webRuntimeCreateExtensionPairing,
+  {
+    payload: Schema.Struct({ sessionId: TrimmedNonEmptyString }),
+    success: WebRuntime.WebRuntimeExtensionPairing,
+    error: WebRuntimeRpcError,
+  },
+);
+
+export const WsWebRuntimeEndSessionRpc = Rpc.make(WS_METHODS.webRuntimeEndSession, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: WebRuntime.WebRuntimeCaptureSession,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeDeleteSessionRpc = Rpc.make(WS_METHODS.webRuntimeDeleteSession, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: WebRuntime.WebRuntimeSessionDeleteResult,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeStartProxyRpc = Rpc.make(WS_METHODS.webRuntimeStartProxy, {
+  payload: Schema.Struct({
+    id: TrimmedNonEmptyString,
+    upstreamTls: Schema.optionalKey(WebRuntime.WebRuntimeUpstreamTls),
+  }),
+  success: WebRuntime.WebRuntimeCaptureSessionWithCa,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeStopProxyRpc = Rpc.make(WS_METHODS.webRuntimeStopProxy, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: WebRuntime.WebRuntimeCaptureSession,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeListScopesRpc = Rpc.make(WS_METHODS.webRuntimeListScopes, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(WebRuntime.WebRuntimeScopeProfile),
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeGetScopeRpc = Rpc.make(WS_METHODS.webRuntimeGetScope, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: WebRuntime.WebRuntimeScopeProfile,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeSaveScopeRpc = Rpc.make(WS_METHODS.webRuntimeSaveScope, {
+  payload: WebRuntime.WebRuntimeSaveScopeInput,
+  success: WebRuntime.WebRuntimeScopeSaved,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeUpdateScopeRpc = Rpc.make(WS_METHODS.webRuntimeUpdateScope, {
+  payload: WebRuntime.WebRuntimeUpdateScopeInput,
+  success: WebRuntime.WebRuntimeScopeProfile,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeDeleteScopeRpc = Rpc.make(WS_METHODS.webRuntimeDeleteScope, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: Schema.Struct({}),
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeListTrafficRpc = Rpc.make(WS_METHODS.webRuntimeListTraffic, {
+  payload: WebRuntime.WebRuntimeTrafficQuery,
+  success: WebRuntime.WebRuntimeTrafficPage,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeGetExchangeRpc = Rpc.make(WS_METHODS.webRuntimeGetExchange, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: WebRuntime.WebRuntimeExchangeDetail,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeReadBodyRpc = Rpc.make(WS_METHODS.webRuntimeReadBody, {
+  payload: Schema.Struct({ hash: TrimmedNonEmptyString }),
+  success: WebRuntime.WebRuntimeBodyContent,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeListWebSocketsRpc = Rpc.make(WS_METHODS.webRuntimeListWebSockets, {
+  payload: WebRuntime.WebRuntimeWebSocketQuery,
+  success: WebRuntime.WebRuntimeWebSocketPage,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeGetWebSocketRpc = Rpc.make(WS_METHODS.webRuntimeGetWebSocket, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: WebRuntime.WebRuntimeWebSocketEventDetail,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeListGapsRpc = Rpc.make(WS_METHODS.webRuntimeListGaps, {
+  payload: WebRuntime.WebRuntimeGapQuery,
+  success: Schema.Array(WebRuntime.WebRuntimeCaptureGap),
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeGetMapRpc = Rpc.make(WS_METHODS.webRuntimeGetMap, {
+  payload: WebRuntime.WebRuntimeGraphQuery,
+  success: WebRuntime.WebRuntimeGraphPage,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeGetNeighborhoodRpc = Rpc.make(WS_METHODS.webRuntimeGetNeighborhood, {
+  payload: WebRuntime.WebRuntimeNeighborhoodInput,
+  success: WebRuntime.WebRuntimeGraphNeighborhood,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeListAnnotationsRpc = Rpc.make(WS_METHODS.webRuntimeListAnnotations, {
+  payload: WebRuntime.WebRuntimeAnnotationQuery,
+  success: Schema.Array(WebRuntime.WebRuntimeAnnotation),
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeGetAnnotationRpc = Rpc.make(WS_METHODS.webRuntimeGetAnnotation, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: WebRuntime.WebRuntimeAnnotation,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeAnnotateRpc = Rpc.make(WS_METHODS.webRuntimeAnnotate, {
+  payload: WebRuntime.WebRuntimeAnnotationInput,
+  success: WebRuntime.WebRuntimeAnnotation,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeUpdateAnnotationRpc = Rpc.make(WS_METHODS.webRuntimeUpdateAnnotation, {
+  payload: WebRuntime.WebRuntimeUpdateAnnotationInput,
+  success: WebRuntime.WebRuntimeAnnotation,
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeDeleteAnnotationRpc = Rpc.make(WS_METHODS.webRuntimeDeleteAnnotation, {
+  payload: Schema.Struct({ id: TrimmedNonEmptyString }),
+  success: Schema.Struct({}),
+  error: WebRuntimeRpcError,
+});
+
+export const WsWebRuntimeReplayRpc = Rpc.make(WS_METHODS.webRuntimeReplay, {
+  payload: WebRuntime.WebRuntimeReplayInput,
+  success: WebRuntime.WebRuntimeReplayResult,
+  error: WebRuntimeRpcError,
+});
+
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
   payload: Schema.Struct({
     /**
@@ -472,16 +691,46 @@ export const WsServerUpdateArgosRpc = Rpc.make(WS_METHODS.serverUpdateArgos, {
   error: Schema.Union([ServerArgosError, EnvironmentAuthorizationError]),
 });
 
-export const WsServerGetProteusStatusRpc = Rpc.make(WS_METHODS.serverGetProteusStatus, {
+export const WsServerGetModulesStatusRpc = Rpc.make(WS_METHODS.serverGetModulesStatus, {
   payload: Schema.Struct({}),
-  success: ServerProteusStatus,
-  error: Schema.Union([ServerProteusError, EnvironmentAuthorizationError]),
+  success: ServerModulesStatus,
+  error: Schema.Union([ServerModuleError, EnvironmentAuthorizationError]),
 });
 
-export const WsServerUpdateProteusRpc = Rpc.make(WS_METHODS.serverUpdateProteus, {
+export const WsServerUpdateModuleRpc = Rpc.make(WS_METHODS.serverUpdateModule, {
+  payload: ServerModuleUpdateInput,
+  success: ServerModuleUpdateResult,
+  error: Schema.Union([ServerModuleError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerListMicroVmsRpc = Rpc.make(WS_METHODS.serverListMicroVms, {
   payload: Schema.Struct({}),
-  success: ServerProteusUpdateResult,
-  error: Schema.Union([ServerProteusError, EnvironmentAuthorizationError]),
+  success: MicroVmListResult,
+  error: Schema.Union([MicroVmError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerCreateMicroVmRpc = Rpc.make(WS_METHODS.serverCreateMicroVm, {
+  payload: MicroVmCreateInput,
+  success: MicroVmInfo,
+  error: Schema.Union([MicroVmError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerControlMicroVmRpc = Rpc.make(WS_METHODS.serverControlMicroVm, {
+  payload: MicroVmControlInput,
+  success: MicroVmInfo,
+  error: Schema.Union([MicroVmError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerModifyMicroVmRpc = Rpc.make(WS_METHODS.serverModifyMicroVm, {
+  payload: MicroVmModifyInput,
+  success: MicroVmInfo,
+  error: Schema.Union([MicroVmError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerRemoveMicroVmRpc = Rpc.make(WS_METHODS.serverRemoveMicroVm, {
+  payload: MicroVmRemoveInput,
+  success: Schema.Struct({ removed: Schema.Boolean }),
+  error: Schema.Union([MicroVmError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerUpdateServerRpc = Rpc.make(WS_METHODS.serverUpdateServer, {
@@ -1211,8 +1460,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpdateProviderRpc,
   WsServerGetArgosStatusRpc,
   WsServerUpdateArgosRpc,
-  WsServerGetProteusStatusRpc,
-  WsServerUpdateProteusRpc,
+  WsServerGetModulesStatusRpc,
+  WsServerUpdateModuleRpc,
+  WsServerListMicroVmsRpc,
+  WsServerCreateMicroVmRpc,
+  WsServerControlMicroVmRpc,
+  WsServerModifyMicroVmRpc,
+  WsServerRemoveMicroVmRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
   WsServerUpsertKeybindingRpc,
@@ -1234,6 +1488,33 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,
+  WsWebRuntimeGetStatusRpc,
+  WsWebRuntimeListSessionsRpc,
+  WsWebRuntimeCreateSessionRpc,
+  WsWebRuntimeCreateExtensionPairingRpc,
+  WsWebRuntimeEndSessionRpc,
+  WsWebRuntimeDeleteSessionRpc,
+  WsWebRuntimeStartProxyRpc,
+  WsWebRuntimeStopProxyRpc,
+  WsWebRuntimeListScopesRpc,
+  WsWebRuntimeGetScopeRpc,
+  WsWebRuntimeSaveScopeRpc,
+  WsWebRuntimeUpdateScopeRpc,
+  WsWebRuntimeDeleteScopeRpc,
+  WsWebRuntimeListTrafficRpc,
+  WsWebRuntimeGetExchangeRpc,
+  WsWebRuntimeReadBodyRpc,
+  WsWebRuntimeListWebSocketsRpc,
+  WsWebRuntimeGetWebSocketRpc,
+  WsWebRuntimeListGapsRpc,
+  WsWebRuntimeGetMapRpc,
+  WsWebRuntimeGetNeighborhoodRpc,
+  WsWebRuntimeListAnnotationsRpc,
+  WsWebRuntimeGetAnnotationRpc,
+  WsWebRuntimeAnnotateRpc,
+  WsWebRuntimeUpdateAnnotationRpc,
+  WsWebRuntimeDeleteAnnotationRpc,
+  WsWebRuntimeReplayRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

@@ -1,6 +1,6 @@
-import { CodexSettings, ProviderDriverKind } from "@t3tools/contracts";
+import { CodexSettings, OpenCodeSettings, ProviderDriverKind } from "@t3tools/contracts";
 import type * as Schema from "effect/Schema";
-import { type Icon, OpenAI } from "../Icons";
+import { type Icon, OpenAI, OpenCodeIcon } from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -17,6 +17,7 @@ export interface ProviderClientDefinition {
   readonly label: string;
   readonly icon: Icon;
   readonly settingsSchema: ProviderSettingsSchema;
+  readonly supportsMultipleInstances: boolean;
   /**
    * Optional short label rendered as a `variant="warning"` badge next to
    * the instance title. Used to flag drivers that still ship under an
@@ -33,6 +34,14 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Codex",
     icon: OpenAI,
     settingsSchema: CodexSettings,
+    supportsMultipleInstances: true,
+  },
+  {
+    value: ProviderDriverKind.make("opencode"),
+    label: "OpenCode",
+    icon: OpenCodeIcon,
+    settingsSchema: OpenCodeSettings,
+    supportsMultipleInstances: false,
   },
 ];
 

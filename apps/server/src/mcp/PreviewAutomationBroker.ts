@@ -277,6 +277,27 @@ const classifyResponseError = (
         ...context,
         ...remoteDiagnostics,
       });
+    case "PreviewAutomationExecutionError": {
+      const detail =
+        typeof error.detail === "object" && error.detail !== null ? error.detail : undefined;
+      const browserProfileInUseActiveTabCount =
+        detail &&
+        "reason" in detail &&
+        detail.reason === "browser-profile-in-use" &&
+        "activeTabCount" in detail &&
+        typeof detail.activeTabCount === "number" &&
+        Number.isInteger(detail.activeTabCount) &&
+        detail.activeTabCount > 0
+          ? detail.activeTabCount
+          : undefined;
+      return new PreviewAutomationExecutionError({
+        ...context,
+        ...remoteDiagnostics,
+        ...(browserProfileInUseActiveTabCount === undefined
+          ? {}
+          : { browserProfileInUseActiveTabCount }),
+      });
+    }
     default:
       return new PreviewAutomationExecutionError({
         ...context,

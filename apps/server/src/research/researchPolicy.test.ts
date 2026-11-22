@@ -36,7 +36,6 @@ it("keeps Judge independent, artifact-bounded, and campaign-free", () => {
   assert.match(JUDGE_POLICY, /hard wall-clock budget of 600 seconds/);
   assert.match(JUDGE_POLICY, /CVSS is ancillary classification only/);
   assert.match(JUDGE_POLICY, /finding[\s\S]*under findings\/[\s\S]*PoC under pocs\//);
-  assert.match(JUDGE_POLICY, /never use Proteus skills/);
   assert.lengthOf(RESEARCH_JUDGE_GATES, 8);
 });
 

@@ -32,4 +32,6 @@ export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
+export * from "./webRuntime.ts";
+export * from "./microVm.ts";
 export * from "./rpc.ts";

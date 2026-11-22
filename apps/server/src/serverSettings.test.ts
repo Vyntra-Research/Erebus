@@ -249,6 +249,26 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("keeps sibling pentest module settings on a partial update", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* serverSettings.updateSettings({
+        pentestModules: {
+          secrethound: { patternsPath: "/opt/erebus/patterns.json" },
+          subfinder: { providerConfigPath: "/opt/erebus/providers.yaml" },
+        },
+      });
+
+      const next = yield* serverSettings.updateSettings({
+        pentestModules: { katana: { configPath: "/opt/erebus/katana.yaml" } },
+      });
+
+      assert.equal(next.pentestModules.secrethound.patternsPath, "/opt/erebus/patterns.json");
+      assert.equal(next.pentestModules.katana.configPath, "/opt/erebus/katana.yaml");
+      assert.equal(next.pentestModules.subfinder.providerConfigPath, "/opt/erebus/providers.yaml");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("buffers changes after a subscription is acquired but before it is consumed", () =>
     Effect.scoped(
       Effect.gen(function* () {

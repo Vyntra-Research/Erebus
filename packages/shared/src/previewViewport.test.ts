@@ -27,14 +27,14 @@ describe("previewViewport", () => {
     expect(
       resolvePreviewViewport({
         mode: "preset",
-        preset: "iphone-12-pro",
+        preset: "iphone-15-pro",
         orientation: "landscape",
       }),
     ).toEqual({
       _tag: "preset",
-      width: 844,
-      height: 390,
-      presetId: "iphone-12-pro",
+      width: 852,
+      height: 393,
+      presetId: "iphone-15-pro",
     });
   });
 
@@ -43,6 +43,7 @@ describe("previewViewport", () => {
       "iPhone SE",
       "iPhone XR",
       "iPhone 12 Pro",
+      "iPhone 15 Pro",
       "iPhone 14 Pro Max",
       "Pixel 7",
       "Samsung Galaxy S8+",

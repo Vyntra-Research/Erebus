@@ -5,6 +5,8 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import {
   FILL_PREVIEW_VIEWPORT,
   PREVIEW_AUTOMATION_OPERATIONS,
+  type DesktopPreviewBrowserProfileId,
+  type DesktopPreviewProxyConfiguration,
   type EnvironmentId,
   type PreviewAutomationNavigateInput,
   type PreviewAutomationOpenInput,
@@ -20,7 +22,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Atom } from "effect/unstable/reactivity";
 
 import {
@@ -31,6 +33,7 @@ import {
 } from "~/previewStateStore";
 import { usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
 import { resolveBrowserNavigationTarget } from "~/browser/browserTargetResolver";
+import { useBrowserProfileSelectionStore } from "~/browser/browserProfileSelectionStore";
 import {
   readActiveBrowserRecordingTargets,
   startBrowserRecording,
@@ -42,16 +45,26 @@ import { browserDefaultOpenViewport, resolveBrowserDefaults } from "~/browser/br
 import { runBrowserViewportMutation } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { isElectron } from "~/env";
+import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { useEnvironments } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
+import { webRuntimeEnvironment } from "~/state/webRuntime";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { previewBridge } from "./previewBridge";
+import { listPreviewAutomationTabs } from "./previewAutomationTabs";
 import {
+  browserProfileRemountWebContentsId,
+  resolveAutomationBrowserProfile,
+  type BrowserProfileSelector,
+} from "./browserProfileAutomation";
+import {
+  PreviewAutomationBrowserProfileInUseHostError,
   PreviewAutomationOperationError,
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationRecordingNotActiveError,
+  PreviewAutomationRemoteProxyUnavailableError,
   PreviewAutomationTargetUnavailableError,
   PreviewAutomationViewportTimeoutError,
 } from "./previewAutomationErrors";
@@ -67,6 +80,7 @@ import {
 } from "./previewNavigationReadiness";
 import { createPreviewAutomationRequestConsumerAtom } from "./previewAutomationRequestConsumer";
 import { createPreviewAutomationClientId } from "./previewAutomationClientId";
+import { closePreviewSession } from "./closePreviewSession";
 import {
   needsPreviewAutomationSessionSync,
   resolvePreviewAutomationOpenTab,
@@ -74,6 +88,7 @@ import {
 } from "./previewAutomationTarget";
 import { isPreviewViewportReady } from "./previewViewportReadiness";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
+import { runtimeRestartCleanup } from "../web-security/webSecurityPanelLogic";
 
 const PREVIEW_PRESENTATION_SETTLE_TIMEOUT_MS = 500;
 
@@ -129,6 +144,48 @@ const findPreviewWebview = (tabId: string): ExecutablePreviewWebview | null =>
   Array.from(document.querySelectorAll<ExecutablePreviewWebview>("webview[data-preview-tab]")).find(
     (candidate) => candidate.getAttribute("data-preview-tab") === tabId,
   ) ?? null;
+
+const readWebContentsId = (webview: ExecutablePreviewWebview): number | null => {
+  try {
+    const webContentsId = webview.getWebContentsId();
+    return Number.isInteger(webContentsId) && webContentsId > 0 ? webContentsId : null;
+  } catch {
+    return null;
+  }
+};
+
+const waitForBrowserProfileRemount = async (input: {
+  readonly threadRef: ScopedThreadRef;
+  readonly request: PreviewAutomationRequest;
+  readonly tabId: string;
+  readonly runtimeTabId: string;
+  readonly profileId: DesktopPreviewBrowserProfileId;
+  readonly previousWebContentsId: number | null;
+}): Promise<void> => {
+  const deadline = Date.now() + input.request.timeoutMs;
+  while (Date.now() <= deadline) {
+    assertPreviewRuntimeCurrent(input.threadRef, input.tabId, input.runtimeTabId, input.request);
+    const webview = findPreviewWebview(input.runtimeTabId);
+    const webContentsId = browserProfileRemountWebContentsId({
+      expectedProfileId: input.profileId,
+      currentProfileId: webview?.getAttribute("data-preview-browser-profile") ?? null,
+      previousWebContentsId: input.previousWebContentsId,
+      currentWebContentsId: webview ? readWebContentsId(webview) : null,
+    });
+    if (webContentsId !== null && previewBridge) {
+      await previewBridge.registerWebview(input.runtimeTabId, webContentsId);
+      const status = await previewBridge.automation.status(input.runtimeTabId);
+      if (status.available) return;
+    }
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+  }
+  throw new PreviewAutomationOverlayTimeoutError({
+    requestId: input.request.requestId,
+    environmentId: input.threadRef.environmentId,
+    threadId: input.threadRef.threadId,
+    timeoutMs: input.request.timeoutMs,
+  });
+};
 
 const readWebviewViewport = async (
   webview: ExecutablePreviewWebview,
@@ -254,7 +311,56 @@ const raisePreviewAutomationHostError = (
 };
 
 export function PreviewAutomationHosts() {
-  const { environments } = useEnvironments();
+  const { environments, isReady } = useEnvironments();
+  const knownEnvironmentIdsRef = useRef<ReadonlySet<EnvironmentId> | null>(null);
+  const currentEnvironmentIdsRef = useRef<ReadonlySet<EnvironmentId>>(new Set());
+  const pendingEnvironmentCleanupRef = useRef<Set<EnvironmentId>>(new Set());
+
+  useEffect(() => {
+    const bridge = previewBridge;
+    if (!isReady || !bridge) return;
+    const nextIds = new Set(environments.map(({ environmentId }) => environmentId));
+    const previousIds = knownEnvironmentIdsRef.current;
+    knownEnvironmentIdsRef.current = nextIds;
+    currentEnvironmentIdsRef.current = nextIds;
+    if (previousIds !== null) {
+      for (const environmentId of previousIds) {
+        if (!nextIds.has(environmentId)) {
+          pendingEnvironmentCleanupRef.current.add(environmentId);
+        }
+      }
+    }
+    for (const environmentId of nextIds) {
+      pendingEnvironmentCleanupRef.current.delete(environmentId);
+    }
+
+    let disposed = false;
+    let retryTimer: number | undefined;
+    const clearRemovedEnvironments = async () => {
+      for (const environmentId of pendingEnvironmentCleanupRef.current) {
+        if (disposed || currentEnvironmentIdsRef.current.has(environmentId)) continue;
+        try {
+          await bridge.browserProfiles.clearEnvironment(environmentId);
+          if (!currentEnvironmentIdsRef.current.has(environmentId)) {
+            pendingEnvironmentCleanupRef.current.delete(environmentId);
+          }
+        } catch (error) {
+          console.error("Could not clear browser data for a removed environment.", error);
+        }
+      }
+      if (!disposed && pendingEnvironmentCleanupRef.current.size > 0) {
+        retryTimer = window.setTimeout(() => void clearRemovedEnvironments(), 5_000);
+      }
+    };
+    if (pendingEnvironmentCleanupRef.current.size > 0) {
+      retryTimer = window.setTimeout(() => void clearRemovedEnvironments(), 5_000);
+    }
+    return () => {
+      disposed = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [environments, isReady]);
+
   if (!isElectron || !previewBridge?.automation) return null;
   return (
     <>
@@ -267,14 +373,21 @@ export function PreviewAutomationHosts() {
         <PreviewAutomationHost
           key={environment.environmentId}
           environmentId={environment.environmentId}
+          browserProxyReachable={
+            environment.entry.target._tag === "PrimaryConnectionTarget" ||
+            isDesktopLocalConnectionTarget(environment.entry.target)
+          }
         />
       ))}
     </>
   );
 }
 
-function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId }) {
-  const { environmentId } = props;
+function PreviewAutomationHost(props: {
+  readonly environmentId: EnvironmentId;
+  readonly browserProxyReachable: boolean;
+}) {
+  const { browserProxyReachable, environmentId } = props;
   const registry = useContext(RegistryContext);
   const [automationClientId] = useState(createPreviewAutomationClientId);
   const initialAutomationHost = useMemo<PreviewAutomationHostState>(
@@ -298,6 +411,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   const resize = useAtomCommand(previewEnvironment.resize, {
     reportFailure: false,
   });
+  const close = useAtomCommand(previewEnvironment.close, {
+    reportFailure: false,
+  });
   const respondToAutomation = useAtomCommand(
     previewEnvironment.respondToAutomation,
     "preview automation response",
@@ -308,6 +424,70 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   );
   const [automationConnectionAtom] = useState(() => Atom.make<string | null>(null));
   const automationConnectionId = useAtomValue(automationConnectionAtom);
+  const getWebRuntimeStatus = useAtomQueryRunner(webRuntimeEnvironment.status, {
+    reportFailure: false,
+  });
+  const listWebRuntimeSessions = useAtomQueryRunner(webRuntimeEnvironment.sessions, {
+    reportFailure: false,
+  });
+  const runtimeRestartCountRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    let refreshing = false;
+    const recoverBrowserProfiles = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const target = { environmentId, input: {} } as const;
+        const status = await getWebRuntimeStatus(target);
+        if (disposed || status._tag !== "Success") return;
+        const previousRestartCount = runtimeRestartCountRef.current;
+        if (previousRestartCount === null) {
+          runtimeRestartCountRef.current = status.value.restartCount;
+          return;
+        }
+        if (previousRestartCount === status.value.restartCount) return;
+
+        const sessions = await listWebRuntimeSessions(target);
+        if (disposed || sessions._tag !== "Success") return;
+        const cleanup = runtimeRestartCleanup(
+          previousRestartCount,
+          status.value.restartCount,
+          sessions.value,
+        );
+        const bridge = previewBridge;
+        if (!cleanup.restarted || !bridge) return;
+        const results = await Promise.allSettled(
+          cleanup.profileIds.map((profileId) =>
+            bridge.configureProxy(environmentId, null, profileId),
+          ),
+        );
+        if (disposed) return;
+        const failures = results.filter(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
+        if (failures.length > 0) {
+          for (const failure of failures) {
+            console.error(
+              "Could not clear a browser proxy after the web runtime restarted.",
+              failure.reason,
+            );
+          }
+          return;
+        }
+        runtimeRestartCountRef.current = status.value.restartCount;
+      } finally {
+        refreshing = false;
+      }
+    };
+    void recoverBrowserProfiles();
+    const interval = window.setInterval(() => void recoverBrowserProfiles(), 5_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
+  }, [environmentId, getWebRuntimeStatus, listWebRuntimeSessions]);
 
   const handleRequest = useCallback(
     async (request: PreviewAutomationRequest): Promise<unknown> => {
@@ -364,6 +544,138 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           };
         };
         switch (request.operation) {
+          case "tabsList": {
+            const activeTabId = tabId;
+            return {
+              tabs: await listPreviewAutomationTabs(
+                Object.values(state.sessions),
+                activeTabId,
+                (listedTabId) => currentStatus(threadRef, listedTabId),
+              ),
+            };
+          }
+          case "tabClose": {
+            if (!tabId) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            const result = await closePreviewSession({
+              closePreview: close,
+              snapshot:
+                state.sessions[tabId] ?? (state.snapshot?.tabId === tabId ? state.snapshot : null),
+              tabId,
+              threadRef,
+            });
+            if (result._tag === "Failure") return raiseAtomCommandFailure(result);
+            return { closedTabId: tabId, tabId: null };
+          }
+          case "browserProfilesList": {
+            if (!previewBridge) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            return {
+              profiles: await previewBridge.browserProfiles.list(),
+            };
+          }
+          case "browserProfileCreate": {
+            if (!previewBridge) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            const input = request.input as { readonly name: string };
+            return await previewBridge.browserProfiles.create(input.name);
+          }
+          case "browserProfileRename": {
+            if (!previewBridge) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            const input = request.input as {
+              readonly profile: BrowserProfileSelector;
+              readonly name: string;
+            };
+            const profiles = await previewBridge.browserProfiles.list();
+            const profile = resolveAutomationBrowserProfile(profiles, input.profile);
+            await previewBridge.browserProfiles.rename(profile.id, input.name);
+            const updatedProfiles = await previewBridge.browserProfiles.list();
+            return resolveAutomationBrowserProfile(updatedProfiles, { profileId: profile.id });
+          }
+          case "browserProfileDelete": {
+            if (!previewBridge) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            const input = request.input as { readonly profile: BrowserProfileSelector };
+            const profiles = await previewBridge.browserProfiles.list();
+            const profile = resolveAutomationBrowserProfile(profiles, input.profile);
+            const result = await previewBridge.browserProfiles.delete(profile.id);
+            if (result?.status === "in-use") {
+              throw new PreviewAutomationBrowserProfileInUseHostError({
+                ...unavailableTarget,
+                reason: "browser-profile-in-use",
+                activeTabCount: result.activeTabCount,
+              });
+            }
+            useBrowserProfileSelectionStore.getState().removeProfile(profile.id);
+            return { deletedProfileId: profile.id };
+          }
+          case "browserProfileSelect": {
+            if (!previewBridge) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            const input = request.input as { readonly profile: BrowserProfileSelector };
+            const profiles = await previewBridge.browserProfiles.list();
+            const profile = resolveAutomationBrowserProfile(profiles, input.profile);
+            const selection = useBrowserProfileSelectionStore.getState();
+            if (tabId) {
+              if (state.sessions[tabId] === undefined) {
+                throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+              }
+              const runtimeTabId = previewRuntimeTabId(threadRef, state.serverEpoch, tabId);
+              const previousWebview = findPreviewWebview(runtimeTabId);
+              const previousProfileId = previousWebview?.getAttribute(
+                "data-preview-browser-profile",
+              );
+              const previousWebContentsId = previousWebview
+                ? readWebContentsId(previousWebview)
+                : null;
+              selection.selectForTab(threadRef, tabId, profile.id);
+              if (previousWebview && previousProfileId !== profile.id) {
+                await waitForBrowserProfileRemount({
+                  threadRef,
+                  request,
+                  tabId,
+                  runtimeTabId,
+                  profileId: profile.id,
+                  previousWebContentsId,
+                });
+              }
+            } else {
+              selection.setEnvironmentDefault(environmentId, profile.id);
+            }
+            return { profile, tabId };
+          }
+          case "browserProfileProxy": {
+            if (!previewBridge) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            const input = request.input as {
+              readonly profile: BrowserProfileSelector;
+              readonly proxy: DesktopPreviewProxyConfiguration | null;
+            };
+            if (input.proxy !== null && !browserProxyReachable) {
+              throw new PreviewAutomationRemoteProxyUnavailableError({
+                requestId: request.requestId,
+                environmentId,
+                threadId: request.threadId,
+              });
+            }
+            const profiles = await previewBridge.browserProfiles.list();
+            const profile = resolveAutomationBrowserProfile(profiles, input.profile);
+            await previewBridge.configureProxy(environmentId, input.proxy, profile.id);
+            return {
+              profileId: profile.id,
+              configured: input.proxy !== null,
+            };
+          }
+          case "webRuntimeReachability":
+            return { local: browserProxyReachable };
           case "status":
             return await currentStatus(threadRef, tabId);
           case "open": {
@@ -498,6 +810,28 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               ready.runtimeTabId,
               request.operation,
               input.readiness ?? "load",
+              input.timeoutMs ?? request.timeoutMs,
+            );
+            return await currentStatus(threadRef, ready.tabId);
+          }
+          case "back":
+          case "forward":
+          case "reload": {
+            const ready = await requireReadyTab();
+            const input = request.input as { readonly timeoutMs?: number };
+            if (request.operation === "back") await ready.bridge.goBack(ready.runtimeTabId);
+            else if (request.operation === "forward") {
+              await ready.bridge.goForward(ready.runtimeTabId);
+            } else {
+              await ready.bridge.refresh(ready.runtimeTabId);
+            }
+            await waitForNavigationReadiness(
+              threadRef,
+              request.requestId,
+              ready.tabId,
+              ready.runtimeTabId,
+              request.operation,
+              "load",
               input.timeoutMs ?? request.timeoutMs,
             );
             return await currentStatus(threadRef, ready.tabId);
@@ -689,7 +1023,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         });
       }
     },
-    [environmentId, listPreviews, open, registry, resize],
+    [browserProxyReachable, close, environmentId, listPreviews, open, registry, resize],
   );
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
   const setRequestHandler = useAtomSet(requestHandlerAtom);

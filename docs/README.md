@@ -3,8 +3,10 @@
 ## Use Erebus
 
 - [Install and first run](./user/install.md)
-- [Codex accounts and routing](./user/providers-codex.md)
+- [Providers, accounts, and routing](./user/providers-codex.md)
 - [Research and independent review](./user/research-supervision.md)
+- [Web application testing](./user/web-pentest.md)
+- [Persistent microVMs](./user/microvms.md)
 - [Permission modes](./user/permission-modes.md)
 - [Message composer](./user/composer.md)
 - [Standalone threads and projects](./user/thread-sidebar.md)
@@ -17,7 +19,7 @@
 - [Project icons](./user/project-settings.md)
 - [Updates](./user/updating.md)
 
-The current release is the Windows and x64 Linux desktop app with Codex.
+The current release is the Windows and x64 Linux desktop app with Codex and OpenCode.
 
 ## Work on Erebus
 
@@ -28,7 +30,7 @@ Setup lives in the [root README](../README.md). Contribution policy is in [CONTR
 - [Glossary](./internals/glossary.md)
 - [Scripts](./internals/scripts.md)
 - [Connection runtime](./internals/connection-runtime.md)
-- [Codex provider runtime](./internals/providers.md)
+- [Provider runtime](./internals/providers.md)
 - [Resource telemetry](./internals/resource-telemetry.md)
 - [Environment authorization](./internals/environment-auth.md)
 - [CI gates](./internals/ci.md)

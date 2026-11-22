@@ -64,6 +64,7 @@ import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
+import * as WebRuntimeClient from "../../webRuntime/WebRuntimeClient.ts";
 import {
   EREBUS_NATIVE_CONTROL_FINGERPRINT,
   EREBUS_NATIVE_CONTROL_VERSION,
@@ -202,6 +203,7 @@ export function needsResearchMcpFallback(input: {
   readonly resumeCursor: unknown | undefined;
   readonly hasNativeResearchTools: boolean;
 }): boolean {
+  if (input.provider === "opencode") return true;
   return (
     input.provider === "codex" && input.resumeCursor !== undefined && !input.hasNativeResearchTools
   );
@@ -259,6 +261,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const webRuntime = yield* Effect.serviceOption(WebRuntimeClient.WebRuntimeClient);
   const issueMcpCredential =
     options?.issueMcpCredential ?? McpSessionRegistry.issueActiveMcpCredential;
   const revokeMcpCredential =
@@ -286,6 +289,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       ).pipe(Effect.as(false)),
     ),
   );
+  const webToolsEnabled = Option.match(webRuntime, {
+    onNone: () => Effect.succeed(false),
+    onSome: (runtime) =>
+      runtime.health.pipe(
+        Effect.map((health) => health.status !== "disabled" && health.status !== "unavailable"),
+      ),
+  });
 
   const prepareMcpSession = (input: {
     readonly threadId: ThreadId;
@@ -296,12 +306,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   }) =>
     Effect.gen(function* () {
       const previewEnabled = yield* agentBrowserAccessEnabled;
-      // Codex accepts dynamic tools only on thread/start. Its thread/resume
-      // request has no dynamicTools field, so an existing provider thread needs
-      // the authenticated MCP transport when it predates the current durable
-      // Erebus control toolset. Fresh Codex threads keep native namespaces only.
+      const webEnabled = yield* webToolsEnabled;
+      // OpenCode receives Erebus control through MCP. Codex accepts dynamic
+      // tools only on thread/start, so an older resumed Codex thread also needs
+      // the authenticated fallback when it predates the current toolset.
       const researchFallbackEnabled = needsResearchMcpFallback(input);
-      if (!previewEnabled && !researchFallbackEnabled) {
+      if (!previewEnabled && !webEnabled && !researchFallbackEnabled) {
         // Revoke as well as clear. Every other prepare path reaches
         // `issueActiveMcpCredential`, which revokes the thread first, so
         // skipping it here would leave a previously issued bearer token valid
@@ -314,6 +324,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
       const capabilities = new Set<McpInvocationContext.McpCapability>();
       if (previewEnabled) capabilities.add("preview");
+      if (webEnabled) capabilities.add("web");
       if (researchFallbackEnabled) capabilities.add("researchFallback");
       const credential = yield* issueMcpCredential({
         threadId: input.threadId,

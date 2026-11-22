@@ -22,7 +22,7 @@ export interface ProcessRunInput {
   readonly args: ReadonlyArray<string>;
   readonly cwd?: string | undefined;
   readonly spawnCwd?: string | undefined;
-  readonly timeout?: Duration.Input | undefined;
+  readonly timeout?: Duration.Input | null | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly stdin?: string | undefined;
   readonly maxOutputBytes?: number | undefined;
@@ -253,11 +253,15 @@ function finalizeRunProcess<R>(
   effect: Effect.Effect<ProcessRunOutput, ProcessRunError, R | Scope.Scope>,
   input: ProcessRunInput,
 ): Effect.Effect<ProcessRunOutput, ProcessRunError, Exclude<R, Scope.Scope>> {
+  const scopedEffect = effect.pipe(Effect.scoped);
+  if (input.timeout === null) {
+    return scopedEffect;
+  }
+
   const timeout = Duration.fromInputUnsafe(input.timeout ?? DEFAULT_TIMEOUT);
   const timeoutBehavior = input.timeoutBehavior ?? "error";
 
-  return effect.pipe(
-    Effect.scoped,
+  return scopedEffect.pipe(
     Effect.timeoutOption(timeout),
     Effect.flatMap((result) => {
       if (Option.isSome(result)) {
@@ -332,22 +336,20 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
     );
 
   const stdin = input.stdin;
-  const writeStdin =
-    stdin === undefined
-      ? Effect.void
-      : Stream.run(Stream.encodeText(Stream.make(stdin)), child.stdin).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ProcessStdinError({
-                command: input.command,
-                argumentCount: input.args.length,
-                cwd: input.cwd,
-                spawnCwd: input.spawnCwd,
-                stdinBytes: Buffer.byteLength(stdin),
-                cause,
-              }),
-          ),
-        );
+  const stdinStream = stdin === undefined ? Stream.empty : Stream.encodeText(Stream.make(stdin));
+  const writeStdin = Stream.run(stdinStream, child.stdin).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ProcessStdinError({
+          command: input.command,
+          argumentCount: input.args.length,
+          cwd: input.cwd,
+          spawnCwd: input.spawnCwd,
+          stdinBytes: stdin === undefined ? 0 : Buffer.byteLength(stdin),
+          cause,
+        }),
+    ),
+  );
 
   const [stdout, stderr] = yield* Effect.all(
     [

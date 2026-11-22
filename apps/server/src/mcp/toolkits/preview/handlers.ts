@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import type {
+  DesktopPreviewBrowserProfile,
   PreviewAutomationOperation,
   PreviewAutomationOpenInput,
   PreviewAutomationRecordingArtifact,
@@ -13,7 +14,17 @@ import type {
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
-import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
+import {
+  type PreviewBrowserProfileDeleteResult,
+  type PreviewBrowserProfileListResult,
+  type PreviewBrowserProfileProxyResult,
+  type PreviewBrowserProfileSelectResult,
+  type PreviewBrowserTabCloseResult,
+  type PreviewBrowserTabsResult,
+  PreviewSnapshotToolkit,
+  PreviewStandardToolkit,
+  PreviewToolkit,
+} from "./tools.ts";
 
 /**
  * Collapses the `show` alias onto `open` and defaults tab reuse.
@@ -69,6 +80,26 @@ const invokeTargeted = <A>(
 
 const handlers = {
   preview_status: (input) => invokeTargeted<PreviewAutomationStatus>("status", input ?? {}),
+  preview_browser_profiles: () =>
+    invoke<PreviewBrowserProfileListResult>("browserProfilesList", {}),
+  preview_browser_profile_create: (input) =>
+    invoke<DesktopPreviewBrowserProfile>("browserProfileCreate", input),
+  preview_browser_profile_rename: (input) =>
+    invoke<DesktopPreviewBrowserProfile>("browserProfileRename", input),
+  preview_browser_profile_delete: (input) =>
+    invoke<PreviewBrowserProfileDeleteResult>("browserProfileDelete", input),
+  preview_browser_profile_select: (input) =>
+    invokeTargeted<PreviewBrowserProfileSelectResult>("browserProfileSelect", input),
+  preview_browser_profile_proxy: (input) =>
+    invoke<PreviewBrowserProfileProxyResult>("browserProfileProxy", input),
+  preview_tabs: () => invoke<PreviewBrowserTabsResult>("tabsList", {}),
+  preview_tab_close: (input) =>
+    invokeTargeted<PreviewBrowserTabCloseResult>("tabClose", input ?? {}),
+  preview_back: (input) => invokeTargeted<PreviewAutomationStatus>("back", input, input.timeoutMs),
+  preview_forward: (input) =>
+    invokeTargeted<PreviewAutomationStatus>("forward", input, input.timeoutMs),
+  preview_reload: (input) =>
+    invokeTargeted<PreviewAutomationStatus>("reload", input, input.timeoutMs),
   preview_open: (input) =>
     invokeTargeted<PreviewAutomationStatus>("open", normalizePreviewOpenInput(input)),
   preview_navigate: (input) =>
@@ -84,7 +115,9 @@ const handlers = {
   preview_press: (input) => invokeTargeted<void>("press", input).pipe(Effect.as({})),
   preview_scroll: (input) => invokeTargeted<void>("scroll", input).pipe(Effect.as({})),
   preview_evaluate: (input) =>
-    invokeTargeted<unknown>("evaluate", input).pipe(Effect.map((result) => result ?? null)),
+    invokeTargeted<unknown>("evaluate", input).pipe(
+      Effect.map((result) => ({ value: result ?? null })),
+    ),
   preview_wait_for: (input) =>
     invokeTargeted<void>("waitFor", input, input.timeoutMs).pipe(Effect.as({})),
   preview_recording_start: (input) =>

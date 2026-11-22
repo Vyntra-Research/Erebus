@@ -40,6 +40,7 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 
 import type { CoagentToolControllerShape } from "../../coagents/Services/CoagentToolController.ts";
 import { ServerConfig } from "../../config.ts";
+import type { ResearchToolControllerShape } from "../../research/Services/ResearchToolController.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
@@ -370,6 +371,8 @@ validationLayer("CodexAdapterLive validation", (it) => {
         serviceTier: "priority",
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
+        browserToolsAvailable: false,
+        webToolsAvailable: false,
       });
     }),
   );
@@ -384,12 +387,24 @@ const standaloneCoagentController: CoagentToolControllerShape = {
       contentItems: [{ type: "inputText", text: "ok" }],
     }),
 };
+const standaloneResearchContexts: Array<Parameters<ResearchToolControllerShape["handle"]>[0]> = [];
+const standaloneResearchController: ResearchToolControllerShape = {
+  principalInstructions: () => Effect.succeed("Research instructions are available."),
+  handle: (context) => {
+    standaloneResearchContexts.push(context);
+    return Effect.succeed({
+      success: true,
+      contentItems: [{ type: "inputText", text: "research-ok" }],
+    });
+  },
+};
 const standaloneCoagentLayer = it.layer(
   Layer.effect(
     CodexAdapter,
     makeCodexAdapter(decodeCodexSettings({}), {
       makeRuntime: standaloneCoagentRuntimeFactory.factory,
       coagentToolController: standaloneCoagentController,
+      researchToolController: standaloneResearchController,
     }),
   ).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
@@ -400,8 +415,9 @@ const standaloneCoagentLayer = it.layer(
 );
 
 standaloneCoagentLayer("CodexAdapterLive standalone co-agents", (it) => {
-  it.effect("exposes co-agent tools without a project", () =>
+  it.effect("exposes research and co-agent tools without a project", () =>
     Effect.gen(function* () {
+      standaloneResearchContexts.length = 0;
       const adapter = yield* CodexAdapter;
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
@@ -413,14 +429,36 @@ standaloneCoagentLayer("CodexAdapterLive standalone co-agents", (it) => {
       NodeAssert.ok(runtime);
       NodeAssert.deepStrictEqual(
         runtime.options.dynamicTools?.map((tool) => tool.name),
-        ["threads"],
+        ["research", "threads"],
       );
+      const handleDynamicTool = runtime.options.handleDynamicTool;
+      NodeAssert.ok(handleDynamicTool);
+      NodeAssert.deepStrictEqual(
+        yield* handleDynamicTool({
+          namespace: "research",
+          tool: "calculate_cvss",
+          arguments: { vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L" },
+          callId: "standalone-cvss",
+          threadId: "provider-thread-1",
+          turnId: "standalone-turn",
+        }),
+        {
+          success: true,
+          contentItems: [{ type: "inputText", text: "research-ok" }],
+        },
+      );
+      NodeAssert.deepStrictEqual(standaloneResearchContexts, [
+        {
+          projectId: null,
+          threadId: asThreadId("standalone-coagent-thread"),
+          cwd: process.cwd(),
+        },
+      ]);
       const getAdditionalDeveloperInstructions = runtime.options.getAdditionalDeveloperInstructions;
       NodeAssert.ok(getAdditionalDeveloperInstructions);
-      NodeAssert.match(
-        yield* getAdditionalDeveloperInstructions(),
-        /standalone co-agent coordination/i,
-      );
+      const instructions = yield* getAdditionalDeveloperInstructions();
+      NodeAssert.match(instructions, /research instructions are available/i);
+      NodeAssert.match(instructions, /standalone co-agent coordination/i);
     }),
   );
 });
@@ -715,6 +753,53 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("attaches the scoped web toolkit without claiming browser controls", () => {
+    const runtimeFactory = makeRuntimeFactory();
+    const threadId = asThreadId("session-web-runtime");
+    const layer = Layer.effect(
+      CodexAdapter,
+      makeCodexAdapter(decodeCodexSettings({}), { makeRuntime: runtimeFactory.factory }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("web-environment"),
+        threadId,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerSessionId: "web-session",
+        endpoint: "http://127.0.0.1:12345/mcp",
+        previewEnabled: false,
+        webEnabled: true,
+        authorizationHeader: "Bearer web-test-credential",
+      });
+      try {
+        const adapter = yield* CodexAdapter;
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId,
+          runtimeMode: "full-access",
+        });
+
+        const runtime = runtimeFactory.lastRuntime;
+        NodeAssert.ok(runtime);
+        NodeAssert.equal(runtime.options.browserToolsAvailable, false);
+        NodeAssert.equal(runtime.options.webToolsAvailable, true);
+        NodeAssert.ok(
+          runtime.options.appServerArgs?.includes(
+            "mcp_servers.t3-code.url=http://127.0.0.1:12345/mcp",
+          ),
+        );
+      } finally {
+        McpProviderSession.clearMcpProviderSession(threadId);
+      }
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect(
     "configures current Judge fallback and injects transport guidance on every recovered turn",
     () => {
@@ -760,7 +845,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
           );
           NodeAssert.equal(
             runtime.options.appServerArgs?.some((arg) => arg.startsWith("mcp_servers.t3-code.")),
-            false,
+            true,
           );
           NodeAssert.ok(runtime.options.getAdditionalDeveloperInstructions);
           for (let i = 0; i < 2; i++) {

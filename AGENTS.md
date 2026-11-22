@@ -1,8 +1,8 @@
 # Erebus
 
-Erebus is a local, Codex-first research harness based on T3 Code. A Node WebSocket server wraps provider CLIs and serves the web and desktop clients. Erebus keeps durable research heuristics in the agent context, coordinates parallel tasks, and sends finished findings to an independent Judge.
+Erebus is a local research harness for Codex and OpenCode based on T3 Code. A Node WebSocket server wraps provider runtimes and serves the web and desktop clients. Erebus keeps durable research heuristics in the agent context, coordinates parallel tasks, and sends finished findings to an independent Judge.
 
-The current Erebus release targets Windows and x64 Linux desktops with local Codex use. The inherited macOS, mobile, relay, hosted-app, and other provider surfaces remain in the tree but are not enabled until Erebus tests and publishes them.
+The current Erebus release targets Windows and x64 Linux desktops with local Codex and OpenCode use. The inherited macOS, mobile, relay, hosted-app, and other provider surfaces remain in the tree but are not enabled until Erebus tests and publishes them.
 
 ## Product rules
 
@@ -22,7 +22,7 @@ Erebus does not own goals or campaign state. Use the native Codex goal for visib
 
 ### 4. Isolated local state
 
-Erebus uses its own application data and Codex home. Never point tests or development servers at a live Codex desktop profile. Erebus may expose a managed, read-only Proteus history bridge, but it must not install Proteus research skills or allow Proteus state changes.
+Erebus uses its own application data and Codex home. Never point tests or development servers at a live Codex desktop profile.
 
 ### 5. Preserve the upstream architecture
 
@@ -46,7 +46,7 @@ We need to be on the same page with terminology. When communicating, use this la
 - **we, us, and maintainers** mean Vyntra Research and Erebus contributors.
 - **user** means the person using Erebus to direct coding agents.
 - **agent** means the coding agent a user runs inside Erebus. Depending on context, that may also include you.
-- **provider** means the agent runtime Erebus talks to. Codex is the supported provider.
+- **provider** means the agent runtime Erebus talks to. Codex and OpenCode are supported providers.
 - **client** means the web UI or the desktop app that embeds it. Mobile remains dormant inherited code.
 - **environment** means one running T3 server and the machine, filesystem, provider credentials, and state it owns.
 - **project** means an environment-local workspace record rooted at a directory.
@@ -66,7 +66,7 @@ The most common defect in this repo is a change that works on the path you teste
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
 - **Clients.** Web owns the interface; desktop wraps it and adds Electron shell and IPC behavior. Shared logic belongs in `packages/client-runtime`. Touch mobile only when a task explicitly activates that dormant surface.
-- **Providers.** Codex is the product surface. Do not spend work extending inherited Claude, Cursor, Grok, or OpenCode adapters unless a task explicitly enables one.
+- **Providers.** Codex and OpenCode are product surfaces. Do not spend work extending inherited Claude, Cursor, or Grok adapters unless a task explicitly enables one.
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, and desktop all follow. Keep inherited clients compiling when the shared contract still reaches them.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** The release is local. Multi-device thread sync is real, but hosted relay, remote environments, and tunnels remain dormant.

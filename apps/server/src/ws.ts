@@ -51,7 +51,7 @@ import {
   type ServerSelfUpdateError,
   type ServerSelfUpdateProgressEvent,
   ServerArgosError,
-  ServerProteusError,
+  ServerModuleError,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
   AssetWorkspaceContextNotFoundError,
@@ -66,12 +66,14 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import * as WebRuntimeContract from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import { getArgosStatus, updateArgos } from "./argosMaintenance.ts";
+import { getModulesStatus, updateModule } from "./pentestModules/maintenance.ts";
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -98,7 +100,6 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
-import { getProteusStatus, updateProteus } from "./proteusMaintenance.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -127,6 +128,13 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as ThreadSync from "./threadSync/ThreadSyncService.ts";
+import * as WebRuntimeClient from "./webRuntime/WebRuntimeClient.ts";
+import * as MicroVmRuntime from "./microVm/MicroVmRuntime.ts";
+import {
+  decodeWebRuntimeResponse,
+  webRuntimeRequestPath,
+  webRuntimeRpcFailure,
+} from "./webRuntime/WebRuntimeBridge.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -543,7 +551,54 @@ const makeWsRpcLayer = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
       const threadSync = yield* ThreadSync.ThreadSyncService;
+      const webRuntime = Option.getOrElse(
+        yield* Effect.serviceOption(WebRuntimeClient.WebRuntimeClient),
+        () =>
+          WebRuntimeClient.WebRuntimeClient.of({
+            health: Effect.succeed({
+              status: "disabled",
+              connection: Option.none(),
+              lastError: Option.none(),
+              restartCount: 0,
+            }),
+            connection: Effect.fail(
+              new WebRuntimeClient.WebRuntimeUnavailable({
+                message: "Web runtime is not installed.",
+              }),
+            ),
+            requestJson: () =>
+              Effect.fail(
+                new WebRuntimeClient.WebRuntimeUnavailable({
+                  message: "Web runtime is not installed.",
+                }),
+              ),
+            requestText: () =>
+              Effect.fail(
+                new WebRuntimeClient.WebRuntimeUnavailable({
+                  message: "Web runtime is not installed.",
+                }),
+              ),
+          }),
+      );
       const relayClient = yield* RelayClient.RelayClient;
+      const requestWebRuntimeJson = <A>(
+        operation: string,
+        schema: Schema.Decoder<A, never>,
+        path: string,
+        request?: WebRuntimeClient.WebRuntimeRequest,
+      ): Effect.Effect<A, WebRuntimeContract.WebRuntimeRpcError> =>
+        webRuntime.requestJson(path, request).pipe(
+          Effect.mapError((error) => webRuntimeRpcFailure(operation, error)),
+          Effect.flatMap((value) => decodeWebRuntimeResponse(operation, schema, value)),
+        );
+      const requestWebRuntimeText = (
+        operation: string,
+        path: string,
+        request?: WebRuntimeClient.WebRuntimeRequest,
+      ): Effect.Effect<string, WebRuntimeContract.WebRuntimeRpcError> =>
+        webRuntime
+          .requestText(path, request)
+          .pipe(Effect.mapError((error) => webRuntimeRpcFailure(operation, error)));
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -1619,6 +1674,388 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.webRuntimeGetStatus]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeGetStatus,
+            webRuntime.health.pipe(
+              Effect.map((health) => {
+                const connection = Option.getOrNull(health.connection);
+                return {
+                  status: health.status,
+                  protocolVersion: connection?.protocolVersion ?? null,
+                  schemaVersion: connection?.schemaVersion ?? null,
+                  lastError: Option.getOrNull(health.lastError),
+                  restartCount: health.restartCount,
+                };
+              }),
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeListSessions]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeListSessions,
+            requestWebRuntimeJson(
+              "list sessions",
+              Schema.Array(WebRuntimeContract.WebRuntimeCaptureSession),
+              "/v1/sessions",
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeCreateSession]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeCreateSession,
+            Effect.gen(function* () {
+              const proxy = input.proxy ?? true;
+              const session = yield* requestWebRuntimeJson(
+                "create session",
+                WebRuntimeContract.WebRuntimeCaptureSession,
+                webRuntimeRequestPath("/v1/sessions", { proxy }),
+                {
+                  method: "POST",
+                  body: {
+                    label: input.label,
+                    source: input.source ?? "mixed",
+                    ...(input.scopeProfileId === undefined
+                      ? {}
+                      : { scopeProfileId: input.scopeProfileId }),
+                    ...(input.upstreamTls === undefined ? {} : { upstreamTls: input.upstreamTls }),
+                  },
+                },
+              );
+              if (!proxy || session.proxy === null) {
+                return { session, caPem: null };
+              }
+              const caPem = yield* requestWebRuntimeText("read capture CA", "/v1/proxy/ca").pipe(
+                Effect.tapError(() =>
+                  webRuntime
+                    .requestJson(`/v1/sessions/${encodeURIComponent(session.id)}/end`, {
+                      method: "POST",
+                    })
+                    .pipe(Effect.ignore),
+                ),
+              );
+              return { session, caPem };
+            }),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeCreateExtensionPairing]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeCreateExtensionPairing,
+            Effect.gen(function* () {
+              const pairing = yield* requestWebRuntimeJson(
+                "create extension pairing",
+                WebRuntimeContract.WebRuntimeExtensionPairingToken,
+                `/v1/sessions/${encodeURIComponent(input.sessionId)}/pairing`,
+                { method: "POST" },
+              );
+              const connection = yield* webRuntime.connection.pipe(
+                Effect.mapError((error) => webRuntimeRpcFailure("create extension pairing", error)),
+              );
+              return {
+                serverUrl: connection.baseUrl,
+                sessionId: input.sessionId,
+                token: pairing.token,
+              };
+            }),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeEndSession]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeEndSession,
+            requestWebRuntimeJson(
+              "end session",
+              WebRuntimeContract.WebRuntimeCaptureSession,
+              `/v1/sessions/${encodeURIComponent(input.id)}/end`,
+              { method: "POST" },
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeDeleteSession]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeDeleteSession,
+            requestWebRuntimeJson(
+              "delete session",
+              WebRuntimeContract.WebRuntimeSessionDeleteResult,
+              `/v1/sessions/${encodeURIComponent(input.id)}`,
+              { method: "DELETE" },
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeStartProxy]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeStartProxy,
+            Effect.gen(function* () {
+              const session = yield* requestWebRuntimeJson(
+                "start capture proxy",
+                WebRuntimeContract.WebRuntimeCaptureSession,
+                `/v1/sessions/${encodeURIComponent(input.id)}/proxy/start`,
+                {
+                  method: "POST",
+                  ...(input.upstreamTls === undefined
+                    ? {}
+                    : { body: { upstreamTls: input.upstreamTls } }),
+                },
+              );
+              const caPem = yield* requestWebRuntimeText("read capture CA", "/v1/proxy/ca").pipe(
+                Effect.tapError(() =>
+                  webRuntime
+                    .requestJson(`/v1/sessions/${encodeURIComponent(input.id)}/proxy/stop`, {
+                      method: "POST",
+                    })
+                    .pipe(Effect.ignore),
+                ),
+              );
+              return { session, caPem };
+            }),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeStopProxy]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeStopProxy,
+            requestWebRuntimeJson(
+              "stop capture proxy",
+              WebRuntimeContract.WebRuntimeCaptureSession,
+              `/v1/sessions/${encodeURIComponent(input.id)}/proxy/stop`,
+              { method: "POST" },
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeListScopes]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeListScopes,
+            requestWebRuntimeJson(
+              "list scopes",
+              Schema.Array(WebRuntimeContract.WebRuntimeScopeProfile),
+              "/v1/scope",
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeGetScope]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeGetScope,
+            requestWebRuntimeJson(
+              "read scope",
+              WebRuntimeContract.WebRuntimeScopeProfile,
+              `/v1/scope/${encodeURIComponent(input.id)}`,
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeSaveScope]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeSaveScope,
+            requestWebRuntimeJson(
+              "save scope",
+              WebRuntimeContract.WebRuntimeScopeSaved,
+              "/v1/scope",
+              { method: "POST", body: input },
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeUpdateScope]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeUpdateScope,
+            requestWebRuntimeJson(
+              "update scope",
+              WebRuntimeContract.WebRuntimeScopeProfile,
+              `/v1/scope/${encodeURIComponent(input.id)}`,
+              { method: "PUT", body: { name: input.name, rules: input.rules } },
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeDeleteScope]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeDeleteScope,
+            requestWebRuntimeText("delete scope", `/v1/scope/${encodeURIComponent(input.id)}`, {
+              method: "DELETE",
+            }).pipe(Effect.as({})),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeListTraffic]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeListTraffic,
+            requestWebRuntimeJson(
+              "list traffic",
+              WebRuntimeContract.WebRuntimeTrafficPage,
+              webRuntimeRequestPath("/v1/traffic", {
+                sessionId: input.sessionId,
+                cursor: input.cursor,
+                limit: input.limit,
+                host: input.host,
+                method: input.method,
+                path: input.path,
+                status: input.status,
+                scope: input.scope,
+                text: input.text,
+              }),
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeGetExchange]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeGetExchange,
+            requestWebRuntimeJson(
+              "read exchange",
+              WebRuntimeContract.WebRuntimeExchangeDetail,
+              `/v1/traffic/${encodeURIComponent(input.id)}`,
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeReadBody]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeReadBody,
+            requestWebRuntimeJson(
+              "read captured body",
+              WebRuntimeContract.WebRuntimeBodyContent,
+              `/v1/bodies/${encodeURIComponent(input.hash)}`,
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeListWebSockets]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeListWebSockets,
+            requestWebRuntimeJson(
+              "list WebSocket traffic",
+              WebRuntimeContract.WebRuntimeWebSocketPage,
+              webRuntimeRequestPath("/v1/websockets", {
+                sessionId: input.sessionId,
+                connectionId: input.connectionId,
+                cursor: input.cursor,
+                limit: input.limit,
+                url: input.url,
+                kind: input.kind,
+                direction: input.direction,
+                opcode: input.opcode,
+                scope: input.scope,
+                text: input.text,
+              }),
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeGetWebSocket]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeGetWebSocket,
+            requestWebRuntimeJson(
+              "read WebSocket event",
+              WebRuntimeContract.WebRuntimeWebSocketEventDetail,
+              `/v1/websockets/${encodeURIComponent(input.id)}`,
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeListGaps]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeListGaps,
+            requestWebRuntimeJson(
+              "list capture gaps",
+              Schema.Array(WebRuntimeContract.WebRuntimeCaptureGap),
+              webRuntimeRequestPath("/v1/gaps", {
+                sessionId: input.sessionId,
+                limit: input.limit,
+              }),
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeGetMap]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeGetMap,
+            requestWebRuntimeJson(
+              "read web map",
+              WebRuntimeContract.WebRuntimeGraphPage,
+              webRuntimeRequestPath("/v1/map", {
+                sessionId: input.sessionId,
+                kind: input.kind,
+                text: input.text,
+                limit: input.limit,
+                scope: input.scope,
+                inScopeOnly: input.inScopeOnly,
+              }),
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeGetNeighborhood]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeGetNeighborhood,
+            requestWebRuntimeJson(
+              "read web map neighborhood",
+              WebRuntimeContract.WebRuntimeGraphNeighborhood,
+              webRuntimeRequestPath(`/v1/map/${encodeURIComponent(input.id)}`, {
+                sessionId: input.sessionId,
+                scope: input.scope,
+                inScopeOnly: input.inScopeOnly,
+              }),
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeListAnnotations]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeListAnnotations,
+            requestWebRuntimeJson(
+              "list annotations",
+              Schema.Array(WebRuntimeContract.WebRuntimeAnnotation),
+              webRuntimeRequestPath("/v1/annotations", {
+                targetType: input.targetType,
+                targetId: input.targetId,
+                limit: input.limit,
+              }),
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeGetAnnotation]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeGetAnnotation,
+            requestWebRuntimeJson(
+              "read annotation",
+              WebRuntimeContract.WebRuntimeAnnotation,
+              `/v1/annotations/${encodeURIComponent(input.id)}`,
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeAnnotate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeAnnotate,
+            requestWebRuntimeJson(
+              "annotate web evidence",
+              WebRuntimeContract.WebRuntimeAnnotation,
+              "/v1/annotations",
+              { method: "POST", body: input },
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeUpdateAnnotation]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeUpdateAnnotation,
+            requestWebRuntimeJson(
+              "update annotation",
+              WebRuntimeContract.WebRuntimeAnnotation,
+              `/v1/annotations/${encodeURIComponent(input.id)}`,
+              { method: "PATCH", body: { body: input.body, tags: input.tags ?? [] } },
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeDeleteAnnotation]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeDeleteAnnotation,
+            requestWebRuntimeText(
+              "delete annotation",
+              `/v1/annotations/${encodeURIComponent(input.id)}`,
+              { method: "DELETE" },
+            ).pipe(Effect.as({})),
+            { "rpc.aggregate": "webRuntime" },
+          ),
+        [WS_METHODS.webRuntimeReplay]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.webRuntimeReplay,
+            requestWebRuntimeJson(
+              "replay request",
+              WebRuntimeContract.WebRuntimeReplayResult,
+              "/v1/replay",
+              {
+                method: "POST",
+                body: input,
+                timeoutMs: Math.min(125_000, Math.max(35_000, (input.timeoutMs ?? 30_000) + 5_000)),
+              },
+            ),
+            { "rpc.aggregate": "webRuntime" },
+          ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
@@ -1678,28 +2115,88 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "server" },
           ),
-        [WS_METHODS.serverGetProteusStatus]: (_input) =>
-          observeRpcEffect(WS_METHODS.serverGetProteusStatus, getProteusStatus(config.stateDir), {
-            "rpc.aggregate": "server",
-          }),
-        [WS_METHODS.serverUpdateProteus]: (_input) =>
+        [WS_METHODS.serverGetModulesStatus]: (_input) =>
           observeRpcEffect(
-            WS_METHODS.serverUpdateProteus,
-            Effect.gen(function* () {
-              const settings = yield* serverSettings.getSettings.pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ServerProteusError({
-                      operation: "update",
-                      detail: "Erebus could not read its settings before updating Proteus.",
-                      cause,
-                    }),
+            WS_METHODS.serverGetModulesStatus,
+            serverSettings.getSettings.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ServerModuleError({
+                    module: "argos",
+                    operation: "status",
+                    detail: "Erebus could not read its settings before listing modules.",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((settings) => getModulesStatus(config.stateDir, settings)),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverUpdateModule]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUpdateModule,
+            serverSettings.getSettings.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ServerModuleError({
+                    module: input.id,
+                    operation: "update",
+                    detail: "Erebus could not read its settings before updating the module.",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((settings) => updateModule(config.stateDir, settings, input.id)),
+              Effect.tap(() => (input.id === "argos" ? providerRegistry.refresh() : Effect.void)),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverListMicroVms]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverListMicroVms,
+            MicroVmRuntime.make(config.stateDir).pipe(
+              Effect.flatMap((microVms) =>
+                microVms.list().pipe(
+                  Effect.map((sandboxes) => ({
+                    sandboxes,
+                    home: microVms.home,
+                    backend: "microsandbox" as const,
+                  })),
                 ),
-              );
-              const result = yield* updateProteus(config.stateDir, settings);
-              yield* providerRegistry.refresh();
-              return result;
-            }),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverCreateMicroVm]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverCreateMicroVm,
+            MicroVmRuntime.make(config.stateDir).pipe(
+              Effect.flatMap((microVms) => microVms.create(input)),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverControlMicroVm]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverControlMicroVm,
+            MicroVmRuntime.make(config.stateDir).pipe(
+              Effect.flatMap((microVms) => microVms.control(input)),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverModifyMicroVm]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverModifyMicroVm,
+            MicroVmRuntime.make(config.stateDir).pipe(
+              Effect.flatMap((microVms) => microVms.modify(input)),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverRemoveMicroVm]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverRemoveMicroVm,
+            MicroVmRuntime.make(config.stateDir).pipe(
+              Effect.flatMap((microVms) => microVms.remove(input)),
+              Effect.as({ removed: true }),
+            ),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverUpdateServer]: (input) =>

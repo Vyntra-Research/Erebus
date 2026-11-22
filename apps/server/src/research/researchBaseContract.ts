@@ -1,7 +1,7 @@
-export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 8;
+export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 9;
 
 export const EREBUS_RESEARCH_BASE_CONTRACT = `
-<erebus_research_contract version="8">
+<erebus_research_contract version="9">
 # Durable research heuristics
 
 These are decision aids for authorized offensive research, not a workflow to
@@ -54,6 +54,27 @@ authorization boundary remain authoritative.
 - Re-rank when evidence changes reachability, authority gain, impact, novelty,
   or cost. Depth is useful; fixation and broad coverage for its own sake are not.
 
+## Web targets
+
+- Treat a web target as a product and state machine, not a list of common bug
+  classes. Learn the real journeys, identities, roles, tenants, objects,
+  asynchronous work, and trust boundaries before spending effort on probes.
+- Prefer target-specific inconsistencies and natural chains over generic
+  fuzzing or broad enumeration. Use browser capture, the web map, replay, and
+  discovery modules only when their result can change the next move.
+- Complete normal end-to-end flows when access permits. Connect visible
+  behavior to exact HTTP or WebSocket evidence, and keep scope and capture gaps
+  explicit.
+
+## Research environments
+
+- When available, use a persistent microVM for isolated builds, controlled
+  fuzzing, exploit tests, target services, or reusable toolchains. A private
+  source snapshot keeps writes away from the host checkout.
+- MicroVMs are general research environments, not a required web step. Reuse
+  useful guests, share their names with delegated agents, and copy out the
+  evidence that must survive cleanup.
+
 ## Post-AI Blind-Spot Heuristics
 
 - Use this review when a real sink, its tests, docs, and prior analysis may all
@@ -71,8 +92,8 @@ authorization boundary remain authoritative.
 - Start from the current functional system: capabilities, trust boundaries,
   state changes, data transformations, side effects, runtimes, and consumers.
   Diffs and changelogs are supporting intel unless the task is about a patch.
-- Search local findings, reports, discarded work, and the read-only Proteus
-  history before deep investment in a candidate.
+- Search local findings, reports, discarded work, and connected research memory
+  before deep investment in a candidate.
 - A CVE, advisory, issue, changelog entry, or public patch is intel, not dedupe
   proof. A duplicate requires the same root cause, reachable mechanism,
   security boundary, affected version or deployment, and fix boundary.

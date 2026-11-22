@@ -319,6 +319,33 @@ describe("runProcess", () => {
     }),
   );
 
+  it.effect("closes stdin when no input was supplied", () =>
+    Effect.gen(function* () {
+      let stdinClosed = false;
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeHandle({
+            stdin: Sink.drain.pipe(
+              Sink.ensuring(
+                Effect.sync(() => {
+                  stdinClosed = true;
+                }),
+              ),
+            ),
+          }),
+        ),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["stdin-eof"],
+      });
+
+      expect(result.code).toBe(0);
+      expect(stdinClosed).toBe(true);
+    }),
+  );
+
   it.effect("returns output for non-zero exit codes", () =>
     Effect.gen(function* () {
       const spawner = makeSpawner(() => Effect.succeed(makeHandle({ stderr: "boom", code: 2 })));
@@ -397,6 +424,32 @@ describe("runProcess", () => {
         stdoutTruncated: false,
         stderrTruncated: false,
       });
+    }),
+  );
+
+  it.effect("runs without a deadline when timeout is null", () =>
+    Effect.gen(function* () {
+      const exit = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeHandle({
+            exitCode: Deferred.await(exit),
+          }),
+        ),
+      );
+      const fiber = yield* runWith(spawner)({
+        command: "fake",
+        args: ["long-run"],
+        timeout: null,
+      }).pipe(Effect.forkScoped);
+
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.hours(24));
+      expect(fiber.pollUnsafe()).toBeUndefined();
+
+      yield* Deferred.succeed(exit, ChildProcessSpawner.ExitCode(0));
+      const result = yield* Fiber.join(fiber);
+      expect(result).toMatchObject({ code: 0, timedOut: false });
     }),
   );
 });

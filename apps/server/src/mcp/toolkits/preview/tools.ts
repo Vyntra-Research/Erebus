@@ -1,4 +1,7 @@
 import {
+  DesktopPreviewBrowserProfileIdSchema,
+  DesktopPreviewBrowserProfileSchema,
+  DesktopPreviewProxyConfigurationSchema,
   PreviewAutomationClickInput,
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
@@ -17,6 +20,7 @@ import {
   PreviewAutomationTabTargetInput,
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
+  PreviewTabId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
@@ -32,6 +36,123 @@ const dependencies = [
 const PreviewActionResult = Schema.Record(Schema.String, Schema.Never).annotate({
   description: "The preview action completed successfully.",
 });
+
+/*
+ * Keep the selector as a nested union. Effect filters validate flat optional
+ * fields at runtime but cannot advertise the exclusive choice to MCP clients.
+ */
+const BrowserProfileSelector = Schema.Union([
+  Schema.Struct({
+    profileId: DesktopPreviewBrowserProfileIdSchema.annotate({
+      description: "Exact browser session id. Prefer this stable selector.",
+    }),
+  }),
+  Schema.Struct({
+    profileName: Schema.String.annotate({
+      description: "Browser session name. Matching is case-insensitive and must be unique.",
+    }),
+  }),
+]).annotate({
+  description:
+    "Browser session selector. Use profileId when it is available, otherwise profileName.",
+});
+
+const BrowserProfileSelectorField = {
+  profile: BrowserProfileSelector,
+};
+
+export const PreviewBrowserProfileListInput = Schema.Record(Schema.String, Schema.Never).annotate({
+  description: "No input is required.",
+});
+export const PreviewBrowserProfileListResult = Schema.Struct({
+  profiles: Schema.Array(DesktopPreviewBrowserProfileSchema),
+});
+export type PreviewBrowserProfileListResult = typeof PreviewBrowserProfileListResult.Type;
+
+export const PreviewBrowserProfileCreateInput = Schema.Struct({
+  name: Schema.String.annotate({ description: "Name for the isolated browser session." }),
+});
+
+export const PreviewBrowserProfileRenameInput = Schema.Struct({
+  ...BrowserProfileSelectorField,
+  name: Schema.String.annotate({ description: "New browser session name." }),
+});
+
+export const PreviewBrowserProfileDeleteInput = Schema.Struct({
+  ...BrowserProfileSelectorField,
+});
+
+export const PreviewBrowserProfileSelectInput = Schema.Struct({
+  ...BrowserProfileSelectorField,
+  tabId: Schema.optional(
+    PreviewTabId.annotate({
+      description: "Exact collaborative browser tab. Omit to use the current tab.",
+    }),
+  ).annotate({ description: "Exact collaborative browser tab. Omit to use the current tab." }),
+});
+export const PreviewBrowserProfileSelectResult = Schema.Struct({
+  profile: DesktopPreviewBrowserProfileSchema,
+  tabId: Schema.NullOr(PreviewTabId),
+});
+export type PreviewBrowserProfileSelectResult = typeof PreviewBrowserProfileSelectResult.Type;
+
+export const PreviewBrowserProfileProxyInput = Schema.Struct({
+  ...BrowserProfileSelectorField,
+  proxy: Schema.NullOr(DesktopPreviewProxyConfigurationSchema).annotate({
+    description: "Validated loopback capture proxy configuration, or null to remove it.",
+  }),
+});
+export const PreviewBrowserProfileProxyResult = Schema.Struct({
+  profileId: DesktopPreviewBrowserProfileIdSchema,
+  configured: Schema.Boolean,
+});
+export type PreviewBrowserProfileProxyResult = typeof PreviewBrowserProfileProxyResult.Type;
+
+export const PreviewBrowserProfileDeleteResult = Schema.Struct({
+  deletedProfileId: DesktopPreviewBrowserProfileIdSchema,
+});
+export type PreviewBrowserProfileDeleteResult = typeof PreviewBrowserProfileDeleteResult.Type;
+
+const PreviewBrowserTabTargetFields = {
+  tabId: Schema.optional(
+    PreviewTabId.annotate({
+      description: "Exact collaborative browser tab. Omit to use the current tab.",
+    }),
+  ).annotate({ description: "Exact collaborative browser tab. Omit to use the current tab." }),
+};
+const PreviewBrowserNavigationHistoryInput = Schema.Struct({
+  ...PreviewBrowserTabTargetFields,
+  timeoutMs: Schema.optional(
+    Schema.Int.check(Schema.isGreaterThan(0))
+      .check(Schema.isLessThanOrEqualTo(60_000))
+      .annotate({ description: "Maximum wait in milliseconds. Defaults to 15000." }),
+  ).annotate({ description: "Maximum wait in milliseconds. Defaults to 15000." }),
+});
+
+export const PreviewBrowserTabsInput = Schema.Record(Schema.String, Schema.Never).annotate({
+  description: "No input is required.",
+});
+export const PreviewBrowserTabsResult = Schema.Struct({
+  tabs: Schema.Array(
+    Schema.Struct({
+      tabId: PreviewTabId,
+      active: Schema.Boolean,
+      url: Schema.NullOr(Schema.String),
+      title: Schema.NullOr(Schema.String),
+      loading: Schema.Boolean,
+      canGoBack: Schema.Boolean,
+      canGoForward: Schema.Boolean,
+    }),
+  ),
+});
+export type PreviewBrowserTabsResult = typeof PreviewBrowserTabsResult.Type;
+
+export const PreviewBrowserTabCloseInput = Schema.Struct(PreviewBrowserTabTargetFields);
+export const PreviewBrowserTabCloseResult = Schema.Struct({
+  closedTabId: PreviewTabId,
+  tabId: Schema.Null,
+});
+export type PreviewBrowserTabCloseResult = typeof PreviewBrowserTabCloseResult.Type;
 
 const browserTool = <T extends Tool.Any>(tool: T): T =>
   tool.annotate(Tool.OpenWorld, true).annotate(Tool.Destructive, true) as T;
@@ -55,10 +176,131 @@ export const PreviewStatusTool = Tool.make("preview_status", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
+export const PreviewBrowserProfilesListTool = readonlyBrowserTool(
+  Tool.make("preview_browser_profiles", {
+    description:
+      "List persistent browser sessions. Each profile has isolated cookies, storage, cache, service workers, and proxy settings.",
+    parameters: PreviewBrowserProfileListInput,
+    success: PreviewBrowserProfileListResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "List browser sessions"),
+);
+
+export const PreviewBrowserProfileCreateTool = safeBrowserTool(
+  Tool.make("preview_browser_profile_create", {
+    description: "Create an isolated persistent browser session.",
+    parameters: PreviewBrowserProfileCreateInput,
+    success: DesktopPreviewBrowserProfileSchema,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Create browser session"),
+);
+
+export const PreviewBrowserProfileRenameTool = safeBrowserTool(
+  Tool.make("preview_browser_profile_rename", {
+    description: "Rename a browser session selected by id or name.",
+    parameters: PreviewBrowserProfileRenameInput,
+    success: DesktopPreviewBrowserProfileSchema,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Rename browser session"),
+);
+
+export const PreviewBrowserProfileDeleteTool = browserTool(
+  Tool.make("preview_browser_profile_delete", {
+    description:
+      "Delete a non-default browser session and its cookies, storage, cache, service workers, and proxy route.",
+    parameters: PreviewBrowserProfileDeleteInput,
+    success: PreviewBrowserProfileDeleteResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Delete browser session"),
+);
+
+export const PreviewBrowserProfileSelectTool = safeBrowserTool(
+  Tool.make("preview_browser_profile_select", {
+    description:
+      "Select an isolated browser session for a collaborative tab. Pass tabId to target a known tab; omit it to use the agent session's current tab or the environment default when no tab exists.",
+    parameters: PreviewBrowserProfileSelectInput,
+    success: PreviewBrowserProfileSelectResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  })
+    .annotate(Tool.Title, "Select browser session")
+    .annotate(Tool.Idempotent, true),
+);
+
+export const PreviewBrowserProfileProxyTool = browserTool(
+  Tool.make("preview_browser_profile_proxy", {
+    description:
+      "Apply a validated loopback capture proxy and CA to one isolated browser session, or pass proxy=null to restore direct networking.",
+    parameters: PreviewBrowserProfileProxyInput,
+    success: PreviewBrowserProfileProxyResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Configure browser capture proxy"),
+);
+
+export const PreviewBrowserTabsTool = readonlyBrowserTool(
+  Tool.make("preview_tabs", {
+    description:
+      "List collaborative browser tabs for the current thread, including the active tab, URL, title, loading state, and history availability.",
+    parameters: PreviewBrowserTabsInput,
+    success: PreviewBrowserTabsResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "List browser tabs"),
+);
+
+export const PreviewBrowserTabCloseTool = browserTool(
+  Tool.make("preview_tab_close", {
+    description:
+      "Close a collaborative browser tab. Pass tabId for an exact tab or omit it to close the current tab.",
+    parameters: PreviewBrowserTabCloseInput,
+    success: PreviewBrowserTabCloseResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Close browser tab"),
+);
+
+export const PreviewBrowserBackTool = safeBrowserTool(
+  Tool.make("preview_back", {
+    description:
+      "Move a collaborative browser tab one entry back in its navigation history and wait for the page to load.",
+    parameters: PreviewBrowserNavigationHistoryInput,
+    success: PreviewAutomationStatus,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Go back in browser"),
+);
+
+export const PreviewBrowserForwardTool = safeBrowserTool(
+  Tool.make("preview_forward", {
+    description:
+      "Move a collaborative browser tab one entry forward in its navigation history and wait for the page to load.",
+    parameters: PreviewBrowserNavigationHistoryInput,
+    success: PreviewAutomationStatus,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Go forward in browser"),
+);
+
+export const PreviewBrowserReloadTool = safeBrowserTool(
+  Tool.make("preview_reload", {
+    description:
+      "Reload a collaborative browser tab and wait for the page to load. This uses the normal browser cache policy.",
+    parameters: PreviewBrowserNavigationHistoryInput,
+    success: PreviewAutomationStatus,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Reload browser tab"),
+);
+
 export const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Initialize a collaborative browser tab and open its thread-bound inline preview by default. Set open=false for background-only automation. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab.",
+      "Show this agent session's current collaborative browser tab in the thread-bound inline preview. open=true controls visibility and does not create another tab. Set open=false for background-only automation, pass tabId to reuse a specific tab, or set reuseExistingTab=false to create a new tab.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
     failure: PreviewAutomationError,
@@ -108,7 +350,7 @@ export const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = readonlyBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a page before interacting. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Returns page state, semantic elements, diagnostics, action history, and a PNG screenshot.",
+      "Inspect a page before interacting. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Returns page state, semantic elements, diagnostics, action history, and a PNG screenshot when capture is available.",
     parameters: PreviewAutomationTabTargetInput,
     success: PreviewAutomationSnapshot,
     failure: PreviewAutomationError,
@@ -165,7 +407,7 @@ export const PreviewEvaluateTool = browserTool(
     description:
       "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Returns a serializable result up to 64 KB; the expression may mutate page state.",
     parameters: PreviewAutomationEvaluateInput,
-    success: Schema.Unknown,
+    success: Schema.Struct({ value: Schema.Unknown }),
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Evaluate JavaScript in preview"),
@@ -206,6 +448,17 @@ export const PreviewRecordingStopTool = safeBrowserTool(
 
 export const PreviewToolkit = Toolkit.make(
   PreviewStatusTool,
+  PreviewBrowserProfilesListTool,
+  PreviewBrowserProfileCreateTool,
+  PreviewBrowserProfileRenameTool,
+  PreviewBrowserProfileDeleteTool,
+  PreviewBrowserProfileSelectTool,
+  PreviewBrowserProfileProxyTool,
+  PreviewBrowserTabsTool,
+  PreviewBrowserTabCloseTool,
+  PreviewBrowserBackTool,
+  PreviewBrowserForwardTool,
+  PreviewBrowserReloadTool,
   PreviewOpenTool,
   PreviewNavigateTool,
   PreviewResizeTool,
@@ -223,6 +476,17 @@ export const PreviewToolkit = Toolkit.make(
 
 export const PreviewStandardToolkit = Toolkit.make(
   PreviewStatusTool,
+  PreviewBrowserProfilesListTool,
+  PreviewBrowserProfileCreateTool,
+  PreviewBrowserProfileRenameTool,
+  PreviewBrowserProfileDeleteTool,
+  PreviewBrowserProfileSelectTool,
+  PreviewBrowserProfileProxyTool,
+  PreviewBrowserTabsTool,
+  PreviewBrowserTabCloseTool,
+  PreviewBrowserBackTool,
+  PreviewBrowserForwardTool,
+  PreviewBrowserReloadTool,
   PreviewOpenTool,
   PreviewNavigateTool,
   PreviewResizeTool,

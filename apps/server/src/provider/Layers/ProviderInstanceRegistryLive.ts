@@ -94,6 +94,24 @@ interface RegistryState {
 const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean =>
   Equal.equals(a, b);
 
+const selectSingleInstanceDrivers = <R>(
+  entries: ReadonlyArray<readonly [string, ProviderInstanceConfig]>,
+  driversById: ReadonlyMap<ProviderDriverKind, AnyProviderDriver<R>>,
+): ReadonlyMap<ProviderDriverKind, ProviderInstanceId> => {
+  const selected = new Map<ProviderDriverKind, ProviderInstanceId>();
+  for (const [rawInstanceId, entry] of entries) {
+    const driver = driversById.get(entry.driver);
+    if (driver?.metadata.supportsMultipleInstances !== false) continue;
+
+    const instanceId = ProviderInstanceId.make(rawInstanceId);
+    const defaultInstanceId = defaultInstanceIdForDriver(entry.driver);
+    if (!selected.has(entry.driver) || instanceId === defaultInstanceId) {
+      selected.set(entry.driver, instanceId);
+    }
+  }
+  return selected;
+};
+
 /**
  * Resolve an entry's enabled state. An explicit false on either the
  * envelope or the raw config blob wins (most restrictive) — old settings
@@ -228,6 +246,7 @@ const makeReconcile = <R>(input: {
       const previousEntries = yield* Ref.get(state.entries);
       const previousUnavailable = yield* Ref.get(state.unavailable);
       const nextRaw = Object.entries(configMap);
+      const selectedSingleInstances = selectSingleInstanceDrivers(nextRaw, driversById);
       const nextKeys = new Set<ProviderInstanceId>(
         nextRaw.map(([raw]) => ProviderInstanceId.make(raw)),
       );
@@ -243,7 +262,12 @@ const makeReconcile = <R>(input: {
           continue;
         }
         const nextEntry = configMap[instanceId];
-        if (nextEntry !== undefined && !entryEqual(live.entry, nextEntry)) {
+        const selectedInstanceId =
+          nextEntry === undefined ? undefined : selectedSingleInstances.get(nextEntry.driver);
+        if (
+          (selectedInstanceId !== undefined && selectedInstanceId !== instanceId) ||
+          (nextEntry !== undefined && !entryEqual(live.entry, nextEntry))
+        ) {
           replacedIds.add(instanceId);
         }
       }
@@ -265,6 +289,21 @@ const makeReconcile = <R>(input: {
       for (const [rawInstanceId, entry] of nextRaw) {
         const instanceId = ProviderInstanceId.make(rawInstanceId);
         nextOrder.push(instanceId);
+
+        const selectedInstanceId = selectedSingleInstances.get(entry.driver);
+        if (selectedInstanceId !== undefined && selectedInstanceId !== instanceId) {
+          builtUnavailable.set(
+            instanceId,
+            yield* buildUnavailableProviderSnapshot({
+              driverKind: entry.driver,
+              instanceId,
+              displayName: entry.displayName,
+              accentColor: entry.accentColor,
+              reason: `Driver '${entry.driver}' supports one instance. Keep '${selectedInstanceId}' and remove '${rawInstanceId}'.`,
+            }),
+          );
+          continue;
+        }
 
         const existing = previousEntries.get(instanceId);
         if (existing !== undefined && !replacedIds.has(instanceId)) {

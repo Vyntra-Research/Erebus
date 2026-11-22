@@ -131,6 +131,23 @@ export function resourceMonitorExecutableName(platform: typeof BuildPlatform.Typ
   return platform === "win" ? "t3-resource-monitor.exe" : "t3-resource-monitor";
 }
 
+export function webRuntimeExecutableName(platform: typeof BuildPlatform.Type): string {
+  return platform === "win" ? "erebus-webd.exe" : "erebus-webd";
+}
+
+export const WEB_CAPTURE_EXTENSION_INSTALL_ARGS = [
+  "install",
+  "--frozen-lockfile",
+  "--ignore-workspace",
+] as const;
+export const WEB_CAPTURE_EXTENSION_REQUIRED_FILES = [
+  "manifest.json",
+  "background.js",
+  "popup.html",
+  "popup.js",
+  "popup.css",
+] as const;
+
 const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
   mac: {
     cliFlag: "--mac",
@@ -297,6 +314,53 @@ export class ResourceMonitorBuildOutputMissingError extends Schema.TaggedErrorCl
 ) {
   override get message(): string {
     return `Resource monitor build for ${this.rustTarget} did not produce ${this.binaryPath}.`;
+  }
+}
+
+export class WebRuntimeSourceMissingError extends Schema.TaggedErrorClass<WebRuntimeSourceMissingError>()(
+  "WebRuntimeSourceMissingError",
+  { manifestPath: Schema.String },
+) {
+  override get message(): string {
+    return `Web runtime source was not found at ${this.manifestPath}.`;
+  }
+}
+
+export class WebRuntimeBuildOutputMissingError extends Schema.TaggedErrorClass<WebRuntimeBuildOutputMissingError>()(
+  "WebRuntimeBuildOutputMissingError",
+  {
+    binaryPath: Schema.String,
+    rustTarget: Schema.String,
+    platform: BuildPlatform,
+    arch: BuildArch,
+  },
+) {
+  override get message(): string {
+    return `Web runtime build for ${this.rustTarget} did not produce ${this.binaryPath}.`;
+  }
+}
+
+export class WebCaptureExtensionSourceMissingError extends Schema.TaggedErrorClass<WebCaptureExtensionSourceMissingError>()(
+  "WebCaptureExtensionSourceMissingError",
+  {
+    extensionDirectory: Schema.String,
+    missingFiles: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    return `Web capture extension source is missing ${String(this.missingFiles.length)} required files in ${this.extensionDirectory}.`;
+  }
+}
+
+export class WebCaptureExtensionBuildOutputMissingError extends Schema.TaggedErrorClass<WebCaptureExtensionBuildOutputMissingError>()(
+  "WebCaptureExtensionBuildOutputMissingError",
+  {
+    distDirectory: Schema.String,
+    missingFiles: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    return `Web capture extension build is missing ${String(this.missingFiles.length)} required files in ${this.distDirectory}.`;
   }
 }
 
@@ -561,6 +625,8 @@ const WindowsPackagedPayloadValidationReason = Schema.Literals([
   "sidecar-runtime-missing",
   "unpacked-native-missing",
   "resource-monitor-missing",
+  "web-runtime-missing",
+  "web-extension-missing",
   "file-limit-exceeded",
 ]);
 
@@ -584,6 +650,12 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedErrorCla
     }
     if (this.reason === "resource-monitor-missing") {
       return "Windows packaged payload is missing the resource monitor executable.";
+    }
+    if (this.reason === "web-runtime-missing") {
+      return "Windows packaged payload is missing the web runtime executable.";
+    }
+    if (this.reason === "web-extension-missing") {
+      return `Windows packaged payload is missing ${String(this.missingFiles?.length ?? 0)} web capture extension files.`;
     }
     if (this.reason === "sidecar-invalid") {
       return "Windows packaged payload contains an invalid server.asar sidecar.";
@@ -822,11 +894,6 @@ export const WINDOWS_SERVER_ASAR_REQUIRED_RUNTIME_FILES = [
   "node_modules/@rafabd1/argos/dist/mcp.js",
   "node_modules/@rafabd1/argos/plugins/argos/.codex-plugin/plugin.json",
   "node_modules/@rafabd1/argos/plugins/argos/skills/argos/SKILL.md",
-  "node_modules/@vyntra-research/proteus/package.json",
-  "node_modules/@vyntra-research/proteus/dist/cli.js",
-  "node_modules/@vyntra-research/proteus/dist/mcp.js",
-  "node_modules/@vyntra-research/proteus/plugins/proteus/.codex-plugin/plugin.json",
-  "node_modules/@vyntra-research/proteus/.agents/plugins/marketplace.json",
 ] as const;
 // dlopen/spawn need real files, so native modules, shared libraries, and
 // helper executables live in the server.asar.unpacked sibling (the standard
@@ -875,6 +942,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
+  },
+  {
+    from: "apps/desktop/prod-resources/erebus-web",
+    to: "erebus-web",
   },
 ] as const;
 
@@ -1776,6 +1847,150 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   if (input.platform !== "win") {
     yield* fs.chmod(destinationPath, 0o755);
   }
+});
+
+export const stageWebRuntime = Effect.fn("stageWebRuntime")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly verbose: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const manifestPath = path.join(input.repoRoot, "native/erebus-web/Cargo.toml");
+  if (!(yield* fs.exists(manifestPath))) {
+    return yield* new WebRuntimeSourceMissingError({ manifestPath });
+  }
+  const extensionDirectory = path.join(input.repoRoot, "native/erebus-web/extension");
+  const extensionSourceFiles = ["package.json", "pnpm-lock.yaml", "build.mjs", "manifest.json"];
+  const missingExtensionSourceFiles: string[] = [];
+  for (const fileName of extensionSourceFiles) {
+    const sourcePath = path.join(extensionDirectory, fileName);
+    const isFile = yield* fs.stat(sourcePath).pipe(
+      Effect.map((stat) => stat.type === "File"),
+      Effect.orElseSucceed(() => false),
+    );
+    if (!isFile) missingExtensionSourceFiles.push(fileName);
+  }
+  if (missingExtensionSourceFiles.length > 0) {
+    return yield* new WebCaptureExtensionSourceMissingError({
+      extensionDirectory,
+      missingFiles: missingExtensionSourceFiles,
+    });
+  }
+  const executableName = webRuntimeExecutableName(input.platform);
+  const rustTargets = resolveResourceMonitorRustTargets(input.platform, input.arch);
+  const reuseWebRuntime = yield* Config.boolean("T3CODE_DESKTOP_REUSE_WEB_RUNTIME").pipe(
+    Config.withDefault(false),
+  );
+  const builtBinaries: string[] = [];
+
+  if (!reuseWebRuntime) {
+    const installCommand = yield* resolveSpawnCommand("pnpm", [
+      "--dir",
+      extensionDirectory,
+      ...WEB_CAPTURE_EXTENSION_INSTALL_ARGS,
+    ]);
+    yield* runCommand(
+      ChildProcess.make(installCommand.command, installCommand.args, {
+        cwd: input.repoRoot,
+        shell: installCommand.shell,
+      }),
+      { label: "pnpm install web capture extension", verbose: input.verbose },
+    );
+    const buildCommand = yield* resolveSpawnCommand("pnpm", [
+      "--dir",
+      extensionDirectory,
+      "run",
+      "build",
+    ]);
+    yield* runCommand(
+      ChildProcess.make(buildCommand.command, buildCommand.args, {
+        cwd: input.repoRoot,
+        shell: buildCommand.shell,
+      }),
+      { label: "pnpm build web capture extension", verbose: input.verbose },
+    );
+  }
+
+  const extensionDistDirectory = path.join(extensionDirectory, "dist");
+  const missingExtensionOutputFiles: string[] = [];
+  for (const fileName of WEB_CAPTURE_EXTENSION_REQUIRED_FILES) {
+    const outputPath = path.join(extensionDistDirectory, fileName);
+    const isFile = yield* fs.stat(outputPath).pipe(
+      Effect.map((stat) => stat.type === "File"),
+      Effect.orElseSucceed(() => false),
+    );
+    if (!isFile) missingExtensionOutputFiles.push(fileName);
+  }
+  if (missingExtensionOutputFiles.length > 0) {
+    return yield* new WebCaptureExtensionBuildOutputMissingError({
+      distDirectory: extensionDistDirectory,
+      missingFiles: missingExtensionOutputFiles,
+    });
+  }
+
+  for (const rustTarget of rustTargets) {
+    if (!reuseWebRuntime) {
+      const spawnCommand = yield* resolveSpawnCommand("cargo", [
+        "build",
+        "--locked",
+        "--release",
+        "--manifest-path",
+        manifestPath,
+        "--target",
+        rustTarget,
+      ]);
+      yield* runCommand(
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          cwd: input.repoRoot,
+          shell: spawnCommand.shell,
+        }),
+        {
+          label: `cargo build web runtime (${rustTarget})`,
+          verbose: input.verbose,
+        },
+      );
+    }
+
+    const binaryPath = path.join(
+      input.repoRoot,
+      "native/erebus-web/target",
+      rustTarget,
+      "release",
+      executableName,
+    );
+    if (!(yield* fs.exists(binaryPath))) {
+      return yield* new WebRuntimeBuildOutputMissingError({
+        binaryPath,
+        rustTarget,
+        platform: input.platform,
+        arch: input.arch,
+      });
+    }
+    if (reuseWebRuntime) {
+      yield* Effect.log(`[desktop-artifact] Reusing cached web runtime (${rustTarget}).`);
+    }
+    builtBinaries.push(binaryPath);
+  }
+
+  const destinationDirectory = path.join(input.stageResourcesDir, "erebus-web");
+  const destinationPath = path.join(destinationDirectory, executableName);
+  yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
+  yield* fs.makeDirectory(destinationDirectory, { recursive: true });
+  if (builtBinaries.length === 1) {
+    yield* fs.copyFile(builtBinaries[0]!, destinationPath);
+  } else {
+    yield* runCommand(
+      ChildProcess.make("lipo", ["-create", ...builtBinaries, "-output", destinationPath]),
+      { label: "lipo web runtime universal binary", verbose: input.verbose },
+    );
+  }
+  if (input.platform !== "win") {
+    yield* fs.chmod(destinationPath, 0o755);
+  }
+  yield* fs.copy(extensionDistDirectory, path.join(destinationDirectory, "extension"));
 });
 
 function generateMacIconSet(
@@ -2693,6 +2908,30 @@ export const validateWindowsPackagedPayload = Effect.fn(
     });
   }
 
+  const webRuntimePath = path.join(resourcesDir, "erebus-web", webRuntimeExecutableName("win"));
+  if (!(yield* isFile(webRuntimePath))) {
+    return yield* new WindowsPackagedPayloadValidationError({
+      reason: "web-runtime-missing",
+      packagedAppDir,
+      missingFiles: ["erebus-web/erebus-webd.exe"],
+    });
+  }
+
+  const missingWebExtensionFiles: string[] = [];
+  for (const fileName of WEB_CAPTURE_EXTENSION_REQUIRED_FILES) {
+    const extensionPath = path.join(resourcesDir, "erebus-web", "extension", fileName);
+    if (!(yield* isFile(extensionPath))) {
+      missingWebExtensionFiles.push(`erebus-web/extension/${fileName}`);
+    }
+  }
+  if (missingWebExtensionFiles.length > 0) {
+    return yield* new WindowsPackagedPayloadValidationError({
+      reason: "web-extension-missing",
+      packagedAppDir,
+      missingFiles: missingWebExtensionFiles,
+    });
+  }
+
   const fileCount = yield* countPayloadFiles(packagedAppDir);
   if (fileCount > fileLimit) {
     return yield* new WindowsPackagedPayloadValidationError({
@@ -2922,6 +3161,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
   }
   yield* stageResourceMonitor({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
+  yield* stageWebRuntime({
     repoRoot,
     stageResourcesDir,
     platform: options.platform,

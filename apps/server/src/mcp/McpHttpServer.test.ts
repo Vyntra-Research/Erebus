@@ -160,6 +160,7 @@ it.effect("registers annotated tools and preserves authenticated request context
         readonly operation: string;
         readonly tabId?: string | undefined;
       }> = [];
+      let snapshotResponseCount = 0;
       const events = yield* broker.connect({
         clientId: "mcp-test-client",
         environmentId,
@@ -167,6 +168,7 @@ it.effect("registers annotated tools and preserves authenticated request context
       yield* Stream.runForEach(events, (event) => {
         if (event.type === "connected") return Effect.void;
         routedRequests.push(event.request);
+        if (event.request.operation === "snapshot") snapshotResponseCount += 1;
         return broker.respond({
           clientId: "mcp-test-client",
           connectionId: event.connectionId,
@@ -184,12 +186,16 @@ it.effect("registers annotated tools and preserves authenticated request context
                   consoleEntries: [],
                   networkEntries: [],
                   actionTimeline: [],
-                  screenshot: {
-                    mimeType: "image/png",
-                    data: Buffer.from("png").toString("base64"),
-                    width: 10,
-                    height: 5,
-                  },
+                  ...(snapshotResponseCount === 1
+                    ? {
+                        screenshot: {
+                          mimeType: "image/png",
+                          data: Buffer.from("png").toString("base64"),
+                          width: 10,
+                          height: 5,
+                        },
+                      }
+                    : {}),
                 }
               : event.request.operation === "press"
                 ? undefined
@@ -264,6 +270,20 @@ it.effect("registers annotated tools and preserves authenticated request context
       expect(routedRequests.find(({ operation }) => operation === "snapshot")?.tabId).toBe(
         alternateTabId,
       );
+
+      const semanticSnapshot = yield* server
+        .callTool({ name: "preview_snapshot", arguments: {} })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        );
+      expect(semanticSnapshot.isError).toBe(false);
+      expect(semanticSnapshot.content.some((content) => content.type === "image")).toBe(false);
+      expect(semanticSnapshot.structuredContent).toMatchObject({
+        url: "http://example.test/",
+        visibleText: "Example",
+      });
+      expect(semanticSnapshot.structuredContent).not.toHaveProperty("screenshot");
 
       const actionRequests = [
         { name: "preview_click", arguments: { x: 10, y: 10 } },

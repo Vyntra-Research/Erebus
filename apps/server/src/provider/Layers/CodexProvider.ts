@@ -17,7 +17,6 @@ import type {
   CodexSettings,
   ResearchArgosHealth,
   ResearchDependencyState,
-  ResearchProteusHealth,
   ServerProvider,
   ServerProviderAccountUsage,
   ServerProviderState,
@@ -58,7 +57,6 @@ export interface CodexAppServerProviderSnapshot {
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly argos: ResearchArgosHealth;
-  readonly proteus: ResearchProteusHealth;
 }
 
 function clampPercent(value: number): number {
@@ -399,44 +397,6 @@ function parseCodexSkillsListResponse(
   });
 }
 
-export const readCodexProteusHealth = Effect.fn("readCodexProteusHealth")(function* (
-  client: CodexClient.CodexAppServerClient["Service"],
-  cwd: string,
-) {
-  const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  const [skillsResult, pluginListResult, mcpStatusResult] = yield* Effect.all(
-    [
-      client.request("skills/list", { cwds: [cwd] }).pipe(
-        Effect.timeoutOption(RESEARCH_RUNTIME_STATUS_PROBE_TIMEOUT),
-        Effect.orElseSucceed(() => Option.none()),
-      ),
-      client.request("plugin/list", { cwds: [cwd] }).pipe(
-        Effect.timeoutOption(RESEARCH_RUNTIME_STATUS_PROBE_TIMEOUT),
-        Effect.orElseSucceed(() => Option.none()),
-      ),
-      client.request("mcpServerStatus/list", { detail: "toolsAndAuthOnly", limit: 100 }).pipe(
-        Effect.timeoutOption(RESEARCH_RUNTIME_STATUS_PROBE_TIMEOUT),
-        Effect.orElseSucceed(() => Option.none()),
-      ),
-    ],
-    { concurrency: "unbounded" },
-  );
-  const skills = Option.isSome(skillsResult)
-    ? parseCodexSkillsListResponse(skillsResult.value, cwd)
-    : [];
-  return deriveProteusHealth({
-    pluginList: Option.isSome(pluginListResult) ? pluginListResult.value : undefined,
-    skills,
-    mcpStatus: Option.isSome(mcpStatusResult) ? mcpStatusResult.value : undefined,
-    checkedAt,
-  });
-});
-
-const isProteusName = (value: string): boolean => {
-  const normalized = value.trim().toLowerCase();
-  return normalized === "proteus" || normalized.startsWith("proteus:");
-};
-
 const isArgosName = (value: string): boolean => {
   const normalized = value.trim().toLowerCase();
   return normalized === "argos" || normalized.startsWith("argos:");
@@ -495,63 +455,6 @@ export function deriveArgosHealth(input: {
       issues.length === 0
         ? "Argos connected research memory is ready."
         : `Argos research memory: ${issues.join(", ")}.`,
-    checkedAt: input.checkedAt,
-  };
-}
-
-export function deriveProteusHealth(input: {
-  readonly pluginList: CodexSchema.V2PluginListResponse | undefined;
-  readonly skills: ReadonlyArray<ServerProviderSkill>;
-  readonly mcpStatus: CodexSchema.V2ListMcpServerStatusResponse | undefined;
-  readonly checkedAt: string;
-}): ResearchProteusHealth {
-  const plugin = input.pluginList?.marketplaces
-    .flatMap((marketplace) => marketplace.plugins)
-    .find((candidate) => isProteusName(candidate.name) || isProteusName(candidate.id));
-  const mcp = input.mcpStatus?.data.find((candidate) => isProteusName(candidate.name));
-
-  let pluginState: ResearchDependencyState = "unknown";
-  if (input.pluginList) {
-    if (!plugin || !plugin.installed) {
-      pluginState = "missing";
-    } else if (plugin.availability === "DISABLED_BY_ADMIN") {
-      pluginState = "incompatible";
-    } else {
-      pluginState = plugin.enabled ? "ready" : "failed";
-    }
-  }
-
-  const hasProteusSkills = input.skills.some((skill) => isProteusName(skill.name));
-  const skillsState: ResearchDependencyState = hasProteusSkills
-    ? "incompatible"
-    : input.pluginList
-      ? "ready"
-      : "unknown";
-
-  let mcpState: ResearchDependencyState = "unknown";
-  if (input.mcpStatus) {
-    if (!mcp) {
-      mcpState = "missing";
-    } else {
-      mcpState = Object.keys(mcp.tools).length > 0 ? "ready" : "failed";
-    }
-  }
-
-  const issues: string[] = [];
-  if (pluginState !== "ready") issues.push(`plugin ${pluginState}`);
-  if (skillsState !== "ready") issues.push(`legacy skills ${skillsState}`);
-  if (mcpState !== "ready") issues.push(`MCP ${mcpState}`);
-
-  return {
-    runtime: mcpState,
-    plugin: pluginState,
-    skills: skillsState,
-    mcp: mcpState,
-    version: plugin?.localVersion ?? plugin?.version ?? mcp?.serverInfo?.version ?? null,
-    message:
-      issues.length === 0
-        ? "Proteus read-only history is ready."
-        : `Proteus read-only history: ${issues.join(", ")}.`,
     checkedAt: input.checkedAt,
   };
 }
@@ -684,15 +587,6 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
         message: "Authenticate Codex before checking Argos.",
         checkedAt,
       },
-      proteus: {
-        runtime: "unknown",
-        plugin: "unknown",
-        skills: "unknown",
-        mcp: "unknown",
-        version: null,
-        message: "Authenticate Codex before checking Proteus.",
-        checkedAt,
-      },
     } satisfies CodexAppServerProviderSnapshot;
   }
 
@@ -739,12 +633,6 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     ),
     skills,
     argos: deriveArgosHealth({
-      pluginList: Option.isSome(pluginListResult) ? pluginListResult.value : undefined,
-      skills,
-      mcpStatus: Option.isSome(mcpStatusResult) ? mcpStatusResult.value : undefined,
-      checkedAt,
-    }),
-    proteus: deriveProteusHealth({
       pluginList: Option.isSome(pluginListResult) ? pluginListResult.value : undefined,
       skills,
       mcpStatus: Option.isSome(mcpStatusResult) ? mcpStatusResult.value : undefined,
@@ -960,7 +848,6 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     models: snapshot.models,
     skills: snapshot.skills,
     argos: snapshot.argos,
-    proteus: snapshot.proteus,
     slashCommands: [
       {
         name: "feedback",

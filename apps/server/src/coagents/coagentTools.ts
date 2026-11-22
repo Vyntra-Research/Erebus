@@ -121,7 +121,8 @@ export const EREBUS_THREADS_DYNAMIC_TOOL = {
             type: "integer",
             minimum: 0,
             maximum: 60_000,
-            description: "Maximum event wait. Use 0 for an immediate snapshot.",
+            description:
+              "Maximum event wait in milliseconds. Defaults to 30000 and cannot exceed 60000. Use 0 for an immediate snapshot.",
           },
         },
         ["threadIds"],

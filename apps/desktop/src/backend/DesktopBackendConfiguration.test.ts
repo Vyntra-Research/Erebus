@@ -520,6 +520,7 @@ describe("DesktopBackendConfiguration", () => {
           assert.equal(config.bootstrap.tailscaleServeEnabled, false);
           assert.notProperty(config.bootstrap, "desktopTelemetryFd");
           assert.notProperty(config.bootstrap, "resourceMonitorPath");
+          assert.notProperty(config.bootstrap, "webRuntimePath");
           // httpBaseUrl uses the resolved distro IP from the test stub,
           // not localhost — the renderer reaches the backend directly to
           // avoid relying on wslhost forwarding.
@@ -832,6 +833,7 @@ describe("DesktopBackendConfiguration", () => {
         "app.asar/apps/desktop/prod-resources/resource-monitor/t3-resource-monitor",
       );
       const monitorPath = path.join(resourcesPath, "resource-monitor/t3-resource-monitor");
+      const webRuntimePath = path.join(resourcesPath, "erebus-web/erebus-webd");
       yield* fileSystem.makeDirectory(
         `${resourcesPath}/app.asar/apps/desktop/prod-resources/resource-monitor`,
         { recursive: true },
@@ -839,14 +841,17 @@ describe("DesktopBackendConfiguration", () => {
       yield* fileSystem.makeDirectory(`${resourcesPath}/resource-monitor`, {
         recursive: true,
       });
+      yield* fileSystem.makeDirectory(`${resourcesPath}/erebus-web`, { recursive: true });
       yield* fileSystem.writeFileString(embeddedMonitorPath, "embedded");
       yield* fileSystem.writeFileString(monitorPath, "binary");
+      yield* fileSystem.writeFileString(webRuntimePath, "runtime");
       yield* fileSystem.chmod(monitorPath, 0o755);
 
       yield* Effect.gen(function* () {
         const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
         const config = yield* configuration.resolvePrimary;
         assert.equal(config.bootstrap.resourceMonitorPath, monitorPath);
+        assert.equal(config.bootstrap.webRuntimePath, webRuntimePath);
         assert.equal(config.bootstrap.desktopTelemetryFd, 4);
         assert.equal(config.bootstrap.desktopTelemetryControlFd, 5);
       }).pipe(
@@ -886,15 +891,59 @@ describe("DesktopBackendConfiguration", () => {
         baseDir,
         "native/resource-monitor/target/debug/t3-resource-monitor",
       );
+      const releaseWebRuntimePath = path.join(
+        baseDir,
+        "native/erebus-web/target/release/erebus-webd",
+      );
       yield* fileSystem.makeDirectory(path.dirname(releaseMonitorPath), { recursive: true });
       yield* fileSystem.makeDirectory(path.dirname(debugMonitorPath), { recursive: true });
+      yield* fileSystem.makeDirectory(path.dirname(releaseWebRuntimePath), { recursive: true });
       yield* fileSystem.writeFileString(releaseMonitorPath, "release");
       yield* fileSystem.writeFileString(debugMonitorPath, "debug");
+      yield* fileSystem.writeFileString(releaseWebRuntimePath, "runtime");
 
       yield* Effect.gen(function* () {
         const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
         const config = yield* configuration.resolvePrimary;
         assert.equal(config.bootstrap.resourceMonitorPath, releaseMonitorPath);
+        assert.equal(config.bootstrap.webRuntimePath, releaseWebRuntimePath);
+      }).pipe(
+        Effect.provide(
+          DesktopBackendConfiguration.layer.pipe(
+            Layer.provideMerge(serverExposureLayer),
+            Layer.provideMerge(DesktopAppSettings.layerTest()),
+            Layer.provideMerge(DesktopWslServerTree.layerTest()),
+            Layer.provideMerge(DesktopWslEnvironment.layerTest()),
+            Layer.provideMerge(
+              makeEnvironmentLayer(baseDir, {
+                dirname,
+                devServerUrl: "http://127.0.0.1:5733",
+                isPackaged: false,
+              }),
+            ),
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps the expected development web runtime path while the binary is absent", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-backend-config-test-",
+      });
+      const dirname = path.join(baseDir, "apps/desktop/src");
+      const expectedWebRuntimePath = path.join(
+        baseDir,
+        "native/erebus-web/target/release/erebus-webd",
+      );
+
+      yield* Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const config = yield* configuration.resolvePrimary;
+        assert.equal(config.bootstrap.webRuntimePath, expectedWebRuntimePath);
       }).pipe(
         Effect.provide(
           DesktopBackendConfiguration.layer.pipe(

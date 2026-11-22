@@ -319,6 +319,42 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
     Layer.provideMerge(ModelManifest.layerTest),
   );
 
+  it.live("keeps one OpenCode instance and shadows extra entries", () =>
+    Effect.gen(function* () {
+      const openCodeDriverKind = ProviderDriverKind.make("opencode");
+      const defaultId = ProviderInstanceId.make("opencode");
+      const extraId = ProviderInstanceId.make("opencode_extra");
+      const configMap: ProviderInstanceConfigMap = {
+        [extraId]: {
+          driver: openCodeDriverKind,
+          displayName: "OpenCode Extra",
+          enabled: false,
+          config: makeOpenCodeConfig({}),
+        },
+        [defaultId]: {
+          driver: openCodeDriverKind,
+          displayName: "OpenCode",
+          enabled: false,
+          config: makeOpenCodeConfig({}),
+        },
+      };
+
+      const { registry } = yield* makeProviderInstanceRegistry({
+        drivers: [OpenCodeDriver],
+        configMap,
+      });
+
+      const instances = yield* registry.listInstances;
+      expect(instances.map((instance) => instance.instanceId)).toEqual([defaultId]);
+
+      const unavailable = yield* registry.listUnavailable;
+      expect(unavailable).toHaveLength(1);
+      expect(unavailable[0]?.instanceId).toBe(extraId);
+      expect(unavailable[0]?.unavailableReason).toContain("supports one instance");
+      expect(unavailable[0]?.unavailableReason).toContain(defaultId);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.live("boots one instance of every shipped driver from a single config map", () =>
     Effect.gen(function* () {
       const codexId = ProviderInstanceId.make("codex_default");

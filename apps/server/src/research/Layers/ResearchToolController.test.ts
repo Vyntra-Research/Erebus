@@ -99,15 +99,32 @@ layer("ResearchToolController", (it) => {
       }),
   );
 
-  it.effect("calculates CVSS locally without Judge or Proteus state", () =>
+  it.effect("runs research tools from a standalone workspace", () =>
     Effect.gen(function* () {
       const controller = yield* ResearchToolController;
       assert(controller);
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "erebus-standalone-review-",
+      });
+      yield* fileSystem.makeDirectory(path.join(root, "findings"), { recursive: true });
+      yield* fileSystem.makeDirectory(path.join(root, "pocs", "standalone-finding"), {
+        recursive: true,
+      });
+      yield* fileSystem.writeFileString(
+        path.join(root, "findings", "standalone.md"),
+        "Standalone finding",
+      );
+      yield* fileSystem.writeFileString(
+        path.join(root, "pocs", "standalone-finding", "poc.js"),
+        "console.log('poc')",
+      );
       const threadId = ThreadId.make("thread-cvss");
       const context = {
-        projectId: ProjectId.make("project-cvss"),
+        projectId: null,
         threadId,
-        cwd: process.cwd(),
+        cwd: root,
       };
 
       const calculated = jsonFromResponse(
@@ -125,6 +142,44 @@ layer("ResearchToolController", (it) => {
       assert.equal(calculated.version, "4.0");
       assert.equal(calculated.score, 9.3);
       assert.equal(calculated.severity, "critical");
+
+      const status = resultFromResponse(
+        yield* controller.handle(context, {
+          namespace: "research",
+          tool: "get_status",
+          callId: "call-status",
+          threadId,
+          turnId: "turn-cvss",
+          arguments: {},
+        }),
+      );
+      assert.isTrue(status.accepted);
+      assert.equal(status.status, "empty");
+
+      const submission = resultFromResponse(
+        yield* controller.handle(context, {
+          namespace: "research",
+          tool: "submit_finding",
+          callId: "call-submit",
+          threadId,
+          turnId: "turn-cvss",
+          arguments: {
+            findingId: "standalone-finding",
+            revision: 1,
+            supersedesEvaluationId: null,
+            title: "Standalone finding",
+            target: "Local target",
+            findingPath: "findings/standalone.md",
+            pocPath: "pocs/standalone-finding",
+          },
+        }),
+      );
+      assert.isTrue(submission.accepted);
+      assert.equal(submission.status, "pendingJudge");
+
+      const records = yield* (yield* FindingReviewStore).listByThread(threadId);
+      assert.equal(records.length, 1);
+      assert.isNull(records[0]?.projectId);
     }),
   );
 

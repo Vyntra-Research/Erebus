@@ -18,6 +18,8 @@ import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsResearchRouteImport } from './routes/settings.research'
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
+import { Route as SettingsModulesRouteImport } from './routes/settings.modules'
+import { Route as SettingsMicrovmsRouteImport } from './routes/settings.microvms'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
@@ -73,6 +75,16 @@ const SettingsResearchRoute = SettingsResearchRouteImport.update({
 const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsModulesRoute = SettingsModulesRouteImport.update({
+  id: '/modules',
+  path: '/modules',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsMicrovmsRoute = SettingsMicrovmsRouteImport.update({
+  id: '/microvms',
+  path: '/microvms',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsKeybindingsRoute = SettingsKeybindingsRouteImport.update({
@@ -153,6 +165,8 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/microvms': typeof SettingsMicrovmsRoute
+  '/settings/modules': typeof SettingsModulesRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/research': typeof SettingsResearchRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -174,6 +188,8 @@ export interface FileRoutesByTo {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/microvms': typeof SettingsMicrovmsRoute
+  '/settings/modules': typeof SettingsModulesRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/research': typeof SettingsResearchRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -198,6 +214,8 @@ export interface FileRoutesById {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/microvms': typeof SettingsMicrovmsRoute
+  '/settings/modules': typeof SettingsModulesRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/research': typeof SettingsResearchRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -223,6 +241,8 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/microvms'
+    | '/settings/modules'
     | '/settings/providers'
     | '/settings/research'
     | '/settings/source-control'
@@ -244,6 +264,8 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/microvms'
+    | '/settings/modules'
     | '/settings/providers'
     | '/settings/research'
     | '/settings/source-control'
@@ -267,6 +289,8 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/microvms'
+    | '/settings/modules'
     | '/settings/providers'
     | '/settings/research'
     | '/settings/source-control'
@@ -348,6 +372,20 @@ declare module '@tanstack/react-router' {
       path: '/providers'
       fullPath: '/settings/providers'
       preLoaderRoute: typeof SettingsProvidersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/modules': {
+      id: '/settings/modules'
+      path: '/modules'
+      fullPath: '/settings/modules'
+      preLoaderRoute: typeof SettingsModulesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/microvms': {
+      id: '/settings/microvms'
+      path: '/microvms'
+      fullPath: '/settings/microvms'
+      preLoaderRoute: typeof SettingsMicrovmsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/keybindings': {
@@ -461,6 +499,8 @@ interface SettingsRouteChildren {
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
+  SettingsMicrovmsRoute: typeof SettingsMicrovmsRoute
+  SettingsModulesRoute: typeof SettingsModulesRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
   SettingsResearchRoute: typeof SettingsResearchRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
@@ -474,6 +514,8 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
+  SettingsMicrovmsRoute: SettingsMicrovmsRoute,
+  SettingsModulesRoute: SettingsModulesRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
   SettingsResearchRoute: SettingsResearchRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,

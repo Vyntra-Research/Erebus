@@ -57,17 +57,17 @@ import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.t
 import { ProviderInstanceRegistryMutator } from "../Services/ProviderInstanceRegistryMutator.ts";
 import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistryLive.ts";
 
-const ACTIVE_PROVIDER_DRIVER_KIND = "codex";
-const ACTIVE_BUILT_IN_DRIVERS = BUILT_IN_DRIVERS.filter(
-  (driver) => driver.driverKind === ACTIVE_PROVIDER_DRIVER_KIND,
+const ACTIVE_PROVIDER_DRIVER_KINDS = new Set(["codex", "opencode"]);
+const ACTIVE_BUILT_IN_DRIVERS = BUILT_IN_DRIVERS.filter((driver) =>
+  ACTIVE_PROVIDER_DRIVER_KINDS.has(driver.driverKind),
 );
 
 /**
  * Synthesize a `ProviderInstanceConfigMap` from a `ServerSettings` snapshot.
  *
  * Strategy:
- *   1. Copy explicit Codex instances and ignore inactive driver bindings.
- *   2. For the active built-in driver whose `defaultInstanceIdForDriver(id)` key
+ *   1. Copy explicit instances for active provider drivers.
+ *   2. For each active built-in driver whose `defaultInstanceIdForDriver(id)` key
  *      is *not* already in the explicit map, synthesize an entry from the
  *      matching legacy `settings.providers.<kind>` blob.
  *
@@ -79,8 +79,8 @@ export const deriveProviderInstanceConfigMap = (
   settings: ServerSettings,
 ): ProviderInstanceConfigMap => {
   const merged: Record<string, ProviderInstanceConfig> = Object.fromEntries(
-    Object.entries(settings.providerInstances).filter(
-      ([, instance]) => instance.driver === ACTIVE_PROVIDER_DRIVER_KIND,
+    Object.entries(settings.providerInstances).filter(([, instance]) =>
+      ACTIVE_PROVIDER_DRIVER_KINDS.has(instance.driver),
     ),
   );
 

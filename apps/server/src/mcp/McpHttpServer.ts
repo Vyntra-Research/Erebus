@@ -22,6 +22,12 @@ import {
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
+import { WebToolkitHandlersLive } from "./toolkits/web/handlers.ts";
+import { WebToolkit } from "./toolkits/web/tools.ts";
+import { WebModuleToolkitHandlersLive } from "./toolkits/web/moduleHandlers.ts";
+import { WebModuleToolkit } from "./toolkits/web/moduleTools.ts";
+import { MicroVmToolkitHandlersLive } from "./toolkits/microVm/handlers.ts";
+import { MicroVmToolkit } from "./toolkits/microVm/tools.ts";
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -165,7 +171,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
             onFailure: previewSnapshotFailure,
             onSuccess: ({ encodedResult }) => {
               const snapshot = encodedResult as {
-                readonly screenshot: {
+                readonly screenshot?: {
                   readonly mimeType: "image/png";
                   readonly data: string;
                   readonly width: number;
@@ -176,11 +182,15 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
               const { screenshot, ...page } = snapshot;
               const metadata = {
                 ...page,
-                screenshot: {
-                  mimeType: screenshot.mimeType,
-                  width: screenshot.width,
-                  height: screenshot.height,
-                },
+                ...(screenshot
+                  ? {
+                      screenshot: {
+                        mimeType: screenshot.mimeType,
+                        width: screenshot.width,
+                        height: screenshot.height,
+                      },
+                    }
+                  : {}),
               };
               return Effect.succeed(
                 new McpSchema.CallToolResult({
@@ -188,11 +198,15 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
                   structuredContent: metadata,
                   content: [
                     { type: "text", text: JSON.stringify(metadata) },
-                    {
-                      type: "image",
-                      data: new Uint8Array(Buffer.from(screenshot.data, "base64")),
-                      mimeType: screenshot.mimeType,
-                    },
+                    ...(screenshot
+                      ? [
+                          {
+                            type: "image" as const,
+                            data: new Uint8Array(Buffer.from(screenshot.data, "base64")),
+                            mimeType: screenshot.mimeType,
+                          },
+                        ]
+                      : []),
                   ],
                 }),
               );
@@ -216,6 +230,18 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 );
 
+export const WebToolkitRegistrationLive = McpServer.toolkit(WebToolkit).pipe(
+  Layer.provide(WebToolkitHandlersLive),
+);
+
+export const WebModuleToolkitRegistrationLive = McpServer.toolkit(WebModuleToolkit).pipe(
+  Layer.provide(WebModuleToolkitHandlersLive),
+);
+
+export const MicroVmToolkitRegistrationLive = McpServer.toolkit(MicroVmToolkit).pipe(
+  Layer.provide(MicroVmToolkitHandlersLive),
+);
+
 const McpTransportLive = McpServer.layerHttp({
   name: "Erebus",
   version: packageJson.version,
@@ -224,7 +250,9 @@ const McpTransportLive = McpServer.layerHttp({
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
 // Each endpoint owns its tool registry; only the credential registry is shared.
-export const layer = PreviewToolkitRegistrationLive.pipe(
-  Layer.provideMerge(McpTransportLive),
-  Layer.fresh,
-);
+export const layer = Layer.mergeAll(
+  PreviewToolkitRegistrationLive,
+  WebToolkitRegistrationLive,
+  WebModuleToolkitRegistrationLive,
+  MicroVmToolkitRegistrationLive,
+).pipe(Layer.provideMerge(McpTransportLive), Layer.fresh);

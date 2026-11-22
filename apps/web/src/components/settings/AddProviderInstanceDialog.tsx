@@ -32,6 +32,7 @@ import { ProviderSettingsForm, deriveProviderSettingsFields } from "./ProviderSe
 import { AnimatedHeight } from "../AnimatedHeight";
 import {
   ADD_PROVIDER_WIZARD_STEPS,
+  canAddProviderDriver,
   deriveAvailableProviderInstanceId,
   resolveWizardNavigation,
   type WizardNavigation,
@@ -105,8 +106,26 @@ export function AddProviderInstanceDialog({
     () => new Set(Object.keys(settings.providerInstances ?? {})),
     [settings.providerInstances],
   );
+  const existingDrivers = useMemo(() => {
+    const drivers = new Set<string>();
+    const legacyProviders = settings.providers ?? {};
+    for (const instance of Object.values(settings.providerInstances ?? {})) {
+      drivers.add(instance.driver);
+    }
+    for (const option of DRIVER_OPTIONS) {
+      if (Object.prototype.hasOwnProperty.call(legacyProviders, option.value)) {
+        drivers.add(option.value);
+      }
+    }
+    return drivers;
+  }, [settings.providerInstances, settings.providers]);
 
   const driverOption = DRIVER_OPTION_BY_VALUE[driver] ?? DEFAULT_DRIVER_OPTION;
+  const driverCanBeAdded = canAddProviderDriver(
+    driver,
+    driverOption.supportsMultipleInstances,
+    existingDrivers,
+  );
   const instanceId = deriveAvailableProviderInstanceId(driver, label, existingIds);
   const driverSettingsFields = useMemo(
     () => deriveProviderSettingsFields(driverOption),
@@ -147,6 +166,15 @@ export function AddProviderInstanceDialog({
 
   const handleSave = () => {
     setHasAttemptedSubmit(true);
+    if (!driverCanBeAdded) {
+      setWizardStep(0);
+      toastManager.add({
+        type: "error",
+        title: `${driverOption.label} is already added`,
+        description: `${driverOption.label} supports one instance per device.`,
+      });
+      return;
+    }
     if (instanceIdError !== null) return;
 
     const config = configByDriver[driver] ?? {};
@@ -191,10 +219,10 @@ export function AddProviderInstanceDialog({
       <DialogPopup className="max-w-xl overflow-hidden">
         <div className="flex min-h-0 flex-col overflow-hidden">
           <DialogHeader>
-            <DialogTitle>Add Codex account</DialogTitle>
+            <DialogTitle>Add provider</DialogTitle>
             <DialogDescription>
-              Add another Codex login on {environmentLabel}. Authentication stays separate while
-              sessions, settings, skills, plugins, MCPs, and memories remain shared.
+              Add a provider instance on {environmentLabel}. Its connection and runtime settings
+              stay separate.
             </DialogDescription>
             <AddProviderInstanceWizardSteps
               currentStep={wizardStep}
@@ -221,11 +249,22 @@ export function AddProviderInstanceDialog({
                 >
                   {DRIVER_OPTIONS.map((option) => {
                     const IconComponent = option.icon;
+                    const canAdd = canAddProviderDriver(
+                      option.value,
+                      option.supportsMultipleInstances,
+                      existingDrivers,
+                    );
                     return (
                       <RadioPrimitive.Root
                         key={option.value}
                         value={option.value}
-                        className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
+                        disabled={!canAdd}
+                        className={cn(
+                          "relative flex items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-primary dark:bg-white/3 dark:ring-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary",
+                          canAdd
+                            ? "cursor-pointer hover:bg-zinc-50 data-checked:hover:bg-primary/8 dark:hover:bg-white/5 dark:data-checked:hover:bg-primary/15"
+                            : "cursor-not-allowed opacity-55",
+                        )}
                       >
                         <IconComponent className="size-4 shrink-0" aria-hidden />
                         <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
@@ -240,6 +279,11 @@ export function AddProviderInstanceDialog({
                         {option.badgeLabel ? (
                           <Badge variant="warning" size="sm">
                             {option.badgeLabel}
+                          </Badge>
+                        ) : null}
+                        {!canAdd ? (
+                          <Badge variant="secondary" size="sm">
+                            Added
                           </Badge>
                         ) : null}
                       </RadioPrimitive.Root>
@@ -373,11 +417,15 @@ export function AddProviderInstanceDialog({
               {wizardStep === 0 ? "Cancel" : "Back"}
             </Button>
             {wizardStep < ADD_PROVIDER_WIZARD_STEPS.length - 1 ? (
-              <Button size="sm" onClick={() => navigateToStep(wizardStep + 1)}>
+              <Button
+                size="sm"
+                disabled={!driverCanBeAdded}
+                onClick={() => navigateToStep(wizardStep + 1)}
+              >
                 Next
               </Button>
             ) : (
-              <Button size="sm" onClick={handleSave}>
+              <Button size="sm" disabled={!driverCanBeAdded} onClick={handleSave}>
                 Add instance
               </Button>
             )}

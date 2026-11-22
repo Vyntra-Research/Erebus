@@ -25,6 +25,7 @@ jobs:
       server: ${{ steps.plan.outputs.server }}
       server_only: ${{ steps.plan.outputs.server_only }}
       web: ${{ steps.plan.outputs.web }}
+      web_runtime: ${{ steps.plan.outputs.web_runtime }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -341,6 +342,59 @@ jobs:
       - name: Test resource monitor
         run: cargo test --locked --manifest-path native/resource-monitor/Cargo.toml
 
+  web_runtime:
+    name: Web Runtime
+    needs: changes
+    if: needs.changes.outputs.web_runtime == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check web runtime formatting
+        run: cargo fmt --manifest-path native/erebus-web/Cargo.toml -- --check
+
+      - name: Test web runtime
+        run: cargo test --locked --manifest-path native/erebus-web/Cargo.toml
+
+      - name: Lint web runtime
+        run: cargo clippy --locked --all-targets --manifest-path native/erebus-web/Cargo.toml -- -D warnings
+
+      - name: Build web runtime
+        run: cargo build --locked --release --manifest-path native/erebus-web/Cargo.toml
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Setup pnpm
+        run: corepack enable && corepack prepare pnpm@11.10.0 --activate
+
+      - name: Install capture extension dependencies
+        run: pnpm --dir native/erebus-web/extension install --frozen-lockfile --ignore-workspace
+
+      - name: Check capture extension
+        run: pnpm --dir native/erebus-web/extension run typecheck
+
+      - name: Test capture extension
+        run: pnpm --dir native/erebus-web/extension test
+
+      - name: Build capture extension
+        run: pnpm --dir native/erebus-web/extension build
+
   result:
     name: CI
     if: always()
@@ -353,6 +407,7 @@ jobs:
       - test_web
       - test_server
       - rust
+      - web_runtime
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -366,7 +421,8 @@ jobs:
             test_libraries=${{ needs.test_libraries.result }},
             test_web=${{ needs.test_web.result }},
             test_server=${{ needs.test_server.result }},
-            rust=${{ needs.rust.result }}
+            rust=${{ needs.rust.result }},
+            web_runtime=${{ needs.web_runtime.result }}
         run: |
           if [[ "$RESULTS" == *failure* || "$RESULTS" == *cancelled* ]]; then
             echo "One or more selected CI jobs did not pass: $RESULTS" >&2

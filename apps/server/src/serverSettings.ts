@@ -262,11 +262,8 @@ function restoreUsedProviders(
     Object.entries(settings.providerInstances).map(([instanceId, instance]) => [
       instanceId,
       instance.enabled === undefined &&
-      (instance.driver === "cursor" ||
-        instance.driver === "grok" ||
-        instance.driver === "opencode") &&
-      usedProviderInstances.has(instanceId)
-        ? { ...instance, enabled: true }
+      (instance.driver === "cursor" || instance.driver === "grok" || instance.driver === "opencode")
+        ? { ...instance, enabled: usedProviderInstances.has(instanceId) }
         : instance,
     ]),
   );

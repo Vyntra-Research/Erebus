@@ -1,6 +1,6 @@
 # Permission modes
 
-A permission mode controls when Codex stops for approval. Set it per thread from the composer. A co-agent inherits the parent thread's mode; otherwise a new thread starts in **Full access** unless you choose another mode before sending.
+A permission mode controls when the provider stops for approval. Set it per thread from the composer. A co-agent inherits the parent thread's mode; otherwise a new thread starts in **Full access** unless you choose another mode before sending.
 
 ## Modes
 
@@ -8,7 +8,7 @@ A permission mode controls when Codex stops for approval. Set it per thread from
 
 **Auto-accept edits** accepts file changes and asks before commands or other actions.
 
-**Auto** lets Codex review routine actions and pauses on actions that still require approval.
+**Auto** lets the provider review routine actions and pauses on actions that still require approval.
 
 **Full access** runs commands and edits directly. Erebus still applies its deterministic command guard and blocks hard safety violations before execution.
 

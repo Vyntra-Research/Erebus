@@ -8,6 +8,10 @@ import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { cn } from "~/lib/utils";
 
+import {
+  resolveBrowserProfileId,
+  useBrowserProfileSelectionStore,
+} from "./browserProfileSelectionStore";
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
 import {
   browserViewportSettingKey,
@@ -50,7 +54,10 @@ export function HostedBrowserWebview(props: {
   readonly zoomFactor: number;
 }) {
   const { threadRef, tabId, runtimeTabId, initialUrl, viewport, zoomFactor } = props;
-  const config = usePreviewWebviewConfig(threadRef.environmentId);
+  const browserProfileId = useBrowserProfileSelectionStore((state) =>
+    resolveBrowserProfileId(threadRef, tabId, state),
+  );
+  const config = usePreviewWebviewConfig(threadRef.environmentId, browserProfileId);
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -133,16 +140,26 @@ export function HostedBrowserWebview(props: {
         }
       }, recovery.delayMs);
     };
+    const rememberNavigation = (event: Event) => {
+      const url = (event as Event & { readonly url?: unknown }).url;
+      if (typeof url === "string" && url.length > 0) latestUrlRef.current = url;
+    };
     webview.addEventListener("did-attach", register);
     webview.addEventListener("dom-ready", register);
+    webview.addEventListener("did-navigate", rememberNavigation);
+    webview.addEventListener("did-navigate-in-page", rememberNavigation);
     webview.addEventListener("render-process-gone", recoverGuest);
+    webview.addEventListener("destroyed", recoverGuest);
     register();
     return () => {
       disposed = true;
       if (recoveryTimeout !== null) clearTimeout(recoveryTimeout);
       webview.removeEventListener("did-attach", register);
       webview.removeEventListener("dom-ready", register);
+      webview.removeEventListener("did-navigate", rememberNavigation);
+      webview.removeEventListener("did-navigate-in-page", rememberNavigation);
       webview.removeEventListener("render-process-gone", recoverGuest);
+      webview.removeEventListener("destroyed", recoverGuest);
     };
   }, [config, initialSrc, runtimeTabId, webviewGeneration]);
 
@@ -257,14 +274,15 @@ export function HostedBrowserWebview(props: {
           />
         ) : null}
         <webview
-          key={webviewGeneration}
+          key={`${browserProfileId}:${webviewGeneration}`}
           ref={setWebviewRef}
-          src={webviewGeneration === 0 ? initialSrc : recoverySrc}
+          src={latestUrlRef.current ?? recoverySrc}
           partition={config.partition}
           webpreferences={config.webPreferences}
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
           data-preview-tab={runtimeTabId}
           data-preview-server-tab={tabId}
+          data-preview-browser-profile={browserProfileId}
           data-preview-viewport-mode={effectiveViewport._tag}
           data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
           data-preview-css-width={

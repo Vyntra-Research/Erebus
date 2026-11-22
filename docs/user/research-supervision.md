@@ -1,6 +1,6 @@
 # Research and independent review
 
-Research begins directly in any task. Use the native Codex goal when the work needs a durable objective.
+Research begins directly in any task. Codex tasks can use the native goal when the work needs a durable objective.
 
 Older Codex tasks keep the tool schemas they received when first created. Erebus uses the authenticated `erebus-research` fallback when those schemas differ from the current tools. This preserves the task's history and finding state. The fallback supplies the current Research and Judge tools.
 
@@ -10,9 +10,9 @@ Erebus keeps a short set of rules in the principal and co-agent context. These c
 
 The rules apply when the agent ranks, narrows, discards, reopens, or promotes a path. A failed test closes the path it exercised. Protection claims stay bounded to the routes covered by evidence. New evidence reopens any conclusion whose premise changed.
 
-Argos is the connected memory for current research. Erebus installs its MCP and skills in the shared Codex profile. The agent records canonical nodes and typed relations directly in each project's `.argos/` graph.
+Argos is the connected memory for current research. Erebus installs its MCP and operational skill for enabled providers. The agent records canonical nodes and typed relations directly in each project's `.argos/` graph.
 
-Proteus is legacy history in current Erebus releases. The managed plugin exposes read-only lookup and status tools.
+Erebus also supplies eight research skills: codebase research, web research, chain discovery, exploit validation, evidence testing, adaptive fuzzing, external intelligence, and finding reports. They are focused references, not a mandatory checklist. The agent uses the ones that help the current path.
 
 ## Co-agents and subagents
 
@@ -65,10 +65,6 @@ CVSS classifies a proved finding. Pass a complete explicit vector to `research.c
 
 Use **Settings > Research** to choose the Judge model and reasoning effort.
 
-## Proteus updates
-
-Erebus checks its managed Proteus runtime against the latest stable release. When an update is available, the app shows the current and latest versions. The update control verifies the release metadata, installs the new runtime, and keeps the previous managed release for rollback. The runtime remains read-only inside Erebus.
-
 ## Argos updates
 
-Erebus includes Argos 0.1.0 as a tested fallback and checks the latest stable Argos release separately. The app shows the current and latest versions. Both automatic and manual updates verify the exact release asset and its SHA-256 digest, then install the MCP and skills for enabled Codex accounts. The current and previous managed releases remain available, and project knowledge under `.argos/` stays intact.
+Erebus includes Argos 0.1.0 as a tested fallback and checks the latest stable Argos release separately. The app shows the current and latest versions. Both automatic and manual updates verify the exact release asset and its SHA-256 digest, then install the MCP and operational skill for enabled providers. The current and previous managed releases remain available, and project knowledge under `.argos/` stays intact.

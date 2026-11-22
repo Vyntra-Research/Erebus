@@ -41,10 +41,12 @@ import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneratio
 import { installManagedArgosForCodex } from "../../argosRuntime.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
+import { removeLegacyManagedProteusRuntime } from "../../legacyResearchRuntimeCleanup.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { resolveAgentPersonaDeveloperInstructions } from "../AgentPersona.ts";
 import { CoagentToolController } from "../../coagents/Services/CoagentToolController.ts";
 import { ResearchToolController } from "../../research/Services/ResearchToolController.ts";
+import { materializeErebusResearchSkills } from "../../research/researchSkills.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
 import { CodexRequestGateway } from "../Layers/CodexRequestGateway.ts";
@@ -78,7 +80,6 @@ import {
   withAutomaticCodexAccountOverlay,
 } from "./CodexHomeLayout.ts";
 import { reconcileCodexRolloutPaths } from "./CodexRolloutPathRepair.ts";
-import { installManagedProteusForCodex } from "../../proteusRuntime.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -171,25 +172,37 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
+      yield* removeLegacyManagedProteusRuntime(
+        homeLayout.sharedHomePath,
+        serverConfig.stateDir,
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: cause.detail,
+              cause,
+            }),
+        ),
+      );
       if (enabled) {
-        // Research runtimes are shared by every account. Install them before
-        // materializing the overlay so config.toml and managed plugin entries
-        // already exist in the shared home and are linked into the account home.
-        yield* installManagedArgosForCodex(homeLayout.sharedHomePath, {
-          managedRuntimeRoot: path.join(serverConfig.stateDir, "managed", "argos-runtime"),
-        }).pipe(
+        // Research runtimes are shared by every account. Install Argos before
+        // materializing the overlay so its managed entries already exist in the
+        // shared home and are linked into the account home.
+        yield* materializeErebusResearchSkills(path.join(homeLayout.sharedHomePath, "skills")).pipe(
           Effect.mapError(
             (cause) =>
               new ProviderDriverError({
                 driver: DRIVER_KIND,
                 instanceId,
-                detail: cause.detail,
+                detail: cause.message,
                 cause,
               }),
           ),
         );
-        yield* installManagedProteusForCodex(homeLayout.sharedHomePath, {
-          managedRuntimeRoot: path.join(serverConfig.stateDir, "managed", "proteus-runtime"),
+        yield* installManagedArgosForCodex(homeLayout.sharedHomePath, {
+          managedRuntimeRoot: path.join(serverConfig.stateDir, "managed", "argos-runtime"),
         }).pipe(
           Effect.mapError(
             (cause) =>

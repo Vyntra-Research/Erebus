@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  canAddProviderDriver,
   deriveAvailableProviderInstanceId,
   resolveWizardNavigation,
 } from "./AddProviderInstanceDialog.logic";
+
+describe("canAddProviderDriver", () => {
+  const existingDrivers = new Set(["codex", "opencode"]);
+
+  it("allows another instance when the driver supports multiple accounts", () => {
+    expect(canAddProviderDriver("codex", true, existingDrivers)).toBe(true);
+  });
+
+  it("blocks another instance when the driver supports only one", () => {
+    expect(canAddProviderDriver("opencode", false, existingDrivers)).toBe(false);
+  });
+
+  it("allows the first instance of a single-instance driver", () => {
+    expect(canAddProviderDriver("opencode", false, new Set())).toBe(true);
+  });
+});
 
 describe("deriveAvailableProviderInstanceId", () => {
   it("derives a stable account id from the label", () => {

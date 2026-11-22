@@ -5,11 +5,10 @@ export const EREBUS_RESEARCH_NAMESPACE = "research";
 
 export const EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS = `
 <erebus_control_transport mode="mcp_fallback">
-This resumed Codex rollout does not have a verified current native Erebus
-toolset. Its native research.* and threads.* schemas may be frozen legacy
-contracts. Use the authenticated erebus-research MCP server for Erebus control
-operations instead, even when a native tool has the same name. Do not call both
-transports for one operation. The t3-code MCP server is browser-only.
+This provider session uses the authenticated erebus-research MCP server for
+Erebus control operations. If native research.* or threads.* tools are also
+listed, do not call both transports for one operation. The t3-code MCP server
+contains the collaborative browser and web evidence tools.
 
 The current erebus-research tools are calculate_cvss, get_status,
 submit_finding, revise_finding, and threads_* for task coordination.
@@ -128,14 +127,14 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
       type: "function",
       name: "submit_finding",
       description:
-        "Submit revision 1 to the independent Judge using the existing findings/ document and pocs/ artifact. If accepted=true, this must be the final tool call of the turn; Erebus delivers the durable verdict in a separate follow-up turn. If accepted=false, no Judge job exists: fix the stated input problem and retry the same revision.",
+        "Submit revision 1 to the independent Judge using the existing findings/ document and pocs/ artifact in the task workspace. Standalone tasks use their own workspace and do not need a linked Erebus project. If accepted=true, this must be the final tool call of the turn; Erebus delivers the durable verdict in a separate follow-up turn. If accepted=false, no Judge job exists: fix the stated input problem and retry the same revision.",
       inputSchema: findingInputSchema,
     },
     {
       type: "function",
       name: "revise_finding",
       description:
-        "Submit the next artifact revision after revisionRequired, rejected, or invalidSubmission. Keep findingId stable, increment revision by one, and use the exact prior evaluation id. A reviewBlocked result is retried with the unchanged revision and unchanged artifacts instead. If accepted=true, end the turn and wait for the separate Judge follow-up.",
+        "Submit the next artifact revision from the task workspace after revisionRequired, rejected, or invalidSubmission. Standalone tasks use their own workspace and do not need a linked Erebus project. Keep findingId stable, increment revision by one, and use the exact prior evaluation id. A reviewBlocked result is retried with the unchanged revision and unchanged artifacts instead. If accepted=true, end the turn and wait for the separate Judge follow-up.",
       inputSchema: findingInputSchema,
     },
   ],

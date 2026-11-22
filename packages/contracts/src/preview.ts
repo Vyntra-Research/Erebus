@@ -62,6 +62,7 @@ export const PREVIEW_VIEWPORT_PRESET_IDS = [
   "iphone-se",
   "iphone-xr",
   "iphone-12-pro",
+  "iphone-15-pro",
   "iphone-14-pro-max",
   "pixel-7",
   "samsung-galaxy-s8-plus",
@@ -92,7 +93,6 @@ const LEGACY_PREVIEW_VIEWPORT_PRESET_IDS = [
   "laptop-1366x768",
   "laptop-1280x800",
   "ipad-pro-11",
-  "iphone-15-pro",
   "pixel-8",
   "galaxy-s24",
 ] as const;

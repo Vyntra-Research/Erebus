@@ -40,9 +40,6 @@ export type ResearchKnowledgeRuntimeHealth = typeof ResearchKnowledgeRuntimeHeal
 export const ResearchArgosHealth = ResearchKnowledgeRuntimeHealth;
 export type ResearchArgosHealth = typeof ResearchArgosHealth.Type;
 
-export const ResearchProteusHealth = ResearchKnowledgeRuntimeHealth;
-export type ResearchProteusHealth = typeof ResearchProteusHealth.Type;
-
 export const ResearchGateStatus = Schema.Literals(["pending", "pass", "fail", "unknown"]);
 export type ResearchGateStatus = typeof ResearchGateStatus.Type;
 
@@ -114,7 +111,7 @@ export const ResearchFindingReviewDeliveryStatus = Schema.Literals(["pending", "
 export type ResearchFindingReviewDeliveryStatus = typeof ResearchFindingReviewDeliveryStatus.Type;
 
 export const ResearchFindingReviewRecord = Schema.Struct({
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
   threadId: ThreadId,
   submission: ResearchFindingReviewSubmission,
   evaluations: Schema.Array(ResearchFindingReviewEvaluation),

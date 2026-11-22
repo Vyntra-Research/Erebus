@@ -63,6 +63,15 @@ export const PREVIEW_OPEN_DEVTOOLS_CHANNEL = "desktop:preview-open-devtools";
 export const PREVIEW_CLEAR_COOKIES_CHANNEL = "desktop:preview-clear-cookies";
 export const PREVIEW_CLEAR_CACHE_CHANNEL = "desktop:preview-clear-cache";
 export const PREVIEW_GET_CONFIG_CHANNEL = "desktop:preview-get-config";
+export const PREVIEW_OPEN_CAPTURE_EXTENSION_FOLDER_CHANNEL =
+  "desktop:preview-open-capture-extension-folder";
+export const PREVIEW_CONFIGURE_PROXY_CHANNEL = "desktop:preview-configure-proxy";
+export const PREVIEW_BROWSER_PROFILES_LIST_CHANNEL = "desktop:preview-browser-profiles-list";
+export const PREVIEW_BROWSER_PROFILES_CREATE_CHANNEL = "desktop:preview-browser-profiles-create";
+export const PREVIEW_BROWSER_PROFILES_RENAME_CHANNEL = "desktop:preview-browser-profiles-rename";
+export const PREVIEW_BROWSER_PROFILES_DELETE_CHANNEL = "desktop:preview-browser-profiles-delete";
+export const PREVIEW_BROWSER_PROFILES_CLEAR_ENVIRONMENT_CHANNEL =
+  "desktop:preview-browser-profiles-clear-environment";
 export const PREVIEW_SET_ANNOTATION_THEME_CHANNEL = "desktop:preview-set-annotation-theme";
 export const PREVIEW_PICK_ELEMENT_CHANNEL = "desktop:preview-pick-element";
 export const PREVIEW_CANCEL_PICK_ELEMENT_CHANNEL = "desktop:preview-cancel-pick-element";

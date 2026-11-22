@@ -763,15 +763,20 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
     }),
-    proteusStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:server:proteus-status",
-      tag: WS_METHODS.serverGetProteusStatus,
-      staleTimeMs: 5_000,
-    }),
     argosStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:argos-status",
       tag: WS_METHODS.serverGetArgosStatus,
       staleTimeMs: 5_000,
+    }),
+    modulesStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:modules-status",
+      tag: WS_METHODS.serverGetModulesStatus,
+      staleTimeMs: 5_000,
+    }),
+    microVms: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:micro-vms",
+      tag: WS_METHODS.serverListMicroVms,
+      staleTimeMs: 2_000,
     }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
@@ -797,14 +802,6 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
-    updateProteus: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:update-proteus",
-      tag: WS_METHODS.serverUpdateProteus,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId }) => environmentId,
-      },
-    }),
     updateArgos: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-argos",
       tag: WS_METHODS.serverUpdateArgos,
@@ -812,6 +809,30 @@ export function createServerEnvironmentAtoms<R, E>(
         mode: "singleFlight",
         key: ({ environmentId }) => environmentId,
       },
+    }),
+    updateModule: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:update-module",
+      tag: WS_METHODS.serverUpdateModule,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => `${environmentId}:${input.id}`,
+      },
+    }),
+    createMicroVm: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:create-micro-vm",
+      tag: WS_METHODS.serverCreateMicroVm,
+    }),
+    controlMicroVm: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:control-micro-vm",
+      tag: WS_METHODS.serverControlMicroVm,
+    }),
+    modifyMicroVm: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:modify-micro-vm",
+      tag: WS_METHODS.serverModifyMicroVm,
+    }),
+    removeMicroVm: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:remove-micro-vm",
+      tag: WS_METHODS.serverRemoveMicroVm,
     }),
     updateServer,
     upsertKeybinding: createEnvironmentRpcCommand(runtime, {

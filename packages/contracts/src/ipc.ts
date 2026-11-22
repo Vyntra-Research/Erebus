@@ -87,7 +87,7 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
-import { EnvironmentId } from "./baseSchemas.ts";
+import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
@@ -1008,8 +1008,76 @@ export const DesktopPreviewNavigateInputSchema = Schema.Struct({
   url: Schema.String,
 });
 
+export const DesktopPreviewBrowserProfileIdSchema = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(128),
+);
+export type DesktopPreviewBrowserProfileId = typeof DesktopPreviewBrowserProfileIdSchema.Type;
+
+export const DEFAULT_DESKTOP_PREVIEW_BROWSER_PROFILE_ID = "default" as const;
+
+export const DesktopPreviewBrowserProfileSchema = Schema.Struct({
+  id: DesktopPreviewBrowserProfileIdSchema,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+  isDefault: Schema.Boolean,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+export type DesktopPreviewBrowserProfile = typeof DesktopPreviewBrowserProfileSchema.Type;
+
+export const DesktopPreviewBrowserProfileNameInputSchema = Schema.Struct({
+  name: Schema.String,
+});
+
+export const DesktopPreviewBrowserProfileUpdateInputSchema = Schema.Struct({
+  profileId: DesktopPreviewBrowserProfileIdSchema,
+  name: Schema.String,
+});
+
+export const DesktopPreviewBrowserProfileDeleteInputSchema = Schema.Struct({
+  profileId: DesktopPreviewBrowserProfileIdSchema,
+});
+
+export const DesktopPreviewBrowserProfileDeleteResultSchema = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("deleted") }),
+  Schema.Struct({
+    status: Schema.Literal("in-use"),
+    activeTabCount: Schema.Int.check(Schema.isGreaterThan(0)),
+  }),
+]);
+export type DesktopPreviewBrowserProfileDeleteResult =
+  typeof DesktopPreviewBrowserProfileDeleteResultSchema.Type;
+
+export const DesktopPreviewBrowserProfilesClearEnvironmentInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+});
+
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
+  browserProfileId: Schema.optionalKey(DesktopPreviewBrowserProfileIdSchema),
+});
+
+const DesktopPreviewProxyUrlSchema = TrimmedNonEmptyString.check(Schema.isMaxLength(2_048));
+const DesktopPreviewProxyCaFingerprintSchema = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
+const DesktopPreviewProxyCaPemSchema = TrimmedNonEmptyString.check(Schema.isMaxLength(65_536));
+
+export const DesktopPreviewProxyConfigurationSchema = Schema.Union([
+  Schema.Struct({
+    proxyUrl: DesktopPreviewProxyUrlSchema,
+    caFingerprint: DesktopPreviewProxyCaFingerprintSchema,
+    caCertificatePem: Schema.optionalKey(DesktopPreviewProxyCaPemSchema),
+  }),
+  Schema.Struct({
+    proxyUrl: DesktopPreviewProxyUrlSchema,
+    caFingerprint: Schema.optionalKey(DesktopPreviewProxyCaFingerprintSchema),
+    caCertificatePem: DesktopPreviewProxyCaPemSchema,
+  }),
+]);
+export type DesktopPreviewProxyConfiguration = typeof DesktopPreviewProxyConfigurationSchema.Type;
+
+export const DesktopPreviewConfigureProxyInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  browserProfileId: Schema.optionalKey(DesktopPreviewBrowserProfileIdSchema),
+  proxy: Schema.NullOr(DesktopPreviewProxyConfigurationSchema),
 });
 
 export const DesktopPreviewSetColorSchemeInputSchema = Schema.Struct({
@@ -1198,7 +1266,27 @@ export interface DesktopPreviewBridge {
    * `getPickPreloadPath`) so adding a new field here only requires touching
    * the contract + main, not the renderer's mount logic.
    */
-  getPreviewConfig: (environmentId: EnvironmentId) => Promise<DesktopPreviewWebviewConfig>;
+  getPreviewConfig: (
+    environmentId: EnvironmentId,
+    browserProfileId?: DesktopPreviewBrowserProfileId,
+  ) => Promise<DesktopPreviewWebviewConfig>;
+  /** Open the unpacked web capture extension folder shipped with this desktop build. */
+  openCaptureExtensionFolder: () => Promise<boolean>;
+  /** Apply or remove the capture proxy for one persistent browser profile. */
+  configureProxy: (
+    environmentId: EnvironmentId,
+    proxy: DesktopPreviewProxyConfiguration | null,
+    browserProfileId?: DesktopPreviewBrowserProfileId,
+  ) => Promise<void>;
+  browserProfiles: {
+    list: () => Promise<readonly DesktopPreviewBrowserProfile[]>;
+    create: (name: string) => Promise<DesktopPreviewBrowserProfile>;
+    rename: (profileId: DesktopPreviewBrowserProfileId, name: string) => Promise<void>;
+    delete: (
+      profileId: DesktopPreviewBrowserProfileId,
+    ) => Promise<DesktopPreviewBrowserProfileDeleteResult | void>;
+    clearEnvironment: (environmentId: EnvironmentId) => Promise<void>;
+  };
   setAnnotationTheme: (theme: DesktopPreviewAnnotationTheme) => Promise<void>;
   /**
    * Activate the in-page element picker for the given tab. Resolves with

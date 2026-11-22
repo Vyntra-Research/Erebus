@@ -60,6 +60,7 @@ describe("isPreviewRefreshShortcut", () => {
 
 const {
   browserWindowConstructor,
+  createFromBuffer,
   createFromPath,
   fromId,
   getFocusedWebContents,
@@ -70,6 +71,7 @@ const {
   writeImage,
 } = vi.hoisted(() => ({
   browserWindowConstructor: vi.fn(),
+  createFromBuffer: vi.fn(() => ({ getSize: () => ({ width: 800, height: 600 }) })),
   createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
   fromId: vi.fn((_id?: number) => null),
   getFocusedWebContents: vi.fn(() => null),
@@ -86,6 +88,7 @@ vi.mock("electron", () => ({
     writeImage,
   },
   nativeImage: {
+    createFromBuffer,
     createFromPath,
   },
   shell: {
@@ -106,8 +109,10 @@ const browserSessionLayer = Layer.succeed(
     getPartition: () => Effect.succeed("persist:t3code-preview-test"),
     isPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
     getSession: () => Effect.die("unexpected getSession"),
+    configureProxy: () => Effect.die("unexpected configureProxy"),
     clearCookies: () => Effect.void,
     clearCache: () => Effect.void,
+    clearProfilePartitions: () => Effect.void,
   }),
 );
 
@@ -160,6 +165,8 @@ interface TestCapturedPreviewImage {
 const makeTestPreviewWebContents = (
   capturePage: () => Promise<TestCapturedPreviewImage>,
   id = 42,
+  sendCommand: (method: string, params?: Record<string, unknown>) => Promise<unknown> = async () =>
+    undefined,
 ) =>
   ({
     id,
@@ -168,6 +175,7 @@ const makeTestPreviewWebContents = (
     getURL: () => "https://example.com",
     getTitle: () => "Example",
     isLoading: () => false,
+    isDevToolsOpened: () => false,
     getZoomFactor: () => 1,
     setZoomFactor: vi.fn(),
     setAudioMuted: vi.fn(),
@@ -181,7 +189,7 @@ const makeTestPreviewWebContents = (
     debugger: {
       isAttached: () => false,
       attach: vi.fn(),
-      sendCommand: vi.fn(async () => undefined),
+      sendCommand,
       on: vi.fn(),
       off: vi.fn(),
     },
@@ -326,6 +334,7 @@ describe("PreviewManager", () => {
     writeFile.mockClear();
     showItemInFolder.mockClear();
     writeImage.mockClear();
+    createFromBuffer.mockClear();
     createFromPath.mockClear();
     webviewSend.mockClear();
   });
@@ -499,6 +508,45 @@ describe("PreviewManager", () => {
 
         expect(loadURL).toHaveBeenCalledOnce();
         expect(loadURL).toHaveBeenCalledWith("http://localhost:3200/");
+      }),
+    ),
+  );
+
+  effectIt.effect("accepts ERR_ABORTED after Electron starts the requested navigation", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeFaviconWebContents();
+        fromId.mockReturnValue(preview.webContents);
+        yield* manager.createTab("tab_aborted_navigation");
+        yield* manager.registerWebview("tab_aborted_navigation", 42);
+        preview.loadURL.mockImplementationOnce(async (url) => {
+          preview.setUrl(url);
+          preview.setLoading(true);
+          throw Object.assign(new Error("ERR_ABORTED (-3) loading URL"), {
+            code: "ERR_ABORTED",
+          });
+        });
+
+        yield* manager.navigate("tab_aborted_navigation", "https://example.com/redirected");
+
+        expect(preview.loadURL).toHaveBeenCalledWith("https://example.com/redirected");
+
+        preview.setLoading(false);
+        preview.loadURL.mockImplementationOnce(async () => {
+          throw Object.assign(new Error("ERR_FAILED (-2) loading URL"), {
+            code: "ERR_FAILED",
+          });
+        });
+        const exit = yield* Effect.exit(
+          manager.navigate("tab_aborted_navigation", "https://example.com/failed"),
+        );
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isSuccess(exit)) return;
+        expect(Option.getOrThrow(Cause.findErrorOption(exit.cause))).toMatchObject({
+          _tag: "PreviewOperationError",
+          operation: "navigate.loadURL",
+        });
       }),
     ),
   );
@@ -2467,16 +2515,17 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("retries a cold hidden-tab capture without dropping recording", () =>
+  effectIt.effect("falls back to a debugger frame when hidden-tab capture fails", () =>
     withManager((manager) =>
       Effect.gen(function* () {
-        const jpeg = Buffer.from("recovered-preview-frame");
-        const capturePage = vi.fn(async () => ({
-          toJPEG: () => jpeg,
-          getSize: () => ({ width: 1280, height: 720 }),
-        }));
-        capturePage.mockRejectedValueOnce(new Error("UnknownVizError"));
-        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage));
+        const jpeg = Buffer.from("debugger-recording-frame");
+        const capturePage = vi.fn(async (): Promise<TestCapturedPreviewImage> => {
+          throw new Error("UnknownVizError");
+        });
+        const sendCommand = vi.fn(async (method: string) =>
+          method === "Page.captureScreenshot" ? { data: jpeg.toString("base64") } : undefined,
+        );
+        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 42, sendCommand));
         const frames: DesktopPreviewRecordingFrame[] = [];
 
         yield* manager.subscribeRecordingFrames((frame) =>
@@ -2490,19 +2539,20 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_cold_capture");
 
         expect(capturePage).toHaveBeenCalledOnce();
-        expect(frames).toHaveLength(0);
-
-        yield* TestClock.adjust(100);
-
-        expect(capturePage).toHaveBeenCalledTimes(2);
         expect(frames).toEqual([
           expect.objectContaining({
             tabId: "tab_cold_capture",
             data: jpeg.toString("base64"),
-            width: 1280,
-            height: 720,
+            width: 800,
+            height: 600,
           }),
         ]);
+        expect(sendCommand).toHaveBeenCalledWith("Page.captureScreenshot", {
+          format: "jpeg",
+          fromSurface: true,
+          captureBeyondViewport: false,
+          quality: 80,
+        });
 
         yield* manager.stopRecording("tab_cold_capture");
       }),
@@ -2894,6 +2944,180 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("falls back to a debugger screenshot for automation snapshots", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const png = Buffer.from("debugger-snapshot");
+        const capturePage = vi.fn(async (): Promise<TestCapturedPreviewImage> => {
+          throw new Error("UnknownVizError");
+        });
+        const page = {
+          url: "https://example.com",
+          title: "Example",
+          loading: false,
+          visibleText: "Visible page text",
+          interactiveElements: [],
+        };
+        const accessibilityTree = { nodes: [] };
+        const sendCommand = vi.fn(async (method: string) => {
+          if (method === "Runtime.evaluate") return { result: { value: page } };
+          if (method === "Accessibility.getFullAXTree") return accessibilityTree;
+          if (method === "Page.captureScreenshot") return { data: png.toString("base64") };
+          return undefined;
+        });
+        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 42, sendCommand));
+        yield* manager.createTab("tab_snapshot_fallback");
+        yield* manager.registerWebview("tab_snapshot_fallback", 42);
+
+        const snapshot = yield* manager.automationSnapshot("tab_snapshot_fallback");
+
+        expect(capturePage).toHaveBeenCalledOnce();
+        expect(sendCommand).toHaveBeenCalledWith("Page.captureScreenshot", {
+          format: "png",
+          fromSurface: true,
+          captureBeyondViewport: false,
+        });
+        expect(snapshot).toMatchObject({
+          ...page,
+          accessibilityTree,
+          screenshot: {
+            mimeType: "image/png",
+            data: png.toString("base64"),
+            width: 800,
+            height: 600,
+          },
+        });
+      }),
+    ),
+  );
+
+  effectIt.effect("returns semantic snapshot data when both screenshot paths fail", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const capturePage = vi.fn(async (): Promise<TestCapturedPreviewImage> => {
+          throw new Error("native capture unavailable");
+        });
+        const page = {
+          url: "https://example.com/form",
+          title: "Example form",
+          loading: false,
+          visibleText: "Submit order",
+          interactiveElements: [],
+        };
+        const accessibilityTree = { nodes: [{ role: "button", name: "Submit order" }] };
+        const sendCommand = vi.fn(async (method: string) => {
+          if (method === "Runtime.evaluate") return { result: { value: page } };
+          if (method === "Accessibility.getFullAXTree") return accessibilityTree;
+          if (method === "Page.captureScreenshot") {
+            return new Promise<unknown>(() => {
+              // Simulate a compositor command that never settles.
+            });
+          }
+          return undefined;
+        });
+        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 42, sendCommand));
+        yield* manager.createTab("tab_snapshot_semantic_fallback");
+        yield* manager.registerWebview("tab_snapshot_semantic_fallback", 42);
+
+        const snapshotFiber = yield* manager
+          .automationSnapshot("tab_snapshot_semantic_fallback")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* settle(() =>
+          sendCommand.mock.calls.some(([method]) => method === "Page.captureScreenshot"),
+        );
+        yield* TestClock.adjust(3_000);
+        const snapshot = yield* Fiber.join(snapshotFiber);
+
+        expect(snapshot).toMatchObject({
+          ...page,
+          accessibilityTree,
+        });
+        expect(snapshot).not.toHaveProperty("screenshot");
+        expect(sendCommand).toHaveBeenCalledWith("Page.captureScreenshot", {
+          format: "png",
+          fromSurface: true,
+          captureBeyondViewport: false,
+        });
+      }),
+    ),
+  );
+
+  effectIt.effect("releases a queued click when native snapshot capture hangs", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let markCaptureStarted!: () => void;
+        const captureStarted = new Promise<void>((resolve) => {
+          markCaptureStarted = resolve;
+        });
+        const capturePage = vi.fn(() => {
+          markCaptureStarted();
+          return new Promise<TestCapturedPreviewImage>(() => undefined);
+        });
+        const png = Buffer.from("timed-out-native-capture");
+        let targetResolved = false;
+        const sendCommand = vi.fn(
+          async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
+            if (method === "Accessibility.getFullAXTree") return { nodes: [] };
+            if (method === "Page.captureScreenshot") return { data: png.toString("base64") };
+            if (method !== "Runtime.evaluate") return undefined;
+            const expression =
+              typeof params?.["expression"] === "string" ? params["expression"] : "";
+            if (expression.includes("interactiveElements: elements")) {
+              return {
+                result: {
+                  value: {
+                    url: "https://example.com",
+                    title: "Example",
+                    loading: false,
+                    visibleText: "Ready",
+                    interactiveElements: [],
+                  },
+                },
+              };
+            }
+            if (expression === "Boolean(globalThis.__t3PlaywrightInjected)") {
+              return { result: { value: true } };
+            }
+            if (expression.includes("const injected = globalThis.__t3PlaywrightInjected")) {
+              targetResolved = true;
+              return { result: { value: { x: 120, y: 80 } } };
+            }
+            return { result: { value: { width: 800, height: 600 } } };
+          },
+        );
+        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 42, sendCommand));
+        yield* manager.createTab("tab_snapshot_click_queue");
+        yield* manager.registerWebview("tab_snapshot_click_queue", 42);
+
+        const snapshotFiber = yield* manager
+          .automationSnapshot("tab_snapshot_click_queue")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => captureStarted);
+        const clickFiber = yield* manager
+          .automationClick("tab_snapshot_click_queue", {
+            locator: "text=Continue",
+            timeoutMs: 3_000,
+          })
+          .pipe(Effect.forkChild({ startImmediately: true }));
+
+        yield* TestClock.adjust(1_000);
+        const snapshot = yield* Fiber.join(snapshotFiber);
+        yield* settle(() => targetResolved);
+        yield* TestClock.adjust(200);
+        yield* Fiber.join(clickFiber);
+
+        expect(snapshot.screenshot?.data).toBe(png.toString("base64"));
+        expect(sendCommand).toHaveBeenCalledWith("Input.dispatchMouseEvent", {
+          type: "mousePressed",
+          x: 120,
+          y: 80,
+          button: "left",
+          clickCount: 1,
+        });
+      }),
+    ),
+  );
+
   effectIt.effect("emits the resolved pointer target before dispatching an automation click", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -2977,6 +3201,66 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("waits for a late click target using the documented default timeout", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let evaluation = 0;
+        const sendCommand = vi.fn(async (method: string) => {
+          if (method !== "Runtime.evaluate") return undefined;
+          evaluation += 1;
+          if (evaluation === 1) return { result: { value: true } };
+          if (evaluation === 2) return { result: { value: { notFound: true } } };
+          if (evaluation === 3) return { result: { value: { x: 120, y: 80 } } };
+          return { result: { value: { width: 800, height: 600 } } };
+        });
+        fromId.mockReturnValue({
+          id: 42,
+          isDestroyed: () => false,
+          getType: () => "webview",
+          getURL: () => "https://example.com",
+          getTitle: () => "Example",
+          isLoading: () => false,
+          isDevToolsOpened: () => false,
+          getZoomFactor: () => 1,
+          setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
+          on: vi.fn(),
+          off: vi.fn(),
+          ipc: { on: vi.fn(), off: vi.fn() },
+          send: webviewSend,
+          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setWindowOpenHandler: vi.fn(),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand,
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+        } as never);
+        yield* manager.createTab("tab_late_click_target");
+        yield* manager.registerWebview("tab_late_click_target", 42);
+
+        const click = yield* manager
+          .automationClick("tab_late_click_target", { locator: "text=Continue" })
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* settle(() => evaluation >= 2);
+        yield* TestClock.adjust(250);
+        yield* Fiber.join(click);
+
+        expect(evaluation).toBe(4);
+        expect(sendCommand).toHaveBeenCalledWith("Input.dispatchMouseEvent", {
+          type: "mousePressed",
+          x: 120,
+          y: 80,
+          button: "left",
+          clickCount: 1,
+        });
+      }),
+    ),
+  );
+
   effectIt.effect("types in background webviews and enables native key input", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -3049,6 +3333,11 @@ describe("PreviewManager", () => {
         yield* manager.registerWebview("tab_input", 42);
         yield* manager.automationType("tab_input", { text: "hello", clear: true });
         yield* manager.automationType("tab_input", { text: "", clear: true });
+        yield* manager.automationType("tab_input", {
+          locator: "input[type=time]",
+          text: "13:45",
+          clear: true,
+        });
         yield* manager.automationPress("tab_input", { key: "x" });
 
         const calls = sendCommand.mock.calls;
@@ -3090,6 +3379,18 @@ describe("PreviewManager", () => {
             params.expression.includes("Object.getOwnPropertyDescriptor"),
         );
         expect(clearOnlyEvaluation).toBeDefined();
+        const timeInputEvaluation = sendCommand.mock.calls.find(
+          ([method, params]) =>
+            method === "Runtime.evaluate" &&
+            typeof params === "object" &&
+            params !== null &&
+            "expression" in params &&
+            typeof params.expression === "string" &&
+            params.expression.includes('new Set(["date", "datetime-local"') &&
+            params.expression.includes('const text = "13:45"') &&
+            params.expression.includes("valueSetter.call(element, text)"),
+        );
+        expect(timeInputEvaluation).toBeDefined();
         expect(methods).not.toContain("Input.insertText");
         expect(enableIndex).toBeGreaterThanOrEqual(0);
         expect(focus).toHaveBeenCalledOnce();
@@ -3147,6 +3448,51 @@ describe("PreviewManager", () => {
           unmodifiedText: "!",
         });
         expect(restoreFocus).toHaveBeenCalledTimes(3);
+      }),
+    ),
+  );
+
+  effectIt.effect("rebuilds debugger control after a command stops responding", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let evaluationCount = 0;
+        const sendCommand = vi.fn(async (method: string) => {
+          if (method !== "Runtime.evaluate") return undefined;
+          evaluationCount += 1;
+          if (evaluationCount === 1) {
+            return new Promise<unknown>(() => {
+              // Simulate a renderer command that never settles.
+            });
+          }
+          return { result: { value: "recovered" } };
+        });
+        fromId.mockReturnValue(
+          makeTestPreviewWebContents(
+            async () => ({
+              toJPEG: () => Buffer.from("unused"),
+              getSize: () => ({ width: 1, height: 1 }),
+            }),
+            42,
+            sendCommand,
+          ),
+        );
+        yield* manager.createTab("tab_debugger_recovery");
+        yield* manager.registerWebview("tab_debugger_recovery", 42);
+
+        const stalled = yield* manager
+          .automationEvaluate("tab_debugger_recovery", { expression: "'stalled'" })
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* settle(() => evaluationCount === 1);
+        yield* TestClock.adjust(10_000);
+        const stalledExit = yield* Fiber.await(stalled);
+
+        expect(Exit.isFailure(stalledExit)).toBe(true);
+        expect(
+          yield* manager.automationEvaluate("tab_debugger_recovery", {
+            expression: "'recovered'",
+          }),
+        ).toBe("recovered");
+        expect(evaluationCount).toBe(2);
       }),
     ),
   );

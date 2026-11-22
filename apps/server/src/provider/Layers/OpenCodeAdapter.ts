@@ -1,6 +1,7 @@
 import {
   EventId,
   type OpenCodeSettings,
+  type ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -23,12 +24,22 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
+import type {
+  OpenCodeCompatClient as OpencodeClient,
+  OpenCodePart as Part,
+  OpenCodePermissionRequest as PermissionRequest,
+  OpenCodeQuestionRequest as QuestionRequest,
+} from "../opencodeClient.ts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import type { CoagentToolControllerShape } from "../../coagents/Services/CoagentToolController.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { EREBUS_MICROVM_INSTRUCTIONS } from "../../microVm/instructions.ts";
+import type { ResearchToolControllerShape } from "../../research/Services/ResearchToolController.ts";
+import { EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS } from "../../research/researchTools.ts";
+import { buildErebusDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
@@ -89,7 +100,8 @@ function parseOpenCodeResume(raw: unknown): { readonly sessionId: string } | und
  * propagate, or a transient blip resets a live thread to an empty one — the
  * #3604 silent context loss. Decides on structured signals only, never free
  * text: a numeric 404 or the exact `NotFoundError` name, found via a bounded walk
- * over `cause`/`body`/`error`/`data`. An explicit non-404 status seals its
+ * or the V2 `SessionNotFoundError` tag, found via a bounded walk over
+ * `cause`/`body`/`error`/`data`. An explicit non-404 status seals its
  * subtree so a wrapped "NotFound" name can't reclassify a real failure.
  * Exported for unit testing.
  */
@@ -121,6 +133,9 @@ export function isOpenCodeNotFound(cause: unknown): boolean {
 
     const name = record.name;
     if (typeof name === "string" && name.toLowerCase() === "notfounderror") {
+      return true;
+    }
+    if (record._tag === "SessionNotFoundError") {
       return true;
     }
 
@@ -193,7 +208,19 @@ function openCodeEventSessionId(event: OpenCodeSubscribedEvent): string | undefi
   }
 
   const info = (properties as { readonly info?: { readonly id?: unknown } }).info;
-  return info && typeof info.id === "string" ? info.id : undefined;
+  const infoSessionID = info && "sessionID" in info ? info.sessionID : undefined;
+  if (typeof infoSessionID === "string") {
+    return infoSessionID;
+  }
+
+  const part = (properties as { readonly part?: { readonly sessionID?: unknown } }).part;
+  if (part && typeof part.sessionID === "string") {
+    return part.sessionID;
+  }
+
+  return event.type === "session.updated" && info && typeof info.id === "string"
+    ? info.id
+    : undefined;
 }
 
 function openCodeEventSessionTitle(event: OpenCodeSubscribedEvent): string | undefined {
@@ -226,7 +253,12 @@ interface OpenCodeSessionContext {
   readonly client: OpencodeClient;
   readonly server: OpenCodeServerConnection;
   readonly directory: string;
+  readonly projectId: ProjectId | null;
   readonly openCodeSessionId: string;
+  readonly browserToolsAvailable: boolean;
+  readonly webToolsAvailable: boolean;
+  readonly erebusToolsAvailable: boolean;
+  readonly researchFallbackAvailable: boolean;
   readonly pendingPermissions: Map<string, PermissionRequest>;
   readonly pendingQuestions: Map<string, QuestionRequest>;
   readonly messageRoleById: Map<string, "user" | "assistant">;
@@ -244,6 +276,11 @@ interface OpenCodeSessionContext {
    */
   readonly stopped: Ref.Ref<boolean>;
   /**
+   * Cancels the long-lived `event.subscribe` request before the session scope
+   * starts waiting for its event-pump fiber to stop.
+   */
+  readonly eventsAbortController: AbortController;
+  /**
    * Sole lifecycle handle for the session. Closing this scope:
    *   - aborts the `AbortController` registered as a finalizer
    *     (cancels the in-flight `event.subscribe` fetch),
@@ -259,6 +296,9 @@ export interface OpenCodeAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly researchToolController?: ResearchToolControllerShape;
+  readonly coagentToolController?: CoagentToolControllerShape;
+  readonly getAgentPersonaDeveloperInstructions?: () => Effect.Effect<string>;
 }
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -521,11 +561,22 @@ function sessionErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
     return "OpenCode session failed.";
   }
+  const directMessage = "message" in error ? error.message : null;
+  if (typeof directMessage === "string" && directMessage.trim().length > 0) {
+    return directMessage;
+  }
   const data = "data" in error && error.data && typeof error.data === "object" ? error.data : null;
   const message = data && "message" in data ? data.message : null;
   return typeof message === "string" && message.trim().length > 0
     ? message
     : "OpenCode session failed.";
+}
+
+function normalizeOpenCodeAgentId(agent: string | undefined): string | undefined {
+  const normalized = agent?.trim();
+  if (!normalized) return undefined;
+  const legacyBuiltInId = normalized.toLowerCase();
+  return legacyBuiltInId === "build" || legacyBuiltInId === "plan" ? legacyBuiltInId : normalized;
 }
 
 function updateProviderSession(
@@ -569,6 +620,11 @@ const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
   yield* runOpenCodeSdk("session.abort", () =>
     context.client.session.abort({ sessionID: context.openCodeSessionId }),
   ).pipe(Effect.ignore({ log: true }));
+
+  // Do this explicitly before Scope.close. The event-pump fiber is itself a
+  // finalizer of the scope; relying on the controller's scope finalizer can
+  // make close wait for the fetch before the fetch is cancelled.
+  context.eventsAbortController.abort();
 
   // Closing the session scope interrupts every fiber forked into it and
   // runs each finalizer we registered — the `AbortController.abort()` call,
@@ -729,6 +785,7 @@ export function makeOpenCodeAdapter(
       yield* runOpenCodeSdk("session.abort", () =>
         context.client.session.abort({ sessionID: context.openCodeSessionId }),
       ).pipe(Effect.ignore({ log: true }));
+      context.eventsAbortController.abort();
       yield* Scope.close(context.sessionScope, Exit.void);
     });
 
@@ -802,13 +859,14 @@ export function makeOpenCodeAdapter(
     const handleSubscribedEvent = Effect.fn("handleSubscribedEvent")(function* (
       context: OpenCodeSessionContext,
       event: OpenCodeSubscribedEvent,
+      turnIdOverride?: TurnId,
     ) {
       const payloadSessionId = openCodeEventSessionId(event);
       if (payloadSessionId !== context.openCodeSessionId) {
         return;
       }
 
-      const turnId = context.activeTurnId;
+      const turnId = turnIdOverride ?? context.activeTurnId;
       yield* writeNativeEventBestEffort(context.session.threadId, {
         observedAt: yield* nowIso,
         event: {
@@ -1075,6 +1133,8 @@ export function makeOpenCodeAdapter(
 
           if (event.properties.status.type === "idle" && turnId) {
             context.activeTurnId = undefined;
+            context.activeAgent = undefined;
+            context.activeVariant = undefined;
             yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
             yield* emit({
               ...(yield* buildEventBase({
@@ -1137,15 +1197,134 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    const reconcileTurnAfterWait = Effect.fn("reconcileTurnAfterWait")(function* (
+      context: OpenCodeSessionContext,
+      turnId: TurnId,
+      baselineMessageIds: ReadonlySet<string>,
+    ) {
+      const waitExit = yield* Effect.exit(
+        runOpenCodeSdk("session.wait", () =>
+          context.client.session.wait(
+            { sessionID: context.openCodeSessionId },
+            { signal: context.eventsAbortController.signal },
+          ),
+        ),
+      );
+      if (context.eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
+        return;
+      }
+      if (context.activeTurnId !== undefined && context.activeTurnId !== turnId) {
+        return;
+      }
+      if (Exit.isFailure(waitExit)) {
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+          })),
+          type: "runtime.warning",
+          payload: {
+            message: "OpenCode turn reconciliation failed.",
+            detail: openCodeRuntimeErrorDetail(Cause.squash(waitExit.cause)),
+          },
+        });
+        return;
+      }
+
+      const messagesExit = yield* Effect.exit(
+        runOpenCodeSdk("session.messages", () =>
+          context.client.session.messages({ sessionID: context.openCodeSessionId }),
+        ),
+      );
+      if (context.activeTurnId !== undefined && context.activeTurnId !== turnId) {
+        return;
+      }
+      if (Exit.isFailure(messagesExit)) {
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+          })),
+          type: "runtime.warning",
+          payload: {
+            message: "OpenCode completed, but its response could not be reconciled.",
+            detail: openCodeRuntimeErrorDetail(Cause.squash(messagesExit.cause)),
+          },
+        });
+        return;
+      }
+
+      const newEntries = (messagesExit.value.data ?? []).filter(
+        (entry) => !baselineMessageIds.has(entry.info.id),
+      );
+      const failedAssistant = newEntries.find(
+        (entry) => entry.info.role === "assistant" && entry.info.error !== undefined,
+      );
+      if (failedAssistant?.info.error !== undefined) {
+        if (context.activeTurnId === turnId) {
+          yield* handleSubscribedEvent(context, {
+            type: "session.error",
+            properties: {
+              sessionID: context.openCodeSessionId,
+              error: failedAssistant.info.error,
+            },
+          });
+        }
+        return;
+      }
+
+      for (const entry of newEntries) {
+        yield* handleSubscribedEvent(
+          context,
+          {
+            type: "message.updated",
+            properties: {
+              sessionID: context.openCodeSessionId,
+              info: entry.info,
+            },
+          },
+          turnId,
+        );
+        for (const part of entry.parts) {
+          yield* handleSubscribedEvent(
+            context,
+            {
+              type: "message.part.updated",
+              properties: {
+                sessionID: context.openCodeSessionId,
+                part,
+              },
+            },
+            turnId,
+          );
+        }
+      }
+
+      if (context.activeTurnId !== turnId) {
+        return;
+      }
+      context.activeTurnId = undefined;
+      context.activeAgent = undefined;
+      context.activeVariant = undefined;
+      yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+        })),
+        type: "turn.completed",
+        payload: { state: "completed" },
+      });
+    });
+
     const startEventPump = Effect.fn("startEventPump")(function* (context: OpenCodeSessionContext) {
       // One AbortController per session scope. The finalizer fires when
       // the scope closes (explicit stop, unexpected exit, or layer
       // shutdown) and cancels the in-flight `event.subscribe` fetch so
       // the async iterable unwinds cleanly.
-      const eventsAbortController = new AbortController();
       yield* Scope.addFinalizer(
         context.sessionScope,
-        Effect.sync(() => eventsAbortController.abort()),
+        Effect.sync(() => context.eventsAbortController.abort()),
       );
 
       // Fibers forked into `context.sessionScope` are interrupted
@@ -1153,7 +1332,7 @@ export function makeOpenCodeAdapter(
       yield* Effect.flatMap(
         runOpenCodeSdk("event.subscribe", () =>
           context.client.event.subscribe(undefined, {
-            signal: eventsAbortController.signal,
+            signal: context.eventsAbortController.signal,
           }),
         ),
         (subscription) =>
@@ -1172,7 +1351,7 @@ export function makeOpenCodeAdapter(
           Effect.gen(function* () {
             // Expected paths: caller aborted the fetch or the session
             // has already been marked stopped. Treat as a clean exit.
-            if (eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
+            if (context.eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
               return;
             }
             if (Exit.isFailure(exit)) {
@@ -1229,11 +1408,15 @@ export function makeOpenCodeAdapter(
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
                 directory,
-                ...(server.external && serverPassword ? { serverPassword } : {}),
+                ...(server.password
+                  ? { serverPassword: server.password }
+                  : server.external && serverPassword
+                    ? { serverPassword }
+                    : {}),
               });
               const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
               if (mcpSession && !server.external) {
-                yield* runOpenCodeSdk("mcp.add", () =>
+                yield* runOpenCodeSdk("mcp.add:t3-code", () =>
                   client.mcp.add({
                     name: "t3-code",
                     config: {
@@ -1246,6 +1429,22 @@ export function makeOpenCodeAdapter(
                     },
                   }),
                 );
+                const researchFallbackEndpoint = mcpSession.researchFallbackEndpoint;
+                if (researchFallbackEndpoint) {
+                  yield* runOpenCodeSdk("mcp.add:erebus-research", () =>
+                    client.mcp.add({
+                      name: "erebus-research",
+                      config: {
+                        type: "remote",
+                        url: researchFallbackEndpoint,
+                        headers: {
+                          Authorization: mcpSession.authorizationHeader,
+                        },
+                        oauth: false,
+                      },
+                    }),
+                  );
+                }
               }
               // Resume: re-adopt the session named by the durable cursor —
               // OpenCode scopes history by session id. The probe recovers only
@@ -1338,6 +1537,11 @@ export function makeOpenCodeAdapter(
                 client,
                 openCodeSession: resolved.openCodeSession,
                 created: resolved.created,
+                browserToolsAvailable: !server.external && mcpSession?.previewEnabled === true,
+                webToolsAvailable: !server.external && mcpSession?.webEnabled === true,
+                erebusToolsAvailable: !server.external && mcpSession !== undefined,
+                researchFallbackAvailable:
+                  !server.external && mcpSession?.researchFallbackEndpoint !== undefined,
               };
             }).pipe(Effect.provideService(Scope.Scope, sessionScope)),
           );
@@ -1391,7 +1595,12 @@ export function makeOpenCodeAdapter(
           client: started.client,
           server: started.server,
           directory,
+          projectId: input.projectId ?? null,
           openCodeSessionId: started.openCodeSession.id,
+          browserToolsAvailable: started.browserToolsAvailable,
+          webToolsAvailable: started.webToolsAvailable,
+          erebusToolsAvailable: started.erebusToolsAvailable,
+          researchFallbackAvailable: started.researchFallbackAvailable,
           pendingPermissions: new Map(),
           pendingQuestions: new Map(),
           partById: new Map(),
@@ -1403,6 +1612,7 @@ export function makeOpenCodeAdapter(
           activeAgent: undefined,
           activeVariant: undefined,
           stopped: yield* Ref.make(false),
+          eventsAbortController: new AbortController(),
           sessionScope: started.sessionScope,
         };
         sessions.set(input.threadId, context);
@@ -1472,8 +1682,59 @@ export function makeOpenCodeAdapter(
         });
       }
 
-      const agent = getModelSelectionStringOptionValue(modelSelection, "agent");
+      const agent = normalizeOpenCodeAgentId(
+        getModelSelectionStringOptionValue(modelSelection, "agent"),
+      );
       const variant = getModelSelectionStringOptionValue(modelSelection, "variant");
+      const additionalInstructions = yield* Effect.all([
+        Effect.succeed(context.erebusToolsAvailable ? EREBUS_MICROVM_INSTRUCTIONS : ""),
+        options?.getAgentPersonaDeveloperInstructions
+          ? options.getAgentPersonaDeveloperInstructions()
+          : Effect.succeed(""),
+        options?.researchToolController
+          ? options.researchToolController.principalInstructions({
+              projectId: context.projectId,
+              threadId: input.threadId,
+              cwd: context.directory,
+            })
+          : Effect.succeed(""),
+        options?.coagentToolController
+          ? options.coagentToolController.instructions({
+              projectId: context.projectId,
+              threadId: input.threadId,
+              cwd: context.directory,
+            })
+          : Effect.succeed(""),
+        Effect.succeed(
+          context.researchFallbackAvailable ? EREBUS_RESEARCH_FALLBACK_INSTRUCTIONS : "",
+        ),
+      ]).pipe(Effect.map((parts) => parts.filter(Boolean).join("\n\n")));
+      const system = buildErebusDeveloperInstructions(
+        input.interactionMode ?? "default",
+        {
+          harness: "OpenCode",
+          model: modelSelection?.model ?? `${parsedModel.providerID}/${parsedModel.modelID}`,
+          reasoningEffort: variant ?? "default",
+        },
+        context.browserToolsAvailable,
+        additionalInstructions,
+        context.webToolsAvailable,
+      );
+
+      const reconciliationBaseline =
+        steeringTurnId === undefined
+          ? yield* runOpenCodeSdk("session.messages", () =>
+              context.client.session.messages({ sessionID: context.openCodeSessionId }),
+            ).pipe(
+              Effect.map(
+                (messages) =>
+                  new Set(
+                    (messages.data ?? []).map((entry) => entry.info.id),
+                  ) as ReadonlySet<string>,
+              ),
+              Effect.option,
+            )
+          : Option.none<ReadonlySet<string>>();
 
       context.activeTurnId = turnId;
       context.activeAgent = agent ?? (input.interactionMode === "plan" ? "plan" : undefined);
@@ -1505,6 +1766,8 @@ export function makeOpenCodeAdapter(
           model: parsedModel,
           ...(context.activeAgent ? { agent: context.activeAgent } : {}),
           ...(context.activeVariant ? { variant: context.activeVariant } : {}),
+          system,
+          delivery: steeringTurnId === undefined ? "queue" : "steer",
           parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
         }),
       ).pipe(
@@ -1543,6 +1806,12 @@ export function makeOpenCodeAdapter(
               }),
         ),
       );
+
+      if (steeringTurnId === undefined && Option.isSome(reconciliationBaseline)) {
+        yield* reconcileTurnAfterWait(context, turnId, reconciliationBaseline.value).pipe(
+          Effect.forkIn(context.sessionScope),
+        );
+      }
 
       return {
         threadId: input.threadId,
@@ -1590,6 +1859,7 @@ export function makeOpenCodeAdapter(
 
       yield* runOpenCodeSdk("permission.reply", () =>
         context.client.permission.reply({
+          sessionID: context.openCodeSessionId,
           requestID: requestId,
           reply: toOpenCodePermissionReply(decision),
         }),
@@ -1611,6 +1881,7 @@ export function makeOpenCodeAdapter(
 
       yield* runOpenCodeSdk("question.reply", () =>
         context.client.question.reply({
+          sessionID: context.openCodeSessionId,
           requestID: requestId,
           answers: toOpenCodeQuestionAnswers(request, answers),
         }),

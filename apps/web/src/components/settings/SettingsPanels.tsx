@@ -75,8 +75,6 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
-import { useEnvironmentQuery } from "../../state/query";
-import { useAtomCommand } from "../../state/use-atom-command";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
@@ -89,12 +87,7 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
-import {
-  primaryServerObservabilityAtom,
-  primaryServerProvidersAtom,
-  serverEnvironment,
-} from "../../state/server";
-import { usePrimaryEnvironment } from "../../state/environments";
+import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -472,156 +465,6 @@ function AboutVersionSection() {
         />
       ) : null}
     </>
-  );
-}
-
-function AboutProteusSection() {
-  const primaryEnvironment = usePrimaryEnvironment();
-  const environmentId = primaryEnvironment?.environmentId ?? null;
-  const {
-    data: proteusStatus,
-    error: proteusStatusError,
-    isPending: isProteusStatusPending,
-    refresh: refreshProteusStatus,
-  } = useEnvironmentQuery(
-    environmentId === null ? null : serverEnvironment.proteusStatus({ environmentId, input: {} }),
-  );
-  const updateProteus = useAtomCommand(serverEnvironment.updateProteus, {
-    reportFailure: false,
-  });
-  const [isUpdating, setIsUpdating] = useState(false);
-
-  const handleUpdate = useCallback(async () => {
-    if (environmentId === null || isUpdating) return;
-    setIsUpdating(true);
-    const result = await updateProteus({ environmentId, input: {} });
-    setIsUpdating(false);
-    if (result._tag === "Success") {
-      refreshProteusStatus();
-      toastManager.add({
-        type: "success",
-        title: result.value.updated ? "Proteus updated" : "Proteus is up to date",
-        description: `Version ${result.value.version}`,
-      });
-      return;
-    }
-    if (!isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not update Proteus",
-          description: error instanceof Error ? error.message : "Proteus update failed.",
-        }),
-      );
-    }
-  }, [environmentId, isUpdating, refreshProteusStatus, updateProteus]);
-
-  const version = proteusStatus?.version ?? (isProteusStatusPending ? "Checking…" : "Unavailable");
-  const latestVersion = proteusStatus?.latestVersion ?? null;
-  const updateAvailable = proteusStatus?.updateAvailable === true && latestVersion !== null;
-  const description = updateAvailable
-    ? `Proteus ${latestVersion} is available.`
-    : (proteusStatus?.updateCheckError ?? proteusStatusError ?? "Managed research runtime.");
-  return (
-    <SettingsRow
-      title={
-        <span className="inline-flex items-baseline gap-2">
-          <span>Proteus</span>
-          <code className="text-[11px] font-medium text-muted-foreground">{version}</code>
-        </span>
-      }
-      description={description}
-      control={
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={environmentId === null || isUpdating || isProteusStatusPending}
-          onClick={() => void handleUpdate()}
-        >
-          {isUpdating
-            ? "Updating…"
-            : updateAvailable
-              ? `Update to ${latestVersion}`
-              : "Check for Updates"}
-        </Button>
-      }
-    />
-  );
-}
-
-function AboutArgosSection() {
-  const primaryEnvironment = usePrimaryEnvironment();
-  const environmentId = primaryEnvironment?.environmentId ?? null;
-  const {
-    data: argosStatus,
-    error: argosStatusError,
-    isPending: isArgosStatusPending,
-    refresh: refreshArgosStatus,
-  } = useEnvironmentQuery(
-    environmentId === null ? null : serverEnvironment.argosStatus({ environmentId, input: {} }),
-  );
-  const updateArgos = useAtomCommand(serverEnvironment.updateArgos, {
-    reportFailure: false,
-  });
-  const [isUpdating, setIsUpdating] = useState(false);
-
-  const handleUpdate = useCallback(async () => {
-    if (environmentId === null || isUpdating) return;
-    setIsUpdating(true);
-    const result = await updateArgos({ environmentId, input: {} });
-    setIsUpdating(false);
-    if (result._tag === "Success") {
-      refreshArgosStatus();
-      toastManager.add({
-        type: "success",
-        title: result.value.updated ? "Argos updated" : "Argos is up to date",
-        description: `Version ${result.value.version}`,
-      });
-      return;
-    }
-    if (!isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not update Argos",
-          description: error instanceof Error ? error.message : "Argos update failed.",
-        }),
-      );
-    }
-  }, [environmentId, isUpdating, refreshArgosStatus, updateArgos]);
-
-  const version = argosStatus?.version ?? (isArgosStatusPending ? "Checking…" : "Unavailable");
-  const latestVersion = argosStatus?.latestVersion ?? null;
-  const updateAvailable = argosStatus?.updateAvailable === true && latestVersion !== null;
-  const description = updateAvailable
-    ? `Argos ${latestVersion} is available.`
-    : (argosStatus?.updateCheckError ?? argosStatusError ?? "Managed connected research map.");
-  return (
-    <SettingsRow
-      title={
-        <span className="inline-flex items-baseline gap-2">
-          <span>Argos</span>
-          <code className="text-[11px] font-medium text-muted-foreground">{version}</code>
-        </span>
-      }
-      description={description}
-      control={
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={environmentId === null || isUpdating || isArgosStatusPending}
-          onClick={() => void handleUpdate()}
-        >
-          {isUpdating
-            ? "Updating…"
-            : updateAvailable
-              ? `Update to ${latestVersion}`
-              : "Check for Updates"}
-        </Button>
-      }
-    />
   );
 }
 
@@ -2785,8 +2628,6 @@ export function GeneralSettingsPanel() {
             description="Current version of the application."
           />
         )}
-        <AboutArgosSection />
-        <AboutProteusSection />
         <SettingsRow
           {...searchableSetting("diagnostics")}
           description={diagnosticsDescription}

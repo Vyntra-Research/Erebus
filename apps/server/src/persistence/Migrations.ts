@@ -69,6 +69,7 @@ import Migration0053 from "./Migrations/053_StandaloneThreads.ts";
 import Migration0054 from "./Migrations/054_ThreadSyncImportCascadeIndex.ts";
 import Migration0055 from "./Migrations/055_DeletedThreadRetention.ts";
 import Migration0056 from "./Migrations/056_StandaloneCoagents.ts";
+import Migration0057 from "./Migrations/057_StandaloneFindingReviews.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -137,6 +138,7 @@ export const migrationEntries = [
   [54, "ThreadSyncImportCascadeIndex", Migration0054],
   [55, "DeletedThreadRetention", Migration0055],
   [56, "StandaloneCoagents", Migration0056],
+  [57, "StandaloneFindingReviews", Migration0057],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

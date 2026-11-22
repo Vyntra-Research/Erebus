@@ -63,6 +63,7 @@ import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import * as WebRuntimeClient from "../../webRuntime/WebRuntimeClient.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
 import {
   EREBUS_NATIVE_CONTROL_FINGERPRINT,
@@ -2416,7 +2417,15 @@ validation.layer("ProviderServiceLive validation", (it) => {
 describe("agent browser access", () => {
   const revokedThreads: Array<ThreadId> = [];
 
-  it("uses fallback only when a resumed Codex rollout lacks native research tools", () => {
+  it("uses fallback for OpenCode and for resumed Codex without current native tools", () => {
+    assert.equal(
+      needsResearchMcpFallback({
+        provider: ProviderDriverKind.make("opencode"),
+        resumeCursor: undefined,
+        hasNativeResearchTools: false,
+      }),
+      true,
+    );
     assert.equal(
       needsResearchMcpFallback({
         provider: CODEX_DRIVER,
@@ -2449,6 +2458,7 @@ describe("agent browser access", () => {
     resumeCursor?: { readonly threadId: string },
     runtimePayload?: Record<string, unknown>,
     recoverOnSend = false,
+    webRuntime?: WebRuntimeClient.WebRuntimeClient["Service"],
   ) =>
     Effect.gen(function* () {
       const issued: Array<McpSessionRegistry.McpCredentialRequest> = [];
@@ -2463,7 +2473,7 @@ describe("agent browser access", () => {
       const directoryLayer = ProviderSessionDirectoryLive.pipe(
         Layer.provide(runtimeRepositoryLayer),
       );
-      const providerLayer = makeProviderServiceLive({
+      const providerLayerBase = makeProviderServiceLive({
         issueMcpCredential: (request) =>
           Effect.sync(() => {
             issued.push(request);
@@ -2483,6 +2493,11 @@ describe("agent browser access", () => {
           ),
         ),
       );
+      const providerLayer = webRuntime
+        ? providerLayerBase.pipe(
+            Layer.provide(Layer.succeed(WebRuntimeClient.WebRuntimeClient, webRuntime)),
+          )
+        : providerLayerBase;
 
       yield* Effect.gen(function* () {
         const provider = yield* ProviderService.ProviderService;
@@ -2573,6 +2588,76 @@ describe("agent browser access", () => {
         [threadId],
       );
       assert.deepEqual(Array.from(issued[0]?.capabilities ?? []), ["preview"]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("adds web capability only while the capture runtime is available", () =>
+    Effect.gen(function* () {
+      const runtime = WebRuntimeClient.WebRuntimeClient.of({
+        health: Effect.succeed({
+          status: "healthy",
+          connection: Option.none(),
+          lastError: Option.none(),
+          restartCount: 0,
+        }),
+        connection: Effect.die("unused"),
+        requestJson: () => Effect.die("unused"),
+        requestText: () => Effect.die("unused"),
+      });
+      const issued = yield* startSessionWith(
+        false,
+        asThreadId("thread-web-tools"),
+        undefined,
+        undefined,
+        false,
+        runtime,
+      );
+
+      assert.deepEqual(Array.from(issued[0]?.capabilities ?? []), ["web"]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("emits web capability for a delegated thread through its own session", () =>
+    Effect.gen(function* () {
+      const runtime = WebRuntimeClient.WebRuntimeClient.of({
+        health: Effect.succeed({
+          status: "healthy",
+          connection: Option.none(),
+          lastError: Option.none(),
+          restartCount: 0,
+        }),
+        connection: Effect.die("unused"),
+        requestJson: () => Effect.die("unused"),
+        requestText: () => Effect.die("unused"),
+      });
+      const parentThreadId = asThreadId("thread-web-parent");
+      const childThreadId = asThreadId("thread-web-coagent");
+      const parentIssued = yield* startSessionWith(
+        false,
+        parentThreadId,
+        undefined,
+        undefined,
+        false,
+        runtime,
+      );
+      const childIssued = yield* startSessionWith(
+        false,
+        childThreadId,
+        undefined,
+        undefined,
+        false,
+        runtime,
+      );
+
+      assert.deepEqual(
+        parentIssued.map((request) => request.threadId),
+        [parentThreadId],
+      );
+      assert.deepEqual(
+        childIssued.map((request) => request.threadId),
+        [childThreadId],
+      );
+      assert.deepEqual(Array.from(childIssued[0]?.capabilities ?? []), ["web"]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

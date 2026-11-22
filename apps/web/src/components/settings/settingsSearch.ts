@@ -6,6 +6,8 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/providers"
   | "/settings/research"
+  | "/settings/modules"
+  | "/settings/microvms"
   | "/settings/integrations"
   | "/settings/source-control"
   | "/settings/connections"
@@ -31,6 +33,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
   "/settings/research": "Research",
+  "/settings/modules": "Modules",
+  "/settings/microvms": "MicroVMs",
   "/settings/integrations": "Integrations",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
@@ -44,6 +48,31 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * here once instead of separately in the panel and the index.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "microvms",
+    title: "Persistent microVMs",
+    to: "/settings/microvms",
+  },
+  {
+    id: "module-argos",
+    title: "Argos",
+    to: "/settings/modules",
+  },
+  {
+    id: "module-secrethound",
+    title: "SecretHound",
+    to: "/settings/modules",
+  },
+  {
+    id: "module-katana",
+    title: "Katana",
+    to: "/settings/modules",
+  },
+  {
+    id: "module-subfinder",
+    title: "Subfinder",
+    to: "/settings/modules",
+  },
   {
     id: "research-evaluator-model",
     title: "Judge model",

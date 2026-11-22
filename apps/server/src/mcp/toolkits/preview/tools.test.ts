@@ -26,6 +26,14 @@ const schemaHasMultipleAllOfDescriptions = (schema: unknown): boolean => {
 };
 
 it("exports provider-compatible object schemas with described parameters", () => {
+  const profileToolsWithoutTabTargets = new Set([
+    "preview_browser_profiles",
+    "preview_browser_profile_create",
+    "preview_browser_profile_rename",
+    "preview_browser_profile_delete",
+    "preview_browser_profile_proxy",
+    "preview_tabs",
+  ]);
   for (const tool of Object.values(PreviewToolkit.tools)) {
     const schema = Tool.getJsonSchema(tool) as {
       readonly type?: unknown;
@@ -43,10 +51,12 @@ it("exports provider-compatible object schemas with described parameters", () =>
     if (tool.name === "preview_navigate") {
       expect(schemaHasMultipleAllOfDescriptions(schema)).toBe(false);
     }
-    expect(
-      schema.properties?.tabId,
-      `${tool.name} must allow an explicit collaborative browser tab target`,
-    ).toBeDefined();
+    if (!profileToolsWithoutTabTargets.has(tool.name)) {
+      expect(
+        schema.properties?.tabId,
+        `${tool.name} must allow an explicit collaborative browser tab target`,
+      ).toBeDefined();
+    }
     for (const [field, fieldSchema] of Object.entries(schema.properties ?? {})) {
       expect(
         schemaHasDescription(fieldSchema),
@@ -70,5 +80,34 @@ it("exports exact object result schemas for preview actions", () => {
       additionalProperties: false,
       description: "The preview action completed successfully.",
     });
+  }
+});
+
+it("advertises exactly one browser profile selector to MCP clients", () => {
+  const toolNames = [
+    "preview_browser_profile_rename",
+    "preview_browser_profile_delete",
+    "preview_browser_profile_select",
+    "preview_browser_profile_proxy",
+  ] as const;
+
+  for (const name of toolNames) {
+    const schema = Tool.getJsonSchema(PreviewToolkit.tools[name]) as {
+      readonly properties?: Readonly<
+        Record<
+          string,
+          {
+            readonly anyOf?: readonly {
+              readonly required?: readonly string[];
+              readonly additionalProperties?: unknown;
+            }[];
+          }
+        >
+      >;
+    };
+    const variants = schema.properties?.profile?.anyOf;
+    expect(variants, `${name}.profile must be an exclusive id/name choice`).toHaveLength(2);
+    expect(variants?.map((variant) => variant.required)).toEqual([["profileId"], ["profileName"]]);
+    expect(variants?.every((variant) => variant.additionalProperties === false)).toBe(true);
   }
 });

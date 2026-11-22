@@ -2,9 +2,9 @@
 
 ## Scope
 
-This policy covers vulnerabilities caused by Erebus itself, including its desktop app, local server, updater, credential handling, thread sync, managed dependency installation, and client-to-server authorization.
+This policy covers vulnerabilities caused by Erebus itself, including its desktop app, local server, updater, credential handling, thread sync, web capture proxy, browser extension pairing, managed dependency installation, microVM control, and client-to-server authorization.
 
-This channel covers flaws caused by Erebus. Vulnerabilities found in another product belong with that vendor or program. Dependency reports belong with Codex, Argos, Proteus, Git, or the affected project unless Erebus introduces the unsafe behavior.
+This channel covers flaws caused by Erebus. Vulnerabilities found in another product belong with that vendor or program. Dependency reports belong with the affected provider, module, runtime, or project unless Erebus introduces the unsafe behavior.
 
 ## Supported versions
 
