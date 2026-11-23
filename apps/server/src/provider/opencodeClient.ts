@@ -180,6 +180,7 @@ export interface OpenCodeCompatClient {
     ) => Promise<{ readonly stream: AsyncIterable<OpenCodeCompatEvent> }>;
   };
   readonly session: {
+    readonly active: () => Promise<Readonly<Record<string, { readonly type: "running" }>>>;
     readonly create: (input: {
       readonly title?: string;
       readonly permission: OpenCodePermissionRuleset;
@@ -975,6 +976,7 @@ export function makeOpenCodeClient(input: {
       }),
     },
     session: {
+      active: () => client.session.active(),
       create: async (session) => {
         await ensureLocation();
         return {
