@@ -433,6 +433,31 @@ function fieldOptions(field: FormField): ReadonlyArray<OpenCodeQuestionOption> {
   return [];
 }
 
+export function resolveOpenCodeFormOptionValue(
+  options: ReadonlyArray<{
+    readonly value: string;
+    readonly label: string;
+    readonly description?: string;
+  }>,
+  value: string,
+): string {
+  const normalized = value.trim();
+  const option = options.find(
+    (candidate) =>
+      candidate.value === normalized ||
+      candidate.label === normalized ||
+      candidate.description === normalized,
+  );
+  return option?.value ?? value;
+}
+
+function resolveFormOptionValue(field: FormField, value: string): string {
+  if (field.type !== "string" && field.type !== "multiselect") {
+    return value;
+  }
+  return resolveOpenCodeFormOptionValue(field.options ?? [], value);
+}
+
 function toQuestionRequest(form: FormInfo): OpenCodeQuestionRequest {
   return {
     id: form.id,
@@ -456,7 +481,7 @@ function toFormAnswer(form: FormInfo, answers: ReadonlyArray<OpenCodeQuestionAns
     const first = values[0] ?? "";
     switch (field.type) {
       case "multiselect":
-        answer[field.key] = values;
+        answer[field.key] = values.map((value) => resolveFormOptionValue(field, value));
         break;
       case "boolean":
         answer[field.key] = ["true", "yes", "1"].includes(first.trim().toLowerCase());
@@ -468,7 +493,7 @@ function toFormAnswer(form: FormInfo, answers: ReadonlyArray<OpenCodeQuestionAns
         break;
       }
       case "string":
-        answer[field.key] = first;
+        answer[field.key] = resolveFormOptionValue(field, first);
         break;
     }
   }

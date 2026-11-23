@@ -16,6 +16,7 @@ import {
   nextRestart,
   parseReadyLine,
   runtimeEnvironment,
+  workspaceStorageKey,
 } from "./WebRuntimeClient.ts";
 
 describe("WebRuntimeClient readiness", () => {
@@ -99,6 +100,15 @@ describe("WebRuntimeClient readiness", () => {
     const recovered = nextRestart(failures, 65_000);
     expect(recovered.failures).toEqual([65_000]);
     expect(recovered.delayMs).toBe(500);
+  });
+
+  it("uses one stable storage key per workspace", () => {
+    expect(workspaceStorageKey("C:\\Workspace\\Target\\", "win32")).toBe(
+      workspaceStorageKey("C:/Workspace/Target", "win32"),
+    );
+    expect(workspaceStorageKey("C:/Workspace/Target", "win32")).not.toBe(
+      workspaceStorageKey("C:/Workspace/Other", "win32"),
+    );
   });
 
   it.effect("keeps the server layer available when the configured runtime binary is missing", () =>

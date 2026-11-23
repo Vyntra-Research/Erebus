@@ -51,6 +51,7 @@ import {
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
   buildOpenCodePermissionRules,
+  fullAccessQuestionAnswers,
   OpenCodeRuntime,
   OpenCodeRuntimeError,
   openCodeQuestionId,
@@ -265,6 +266,7 @@ interface OpenCodeSessionContext {
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
+  readonly completedAssistantTextByMessageId: Map<string, string>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
@@ -800,6 +802,15 @@ export function makeOpenCodeAdapter(
       if (text === undefined) {
         return;
       }
+      if (
+        part.type === "text" &&
+        part.time?.end !== undefined &&
+        context.completedAssistantTextByMessageId.get(part.messageID) === text
+      ) {
+        context.emittedTextByPartId.set(part.id, text);
+        context.completedAssistantPartIds.add(part.id);
+        return;
+      }
       const previousText = context.emittedTextByPartId.get(part.id);
       const { latestText, deltaToEmit } = mergeOpenCodeAssistantText(previousText, text);
       context.emittedTextByPartId.set(part.id, latestText);
@@ -837,6 +848,7 @@ export function makeOpenCodeAdapter(
         !context.completedAssistantPartIds.has(part.id)
       ) {
         context.completedAssistantPartIds.add(part.id);
+        context.completedAssistantTextByMessageId.set(part.messageID, latestText);
         yield* emit({
           ...(yield* buildEventBase({
             threadId: context.session.threadId,
@@ -915,6 +927,7 @@ export function makeOpenCodeAdapter(
 
         case "message.removed": {
           context.messageRoleById.delete(event.properties.messageID);
+          context.completedAssistantTextByMessageId.delete(event.properties.messageID);
           break;
         }
 
@@ -1014,6 +1027,16 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.asked": {
+          if (context.session.runtimeMode === "full-access") {
+            yield* runOpenCodeSdk("permission.reply", () =>
+              context.client.permission.reply({
+                sessionID: context.openCodeSessionId,
+                requestID: event.properties.id,
+                reply: "always",
+              }),
+            );
+            break;
+          }
           context.pendingPermissions.set(event.properties.id, event.properties);
           yield* emit({
             ...(yield* buildEventBase({
@@ -1054,6 +1077,20 @@ export function makeOpenCodeAdapter(
         }
 
         case "question.asked": {
+          const automaticAnswers =
+            context.session.runtimeMode === "full-access"
+              ? fullAccessQuestionAnswers(event.properties)
+              : undefined;
+          if (automaticAnswers) {
+            yield* runOpenCodeSdk("question.reply", () =>
+              context.client.question.reply({
+                sessionID: context.openCodeSessionId,
+                requestID: event.properties.id,
+                answers: automaticAnswers,
+              }),
+            );
+            break;
+          }
           context.pendingQuestions.set(event.properties.id, event.properties);
           yield* emit({
             ...(yield* buildEventBase({
@@ -1607,6 +1644,7 @@ export function makeOpenCodeAdapter(
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
+          completedAssistantTextByMessageId: new Map(),
           turns: [],
           activeTurnId: undefined,
           activeAgent: undefined,

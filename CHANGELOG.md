@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.0-beta.3 - 2026-11-23
+
+### Changed
+
+- Store web research history, bodies, scopes, annotations, captures, and maps in the active workspace.
+- Share one web research base across the main thread and co-agents that use the same workspace.
+
+### Fixed
+
+- Prevent OpenCode turn reconciliation from showing the same assistant reply twice.
+- Remove duplicate OpenCode replies already stored by affected builds.
+- Honor Full access for OpenCode permission prompts and submit form choices using their provider values.
+
 ## 2.0.0-beta.2 - 2026-11-22
 
 ### Added

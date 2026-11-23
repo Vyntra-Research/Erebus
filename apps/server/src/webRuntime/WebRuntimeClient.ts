@@ -5,15 +5,20 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as NodeCrypto from "node:crypto";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import { ServerConfig } from "../config.ts";
 import * as WebRuntimeBinary from "./WebRuntimeBinary.ts";
@@ -89,6 +94,12 @@ interface ClientState {
   readonly restartCount: number;
 }
 
+interface WorkspaceRuntime {
+  readonly workspaceRoot: string;
+  readonly dataDir: string;
+  readonly state: Ref.Ref<ClientState>;
+}
+
 export class WebRuntimeSpawnFailed extends Schema.TaggedErrorClass<WebRuntimeSpawnFailed>()(
   "WebRuntimeSpawnFailed",
   { path: Schema.String, cause: Schema.Defect() },
@@ -153,8 +164,32 @@ export class WebRuntimeClient extends Context.Service<
       path: string,
       request?: WebRuntimeRequest,
     ) => Effect.Effect<string, WebRuntimeUnavailable | WebRuntimeRequestFailed>;
+    readonly connectionForWorkspace: (
+      workspaceRoot: string,
+    ) => Effect.Effect<WebRuntimeConnection, WebRuntimeUnavailable>;
+    readonly requestJsonForWorkspace: (
+      workspaceRoot: string,
+      path: string,
+      request?: WebRuntimeRequest,
+    ) => Effect.Effect<unknown, WebRuntimeUnavailable | WebRuntimeRequestFailed>;
+    readonly requestTextForWorkspace: (
+      workspaceRoot: string,
+      path: string,
+      request?: WebRuntimeRequest,
+    ) => Effect.Effect<string, WebRuntimeUnavailable | WebRuntimeRequestFailed>;
   }
 >()("erebus/webRuntime/WebRuntimeClient") {}
+
+export function normalizeWorkspaceRoot(workspaceRoot: string, platform: NodeJS.Platform): string {
+  const normalized = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
+  return platform === "win32" ? normalized.toLocaleLowerCase("en-US") : normalized;
+}
+
+export function workspaceStorageKey(workspaceRoot: string, platform: NodeJS.Platform): string {
+  return NodeCrypto.createHash("sha256")
+    .update(normalizeWorkspaceRoot(workspaceRoot, platform))
+    .digest("hex");
+}
 
 export function parseReadyLine(line: string): string | undefined {
   const value = line.trim();
@@ -314,82 +349,32 @@ export const make = Effect.fn("webRuntime.webRuntimeClient.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const crypto = yield* Crypto.Crypto;
   const httpClient = yield* HttpClient.HttpClient;
+  const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const serviceScope = yield* Scope.Scope;
   const config = yield* ServerConfig;
+  const platform = yield* HostProcessPlatform;
   const initialResolution = yield* Effect.result(binary.resolve);
   const resolved = Result.isSuccess(initialResolution)
     ? initialResolution.success
     : Option.none<string>();
-  const shouldRun = Result.isFailure(initialResolution) || Option.isSome(resolved);
-  const state = yield* Ref.make<ClientState>({
+  const baseState: ClientState = {
     status: Result.isFailure(initialResolution)
       ? "unavailable"
       : Option.isNone(resolved)
         ? "disabled"
-        : "starting",
+        : "healthy",
     connection: Option.none(),
     lastError: Result.isFailure(initialResolution)
       ? Option.some(errorMessage(initialResolution.failure))
       : Option.none(),
     restartCount: 0,
-  });
+  };
+  const runtimes = yield* SynchronizedRef.make<ReadonlyMap<string, WorkspaceRuntime>>(new Map());
+  const activeWorkspace = yield* Ref.make<Option.Option<string>>(Option.none());
 
-  const health = Ref.get(state).pipe(
-    Effect.map(
-      (current): WebRuntimeClientHealth => ({
-        status: current.status,
-        connection: Option.map(current.connection, publicConnection),
-        lastError: current.lastError,
-        restartCount: current.restartCount,
-      }),
-    ),
-  );
-
-  const connection = Ref.get(state).pipe(
-    Effect.flatMap((current) =>
-      Option.match(current.connection, {
-        onSome: (value) => Effect.succeed(publicConnection(value)),
-        onNone: () =>
-          Effect.fail(
-            new WebRuntimeUnavailable({
-              message:
-                current.status === "disabled"
-                  ? "Web runtime is not installed."
-                  : "Web runtime is not ready.",
-            }),
-          ),
-      }),
-    ),
-  );
-
-  const requestJson: WebRuntimeClient["Service"]["requestJson"] = Effect.fn(
-    "webRuntime.requestJson",
-  )(function* (path, input) {
-    const current = yield* Ref.get(state);
-    if (Option.isNone(current.connection)) {
-      return yield* new WebRuntimeUnavailable({ message: "Web runtime is not ready." });
-    }
-    return yield* requestResponse(httpClient, current.connection.value, path, input).pipe(
-      Effect.flatMap((response) => response.json),
-      Effect.mapError((cause) => asRequestFailure(path, cause)),
-    );
-  });
-
-  const requestText: WebRuntimeClient["Service"]["requestText"] = Effect.fn(
-    "webRuntime.requestText",
-  )(function* (path, input) {
-    const current = yield* Ref.get(state);
-    if (Option.isNone(current.connection)) {
-      return yield* new WebRuntimeUnavailable({ message: "Web runtime is not ready." });
-    }
-    return yield* requestResponse(httpClient, current.connection.value, path, input).pipe(
-      Effect.flatMap((response) => response.text),
-      Effect.mapError((cause) => asRequestFailure(path, cause)),
-    );
-  });
-
-  if (shouldRun) {
-    const runAttempt: Effect.Effect<void, WebRuntimeClientError> = Effect.scoped(
+  const runAttempt = (runtime: WorkspaceRuntime): Effect.Effect<void, WebRuntimeClientError> =>
+    Effect.scoped(
       Effect.gen(function* () {
         const attemptResolution = yield* binary.resolve;
         if (Option.isNone(attemptResolution)) {
@@ -401,7 +386,7 @@ export const make = Effect.fn("webRuntime.webRuntimeClient.make")(function* () {
         const token = Encoding.encodeHex(yield* crypto.randomBytes(32));
         const command = makeRuntimeCommand({
           executablePath,
-          dataDir: path.join(config.stateDir, "web-runtime"),
+          dataDir: runtime.dataDir,
           cwd: config.cwd,
           token,
         });
@@ -519,13 +504,15 @@ export const make = Effect.fn("webRuntime.webRuntimeClient.make")(function* () {
           schemaVersion: runtimeHealth.schemaVersion,
         };
         yield* Ref.set(attemptConnection, Option.some(active));
-        yield* Ref.set(state, {
+        yield* Ref.set(runtime.state, {
           status: "healthy",
           connection: Option.some(active),
           lastError: Option.none(),
-          restartCount: (yield* Ref.get(state)).restartCount,
+          restartCount: (yield* Ref.get(runtime.state)).restartCount,
         });
         yield* Effect.logInfo("Web runtime ready", {
+          workspaceRoot: runtime.workspaceRoot,
+          dataDir: runtime.dataDir,
           baseUrl: active.baseUrl,
           protocolVersion: active.protocolVersion,
           schemaVersion: active.schemaVersion,
@@ -548,37 +535,201 @@ export const make = Effect.fn("webRuntime.webRuntimeClient.make")(function* () {
         ),
       ),
     ).pipe(
-      Effect.ensuring(Ref.update(state, (current) => ({ ...current, connection: Option.none() }))),
+      Effect.ensuring(
+        Ref.update(runtime.state, (current) => ({ ...current, connection: Option.none() })),
+      ),
     );
 
-    yield* Effect.gen(function* () {
+  const supervise = (runtime: WorkspaceRuntime) =>
+    Effect.gen(function* () {
       let failures: ReadonlyArray<number> = [];
       while (true) {
-        const result = yield* Effect.result(runAttempt);
+        const result = yield* Effect.result(runAttempt(runtime));
         if (Result.isSuccess(result)) return;
         const now = yield* Clock.currentTimeMillis;
         const restart = nextRestart(failures, now);
         failures = restart.failures;
-        const restartCount = (yield* Ref.get(state)).restartCount + 1;
+        const restartCount = (yield* Ref.get(runtime.state)).restartCount + 1;
         const exhausted = restart.exhausted;
-        yield* Ref.set(state, {
+        yield* Ref.set(runtime.state, {
           status: exhausted ? "unavailable" : "degraded",
           connection: Option.none(),
           lastError: Option.some(errorMessage(result.failure)),
           restartCount,
         });
         yield* Effect.logWarning("Web runtime stopped", {
+          workspaceRoot: runtime.workspaceRoot,
           cause: errorMessage(result.failure),
           restartCount,
         });
         if (exhausted) failures = [];
         yield* Effect.sleep(Duration.millis(exhausted ? FAILURE_WINDOW_MS : restart.delayMs));
-        yield* Ref.update(state, (current): ClientState => ({ ...current, status: "starting" }));
+        yield* Ref.update(
+          runtime.state,
+          (current): ClientState => ({
+            ...current,
+            status: "starting",
+          }),
+        );
       }
-    }).pipe(Effect.forkScoped);
-  }
+    });
 
-  return WebRuntimeClient.of({ health, connection, requestJson, requestText });
+  const ensureWorkspace = Effect.fn("webRuntime.ensureWorkspace")(function* (
+    workspaceRoot: string,
+  ) {
+    const normalizedRoot = normalizeWorkspaceRoot(path.resolve(workspaceRoot), platform);
+    const runtime = yield* SynchronizedRef.modifyEffect(runtimes, (current) => {
+      const existing = current.get(normalizedRoot);
+      if (existing) return Effect.succeed([existing, current] as const);
+      return Effect.gen(function* () {
+        const dataDir = path.join(
+          config.stateDir,
+          "web-workspaces",
+          workspaceStorageKey(normalizedRoot, platform),
+        );
+        yield* fs.makeDirectory(dataDir, { recursive: true });
+        yield* fs.writeFileString(path.join(dataDir, "workspace-root.txt"), `${normalizedRoot}\n`);
+        const state = yield* Ref.make<ClientState>({
+          ...baseState,
+          status: baseState.status === "healthy" ? "starting" : baseState.status,
+        });
+        const created: WorkspaceRuntime = {
+          workspaceRoot: normalizedRoot,
+          dataDir,
+          state,
+        };
+        if (baseState.status !== "disabled") {
+          yield* Effect.forkIn(supervise(created), serviceScope);
+        }
+        const next = new Map(current);
+        next.set(normalizedRoot, created);
+        return [created, next] as const;
+      });
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new WebRuntimeUnavailable({
+            message: `Could not prepare web storage for workspace '${normalizedRoot}': ${errorMessage(cause)}`,
+          }),
+      ),
+    );
+    yield* Ref.set(activeWorkspace, Option.some(normalizedRoot));
+    return runtime;
+  });
+
+  const awaitPrivateConnection = Effect.fn("webRuntime.awaitWorkspaceConnection")(function* (
+    runtime: WorkspaceRuntime,
+  ) {
+    for (let attempt = 0; attempt < 240; attempt += 1) {
+      const current = yield* Ref.get(runtime.state);
+      if (Option.isSome(current.connection)) return current.connection.value;
+      if (current.status === "disabled" || current.status === "unavailable") {
+        return yield* new WebRuntimeUnavailable({
+          message:
+            current.status === "disabled"
+              ? "Web runtime is not installed."
+              : Option.getOrElse(current.lastError, () => "Web runtime is unavailable."),
+        });
+      }
+      yield* Effect.sleep(Duration.millis(50));
+    }
+    return yield* new WebRuntimeUnavailable({
+      message: `Web runtime did not become ready for workspace '${runtime.workspaceRoot}'.`,
+    });
+  });
+
+  const connectionForWorkspace: WebRuntimeClient["Service"]["connectionForWorkspace"] = Effect.fn(
+    "webRuntime.connectionForWorkspace",
+  )(function* (workspaceRoot) {
+    const runtime = yield* ensureWorkspace(workspaceRoot);
+    return publicConnection(yield* awaitPrivateConnection(runtime));
+  });
+
+  const requestJsonForWorkspace: WebRuntimeClient["Service"]["requestJsonForWorkspace"] = Effect.fn(
+    "webRuntime.requestJsonForWorkspace",
+  )(function* (workspaceRoot, requestPath, input) {
+    const runtime = yield* ensureWorkspace(workspaceRoot);
+    const privateConnection = yield* awaitPrivateConnection(runtime);
+    return yield* requestResponse(httpClient, privateConnection, requestPath, input).pipe(
+      Effect.flatMap((response) => response.json),
+      Effect.mapError((cause) => asRequestFailure(requestPath, cause)),
+    );
+  });
+
+  const requestTextForWorkspace: WebRuntimeClient["Service"]["requestTextForWorkspace"] = Effect.fn(
+    "webRuntime.requestTextForWorkspace",
+  )(function* (workspaceRoot, requestPath, input) {
+    const runtime = yield* ensureWorkspace(workspaceRoot);
+    const privateConnection = yield* awaitPrivateConnection(runtime);
+    return yield* requestResponse(httpClient, privateConnection, requestPath, input).pipe(
+      Effect.flatMap((response) => response.text),
+      Effect.mapError((cause) => asRequestFailure(requestPath, cause)),
+    );
+  });
+
+  const activeRuntime = Effect.gen(function* () {
+    const current = yield* Ref.get(activeWorkspace);
+    if (Option.isNone(current)) {
+      return yield* new WebRuntimeUnavailable({
+        message: "No web workspace is active. Open a thread or use a web tool first.",
+      });
+    }
+    const runtime = (yield* SynchronizedRef.get(runtimes)).get(current.value);
+    if (!runtime) {
+      return yield* new WebRuntimeUnavailable({ message: "The active web workspace was lost." });
+    }
+    return runtime;
+  });
+
+  const health = Ref.get(activeWorkspace).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed(baseState),
+        onSome: (workspaceRoot) =>
+          SynchronizedRef.get(runtimes).pipe(
+            Effect.flatMap((current) => {
+              const runtime = current.get(workspaceRoot);
+              return runtime ? Ref.get(runtime.state) : Effect.succeed(baseState);
+            }),
+          ),
+      }),
+    ),
+    Effect.map(
+      (current): WebRuntimeClientHealth => ({
+        status: current.status,
+        connection: Option.map(current.connection, publicConnection),
+        lastError: current.lastError,
+        restartCount: current.restartCount,
+      }),
+    ),
+  );
+
+  const connection = activeRuntime.pipe(
+    Effect.flatMap(awaitPrivateConnection),
+    Effect.map(publicConnection),
+  );
+  const requestJson: WebRuntimeClient["Service"]["requestJson"] = (requestPath, input) =>
+    activeRuntime.pipe(
+      Effect.flatMap((runtime) =>
+        requestJsonForWorkspace(runtime.workspaceRoot, requestPath, input),
+      ),
+    );
+  const requestText: WebRuntimeClient["Service"]["requestText"] = (requestPath, input) =>
+    activeRuntime.pipe(
+      Effect.flatMap((runtime) =>
+        requestTextForWorkspace(runtime.workspaceRoot, requestPath, input),
+      ),
+    );
+
+  return WebRuntimeClient.of({
+    health,
+    connection,
+    requestJson,
+    requestText,
+    connectionForWorkspace,
+    requestJsonForWorkspace,
+    requestTextForWorkspace,
+  });
 });
 
 export const layer = Layer.effect(WebRuntimeClient, make());

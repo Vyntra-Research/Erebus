@@ -34,6 +34,18 @@ import {
 import * as WebRuntimeClient from "../../../webRuntime/WebRuntimeClient.ts";
 import { WebToolkit } from "./tools.ts";
 
+const requireWebWorkspaceRoot = Effect.fn("requireWebWorkspaceRoot")(function* () {
+  const invocation = yield* McpInvocationContext.requireWebMcpCapability();
+  if (!invocation.workspaceRoot) {
+    return yield* new WebRuntimeRpcError({
+      code: "unavailable",
+      operation: "resolve web workspace",
+      message: "This web tool call has no workspace context.",
+    });
+  }
+  return invocation.workspaceRoot;
+});
+
 const requestJson = <A>(
   operation: string,
   schema: Schema.Decoder<A, never>,
@@ -41,10 +53,10 @@ const requestJson = <A>(
   request?: WebRuntimeClient.WebRuntimeRequest,
 ) =>
   Effect.gen(function* () {
-    yield* McpInvocationContext.requireWebMcpCapability();
+    const workspaceRoot = yield* requireWebWorkspaceRoot();
     const runtime = yield* WebRuntimeClient.WebRuntimeClient;
     const value = yield* runtime
-      .requestJson(path, request)
+      .requestJsonForWorkspace(workspaceRoot, path, request)
       .pipe(Effect.mapError((error) => webRuntimeRpcFailure(operation, error)));
     return yield* decodeWebRuntimeResponse(operation, schema, value);
   });
@@ -55,10 +67,10 @@ const requestText = (
   request?: WebRuntimeClient.WebRuntimeRequest,
 ) =>
   Effect.gen(function* () {
-    yield* McpInvocationContext.requireWebMcpCapability();
+    const workspaceRoot = yield* requireWebWorkspaceRoot();
     const runtime = yield* WebRuntimeClient.WebRuntimeClient;
     return yield* runtime
-      .requestText(path, request)
+      .requestTextForWorkspace(workspaceRoot, path, request)
       .pipe(Effect.mapError((error) => webRuntimeRpcFailure(operation, error)));
   });
 
@@ -445,10 +457,13 @@ const handlers = {
         `/v1/sessions/${encodeURIComponent(input.sessionId)}/pairing`,
         { method: "POST" },
       );
+      const workspaceRoot = yield* requireWebWorkspaceRoot();
       const runtime = yield* WebRuntimeClient.WebRuntimeClient;
-      const connection = yield* runtime.connection.pipe(
-        Effect.mapError((error) => webRuntimeRpcFailure("create web extension pairing", error)),
-      );
+      const connection = yield* runtime
+        .connectionForWorkspace(workspaceRoot)
+        .pipe(
+          Effect.mapError((error) => webRuntimeRpcFailure("create web extension pairing", error)),
+        );
       return {
         serverUrl: connection.baseUrl,
         sessionId: input.sessionId,

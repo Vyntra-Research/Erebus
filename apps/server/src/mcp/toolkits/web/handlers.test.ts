@@ -24,6 +24,7 @@ const invocation = {
   providerSessionId: "provider-session-web-mcp-test",
   providerInstanceId: ProviderInstanceId.make("codex"),
   capabilities: new Set(["web"] as const),
+  workspaceRoot: "C:/workspace/web-mcp-test",
   issuedAt: 1,
 };
 const browserInvocation: McpInvocationContext.McpInvocationScope = {
@@ -45,6 +46,19 @@ interface RuntimeCall {
   readonly path: string;
   readonly request?: WebRuntimeClient.WebRuntimeRequest;
 }
+
+type LegacyWebRuntime = Pick<
+  WebRuntimeClient.WebRuntimeClient["Service"],
+  "health" | "connection" | "requestJson" | "requestText"
+>;
+
+const workspaceRuntime = (runtime: LegacyWebRuntime) =>
+  WebRuntimeClient.WebRuntimeClient.of({
+    ...runtime,
+    connectionForWorkspace: () => runtime.connection,
+    requestJsonForWorkspace: (_workspaceRoot, path, request) => runtime.requestJson(path, request),
+    requestTextForWorkspace: (_workspaceRoot, path, request) => runtime.requestText(path, request),
+  });
 
 interface PreviewCall {
   readonly operation: PreviewAutomationBroker.PreviewAutomationInvokeInput["operation"];
@@ -93,7 +107,7 @@ const successfulPreviewBroker = (calls: Array<PreviewCall>) =>
 
 const makeRuntime = (calls: Array<RuntimeCall>) => {
   let sessionEnded = false;
-  return WebRuntimeClient.WebRuntimeClient.of({
+  return workspaceRuntime({
     health: Effect.die("unused"),
     connection: Effect.succeed({
       baseUrl: "http://127.0.0.1:4555",
@@ -292,7 +306,7 @@ const makeBrowserCaptureRuntime = (
       upstreamTlsMode: "verify",
     },
   } as const;
-  return WebRuntimeClient.WebRuntimeClient.of({
+  return workspaceRuntime({
     health: Effect.die("unused"),
     connection: Effect.succeed({
       baseUrl: "http://127.0.0.1:4555",
@@ -679,7 +693,7 @@ it.effect("distinguishes live, paused, open, and ended capture sessions", () => 
     label: "Ended capture",
     endedAt: "2026-11-20T12:10:00.000Z",
   };
-  const runtime = WebRuntimeClient.WebRuntimeClient.of({
+  const runtime = workspaceRuntime({
     health: Effect.die("unused"),
     connection: Effect.succeed({
       baseUrl: "http://127.0.0.1:4555",
