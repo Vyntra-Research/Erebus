@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type {
   DesktopPreviewBrowserProfile,
   PreviewAutomationOperation,
@@ -54,14 +55,12 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
 ): Effect.fn.Return<
   A,
   import("@t3tools/contracts").PreviewAutomationError,
-  | McpInvocationContext.McpInvocationContext
-  | PreviewAutomationBroker.PreviewAutomationBroker
-  | WebRuntimeClient.WebRuntimeClient
+  McpInvocationContext.McpInvocationContext | PreviewAutomationBroker.PreviewAutomationBroker
 > {
   const scope = yield* McpInvocationContext.requireMcpCapability("preview");
-  if (scope.workspaceRoot && scope.capabilities.has("web")) {
-    const webRuntime = yield* WebRuntimeClient.WebRuntimeClient;
-    yield* webRuntime.connectionForWorkspace(scope.workspaceRoot).pipe(Effect.ignore);
+  const webRuntime = yield* Effect.serviceOption(WebRuntimeClient.WebRuntimeClient);
+  if (scope.workspaceRoot && scope.capabilities.has("web") && Option.isSome(webRuntime)) {
+    yield* webRuntime.value.connectionForWorkspace(scope.workspaceRoot).pipe(Effect.ignore);
   }
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   return yield* broker.invoke<A>({
