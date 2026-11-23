@@ -17,7 +17,6 @@ import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import * as NodeCrypto from "node:crypto";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import { ServerConfig } from "../config.ts";
@@ -180,15 +179,11 @@ export class WebRuntimeClient extends Context.Service<
   }
 >()("erebus/webRuntime/WebRuntimeClient") {}
 
+export const WEB_WORKSPACE_DATA_SEGMENTS = [".erebus", "web"] as const;
+
 export function normalizeWorkspaceRoot(workspaceRoot: string, platform: NodeJS.Platform): string {
   const normalized = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
   return platform === "win32" ? normalized.toLocaleLowerCase("en-US") : normalized;
-}
-
-export function workspaceStorageKey(workspaceRoot: string, platform: NodeJS.Platform): string {
-  return NodeCrypto.createHash("sha256")
-    .update(normalizeWorkspaceRoot(workspaceRoot, platform))
-    .digest("hex");
 }
 
 export function parseReadyLine(line: string): string | undefined {
@@ -577,24 +572,20 @@ export const make = Effect.fn("webRuntime.webRuntimeClient.make")(function* () {
   const ensureWorkspace = Effect.fn("webRuntime.ensureWorkspace")(function* (
     workspaceRoot: string,
   ) {
-    const normalizedRoot = normalizeWorkspaceRoot(path.resolve(workspaceRoot), platform);
+    const resolvedRoot = path.resolve(workspaceRoot);
+    const normalizedRoot = normalizeWorkspaceRoot(resolvedRoot, platform);
     const runtime = yield* SynchronizedRef.modifyEffect(runtimes, (current) => {
       const existing = current.get(normalizedRoot);
       if (existing) return Effect.succeed([existing, current] as const);
       return Effect.gen(function* () {
-        const dataDir = path.join(
-          config.stateDir,
-          "web-workspaces",
-          workspaceStorageKey(normalizedRoot, platform),
-        );
+        const dataDir = path.join(resolvedRoot, ...WEB_WORKSPACE_DATA_SEGMENTS);
         yield* fs.makeDirectory(dataDir, { recursive: true });
-        yield* fs.writeFileString(path.join(dataDir, "workspace-root.txt"), `${normalizedRoot}\n`);
         const state = yield* Ref.make<ClientState>({
           ...baseState,
           status: baseState.status === "healthy" ? "starting" : baseState.status,
         });
         const created: WorkspaceRuntime = {
-          workspaceRoot: normalizedRoot,
+          workspaceRoot: resolvedRoot,
           dataDir,
           state,
         };

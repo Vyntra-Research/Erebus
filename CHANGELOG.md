@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Store web research history, bodies, scopes, annotations, captures, and maps in the active workspace.
+- Store web research history, bodies, scopes, annotations, captures, and maps under `.erebus/web` in the active workspace.
 - Share one web research base across the main thread and co-agents that use the same workspace.
 
 ### Fixed

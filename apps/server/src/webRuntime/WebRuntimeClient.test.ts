@@ -16,7 +16,7 @@ import {
   nextRestart,
   parseReadyLine,
   runtimeEnvironment,
-  workspaceStorageKey,
+  WEB_WORKSPACE_DATA_SEGMENTS,
 } from "./WebRuntimeClient.ts";
 
 describe("WebRuntimeClient readiness", () => {
@@ -102,13 +102,8 @@ describe("WebRuntimeClient readiness", () => {
     expect(recovered.delayMs).toBe(500);
   });
 
-  it("uses one stable storage key per workspace", () => {
-    expect(workspaceStorageKey("C:\\Workspace\\Target\\", "win32")).toBe(
-      workspaceStorageKey("C:/Workspace/Target", "win32"),
-    );
-    expect(workspaceStorageKey("C:/Workspace/Target", "win32")).not.toBe(
-      workspaceStorageKey("C:/Workspace/Other", "win32"),
-    );
+  it("stores the complete web base inside the workspace", () => {
+    expect(WEB_WORKSPACE_DATA_SEGMENTS).toEqual([".erebus", "web"]);
   });
 
   it.effect("keeps the server layer available when the configured runtime binary is missing", () =>
