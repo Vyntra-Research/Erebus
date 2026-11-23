@@ -101,7 +101,7 @@ const handlers = {
     invoke<PreviewBrowserProfileProxyResult>("browserProfileProxy", input),
   preview_tabs: () => invoke<PreviewBrowserTabsResult>("tabsList", {}),
   extension_browser_list: () =>
-    invoke<PreviewBrowserTabsResult>("tabsList", {}).pipe(
+    invoke<PreviewBrowserTabsResult>("tabsList", { waitForExtension: true }).pipe(
       Effect.map((result) => ({
         browsers: result.browsers.filter((browser) => browser.kind === "extension"),
         tabs: result.tabs.filter((tab) => tab.tabId.startsWith("extension:")),
