@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.4 - 2026-11-23
+
+### Fixed
+
+- Stop showing completed OpenCode turns as running when the provider wait request remains pending.
+
 ## 2.0.0-beta.3 - 2026-11-23
 
 ### Changed
