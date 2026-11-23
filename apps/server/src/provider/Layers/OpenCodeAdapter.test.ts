@@ -1206,6 +1206,44 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("interrupts a running turn before delivering a live follow-up", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-live-follow-up");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      runtimeMock.state.waitResolves = true;
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "run the current task",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("opencode"),
+          model: "openai/gpt-5",
+        },
+      });
+
+      const followUp = yield* adapter.sendTurn({
+        threadId,
+        input: "use this new instruction now",
+        delivery: "live-user-steer",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("opencode"),
+          model: "openai/gpt-5",
+        },
+      });
+
+      NodeAssert.notEqual(String(followUp.turnId), String(turn.turnId));
+      NodeAssert.equal(runtimeMock.state.abortCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.waitCalls.length >= 1, true);
+      const prompts = runtimeMock.state.promptCalls as Array<{ readonly delivery?: string }>;
+      NodeAssert.equal(prompts.at(-1)?.delivery, "queue");
+    }),
+  );
+
   it.effect("keeps the running turn when a steer prompt fails", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;

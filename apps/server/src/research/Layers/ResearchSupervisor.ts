@@ -136,9 +136,6 @@ const makeResearchSupervisor = Effect.gen(function* () {
     yield* Effect.gen(function* () {
       const context = yield* threadContext(threadId);
       if (!context) return;
-      if (context.thread.session?.activeTurnId || context.thread.latestTurn?.state === "running") {
-        return;
-      }
 
       const message = formatJudgeFollowUp({
         evaluationId: evaluation.evaluationId,
