@@ -5,6 +5,7 @@
 ### Fixed
 
 - Give OpenCode sessions the managed Argos tools and technical skill.
+- Wait for OpenCode integrations before loading models so OpenCode Go remains available after startup.
 
 ## 2.0.0-beta.4 - 2026-11-23
 
