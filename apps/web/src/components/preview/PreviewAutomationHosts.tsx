@@ -20,6 +20,7 @@ import {
   type PreviewRenderedViewportSize,
   type PreviewViewportSetting,
   type ScopedThreadRef,
+  type WebRuntimeExtensionAutomationClient,
 } from "@t3tools/contracts";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -89,6 +90,16 @@ import {
 import { isPreviewViewportReady } from "./previewViewportReadiness";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
 import { runtimeRestartCleanup } from "../web-security/webSecurityPanelLogic";
+import {
+  extensionAutomationBrowsers,
+  extensionNavigateInput,
+  extensionAutomationTabId,
+  extensionAutomationTabs,
+  isExtensionAutomationTargetOperation,
+  parseExtensionAutomationBrowserId,
+  parseExtensionAutomationTabId,
+  rewriteExtensionAutomationResult,
+} from "./extensionAutomationTarget";
 
 const PREVIEW_PRESENTATION_SETTLE_TIMEOUT_MS = 500;
 
@@ -430,6 +441,12 @@ function PreviewAutomationHost(props: {
   const listWebRuntimeSessions = useAtomQueryRunner(webRuntimeEnvironment.sessions, {
     reportFailure: false,
   });
+  const listExtensionClients = useAtomQueryRunner(webRuntimeEnvironment.extensionClients, {
+    reportFailure: false,
+  });
+  const invokeExtension = useAtomCommand(webRuntimeEnvironment.invokeExtension, {
+    reportFailure: false,
+  });
   const runtimeRestartCountRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -497,6 +514,86 @@ function PreviewAutomationHost(props: {
       };
       let tabId = request.tabId ?? null;
       try {
+        const externalTarget = parseExtensionAutomationTabId(tabId);
+        const openInput =
+          request.operation === "open" ? (request.input as PreviewAutomationOpenInput) : null;
+        const externalBrowserProducerId = parseExtensionAutomationBrowserId(openInput?.browserId);
+        const extensionTargetedOperation = isExtensionAutomationTargetOperation(request.operation);
+        if (extensionTargetedOperation && (externalTarget || externalBrowserProducerId)) {
+          const clientsResult = await listExtensionClients({ environmentId, input: {} });
+          if (clientsResult._tag === "Failure") return raiseAtomCommandFailure(clientsResult);
+          const producerId = externalTarget?.producerId ?? externalBrowserProducerId!;
+          const client = clientsResult.value.find(
+            (candidate) => candidate.connected && candidate.producerId === producerId,
+          );
+          if (!client) throw new Error("The selected browser extension is no longer connected.");
+
+          let input = request.input;
+          if (request.operation === "navigate") {
+            const navigateInput = request.input as PreviewAutomationNavigateInput;
+            const resolution = resolveBrowserNavigationTarget(
+              environmentId,
+              navigateInput.target ?? { kind: "url", url: navigateInput.url! },
+            );
+            input = extensionNavigateInput(navigateInput, resolution.resolvedUrl);
+          } else if (request.operation === "open") {
+            const { browserId: _browserId, ...extensionOpenInput } = openInput!;
+            input = extensionOpenInput.url
+              ? {
+                  ...extensionOpenInput,
+                  url: resolveBrowserNavigationTarget(environmentId, {
+                    kind: "url",
+                    url: extensionOpenInput.url,
+                  }).resolvedUrl,
+                }
+              : extensionOpenInput;
+          }
+
+          const invocation = await invokeExtension({
+            environmentId,
+            input: {
+              sessionId: client.sessionId,
+              producerId: client.producerId,
+              ...(externalTarget ? { tabId: externalTarget.tabId } : {}),
+              operation: request.operation,
+              input,
+              timeoutMs: Math.min(request.timeoutMs, 60_000),
+            },
+          });
+          if (invocation._tag === "Failure") return raiseAtomCommandFailure(invocation);
+          if (!invocation.value.ok) {
+            const remote = invocation.value.error;
+            const error = new Error(
+              remote?.message ?? "Browser extension command failed.",
+            ) as Error & {
+              _tag?: string;
+              detail?: unknown;
+            };
+            if (remote?.tag) error._tag = remote.tag;
+            if (remote?.detail !== undefined) error.detail = remote.detail;
+            throw error;
+          }
+          if (request.operation === "recordingStop") {
+            const recording = invocation.value.result as Record<string, unknown> | undefined;
+            const mimeType = recording?.mimeType;
+            const dataBase64 = recording?.dataBase64;
+            if (
+              !externalTarget ||
+              !previewBridge ||
+              typeof mimeType !== "string" ||
+              typeof dataBase64 !== "string"
+            ) {
+              throw new Error("The browser extension returned an invalid recording.");
+            }
+            const logicalTabId = extensionAutomationTabId(client.producerId, externalTarget.tabId);
+            const binary = window.atob(dataBase64);
+            const data = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+            const artifact = await previewBridge.recording.save(logicalTabId, mimeType, data);
+            return { ...artifact, tabId: logicalTabId };
+          }
+          return rewriteExtensionAutomationResult(client.producerId, invocation.value.result);
+        }
+
         let state = readThreadPreviewState(threadRef);
         const needsSessionSync = needsPreviewAutomationSessionSync(state, request.tabId);
         if (needsSessionSync) {
@@ -546,12 +643,36 @@ function PreviewAutomationHost(props: {
         switch (request.operation) {
           case "tabsList": {
             const activeTabId = tabId;
-            return {
-              tabs: await listPreviewAutomationTabs(
-                Object.values(state.sessions),
-                activeTabId,
-                (listedTabId) => currentStatus(threadRef, listedTabId),
+            const [internalTabs, extensionClientsResult] = await Promise.all([
+              listPreviewAutomationTabs(Object.values(state.sessions), activeTabId, (listedTabId) =>
+                currentStatus(threadRef, listedTabId),
               ),
+              listExtensionClients({ environmentId, input: {} }),
+            ]);
+            return {
+              browsers: [
+                {
+                  browserId: "internal",
+                  kind: "internal" as const,
+                  browser: "erebus",
+                  version: null,
+                  connected: Boolean(previewBridge),
+                  tabCount: internalTabs.length,
+                },
+                ...(extensionClientsResult._tag === "Success"
+                  ? extensionAutomationBrowsers(
+                      extensionClientsResult.value as ReadonlyArray<WebRuntimeExtensionAutomationClient>,
+                    )
+                  : []),
+              ],
+              tabs: [
+                ...internalTabs,
+                ...(extensionClientsResult._tag === "Success"
+                  ? extensionAutomationTabs(
+                      extensionClientsResult.value as ReadonlyArray<WebRuntimeExtensionAutomationClient>,
+                    )
+                  : []),
+              ],
             };
           }
           case "tabClose": {
@@ -1023,7 +1144,17 @@ function PreviewAutomationHost(props: {
         });
       }
     },
-    [browserProxyReachable, close, environmentId, listPreviews, open, registry, resize],
+    [
+      browserProxyReachable,
+      close,
+      environmentId,
+      invokeExtension,
+      listExtensionClients,
+      listPreviews,
+      open,
+      registry,
+      resize,
+    ],
   );
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
   const setRequestHandler = useAtomSet(requestHandlerAtom);

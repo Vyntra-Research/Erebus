@@ -202,6 +202,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       }),
     openCaptureExtensionFolder: () =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_OPEN_CAPTURE_EXTENSION_FOLDER_CHANNEL),
+    downloadCaptureExtension: (browser) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_DOWNLOAD_CAPTURE_EXTENSION_CHANNEL, { browser }),
     configureProxy: (environmentId, proxy, browserProfileId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_CONFIGURE_PROXY_CHANNEL, {
         environmentId,

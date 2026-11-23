@@ -368,7 +368,9 @@ describe("ServerSettings Codex account routing", () => {
 describe("ServerSettings independent Judge", () => {
   it("provides independent Judge defaults for legacy settings", () => {
     expect(decodeServerSettings({}).researchSupervision).toEqual({
+      evaluatorInstanceId: "codex",
       evaluatorModel: "gpt-daybreak-blue-latest",
+      evaluatorOptionId: "reasoningEffort",
       evaluatorReasoningEffort: "xhigh",
     });
   });
@@ -378,22 +380,27 @@ describe("ServerSettings independent Judge", () => {
       decodeServerSettingsPatch({
         researchSupervision: {
           observerMessageWindow: 8,
+          evaluatorInstanceId: "opencode",
           evaluatorModel: " gpt-daybreak-blue-latest ",
+          evaluatorOptionId: "variant",
           evaluatorReasoningEffort: "high",
         },
       }).researchSupervision,
     ).toEqual({
+      evaluatorInstanceId: "opencode",
       evaluatorModel: "gpt-daybreak-blue-latest",
+      evaluatorOptionId: "variant",
       evaluatorReasoningEffort: "high",
     });
   });
 
-  it.each([{ evaluatorModel: " " }, { evaluatorReasoningEffort: "impossible" }])(
-    "rejects invalid supervision settings: %o",
-    (researchSupervision) => {
-      expect(() => decodeServerSettingsPatch({ researchSupervision })).toThrow();
-    },
-  );
+  it.each([
+    { evaluatorModel: " " },
+    { evaluatorReasoningEffort: " " },
+    { evaluatorOptionId: "impossible" },
+  ])("rejects invalid supervision settings: %o", (researchSupervision) => {
+    expect(() => decodeServerSettingsPatch({ researchSupervision })).toThrow();
+  });
 });
 
 describe("ServerSettings.sourceControlWritingStyle", () => {

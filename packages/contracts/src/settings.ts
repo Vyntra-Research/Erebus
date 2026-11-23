@@ -669,16 +669,25 @@ export const ResearchEvaluatorReasoningEffort = Schema.Literals([
 ]);
 export type ResearchEvaluatorReasoningEffort = typeof ResearchEvaluatorReasoningEffort.Type;
 export const DEFAULT_RESEARCH_EVALUATOR_MODEL = "gpt-daybreak-blue-latest";
+export const DEFAULT_RESEARCH_EVALUATOR_INSTANCE_ID = ProviderInstanceId.make("codex");
+export const ResearchEvaluatorOptionId = Schema.Literals(["reasoningEffort", "variant", "default"]);
+export type ResearchEvaluatorOptionId = typeof ResearchEvaluatorOptionId.Type;
 export const DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT: ResearchEvaluatorReasoningEffort =
   "xhigh";
 
 // Keep the legacy settings key and type name so existing Judge model choices survive
 // upgrades from releases that also stored Observer settings.
 export const ResearchSupervisionSettings = Schema.Struct({
+  evaluatorInstanceId: ProviderInstanceId.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_EVALUATOR_INSTANCE_ID)),
+  ),
   evaluatorModel: TrimmedNonEmptyString.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_EVALUATOR_MODEL)),
   ),
-  evaluatorReasoningEffort: ResearchEvaluatorReasoningEffort.pipe(
+  evaluatorOptionId: ResearchEvaluatorOptionId.pipe(
+    Schema.withDecodingDefault(Effect.succeed("reasoningEffort")),
+  ),
+  evaluatorReasoningEffort: TrimmedNonEmptyString.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RESEARCH_EVALUATOR_REASONING_EFFORT)),
   ),
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
@@ -958,8 +967,10 @@ export const ServerSettingsPatch = Schema.Struct({
   agentPersonaPreset: Schema.optionalKey(AgentPersonaPreset),
   researchSupervision: Schema.optionalKey(
     Schema.Struct({
+      evaluatorInstanceId: Schema.optionalKey(ProviderInstanceId),
       evaluatorModel: Schema.optionalKey(TrimmedNonEmptyString),
-      evaluatorReasoningEffort: Schema.optionalKey(ResearchEvaluatorReasoningEffort),
+      evaluatorOptionId: Schema.optionalKey(ResearchEvaluatorOptionId),
+      evaluatorReasoningEffort: Schema.optionalKey(TrimmedNonEmptyString),
     }),
   ),
   pentestModules: Schema.optionalKey(

@@ -88,8 +88,57 @@ export const WebRuntimeExtensionPairing = Schema.Struct({
   serverUrl: TrimmedNonEmptyString,
   sessionId: TrimmedNonEmptyString,
   token: TrimmedNonEmptyString,
+  proxyUrl: Schema.optionalKey(TrimmedNonEmptyString),
+  caPem: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type WebRuntimeExtensionPairing = typeof WebRuntimeExtensionPairing.Type;
+
+export const WebRuntimeExtensionBrowserTab = Schema.Struct({
+  tabId: Schema.Int,
+  windowId: Schema.Int,
+  active: Schema.Boolean,
+  attached: Schema.Boolean,
+  title: Schema.optionalKey(Schema.String),
+  url: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(Schema.String),
+});
+export type WebRuntimeExtensionBrowserTab = typeof WebRuntimeExtensionBrowserTab.Type;
+
+export const WebRuntimeExtensionAutomationClient = Schema.Struct({
+  sessionId: TrimmedNonEmptyString,
+  producerId: TrimmedNonEmptyString,
+  browser: TrimmedNonEmptyString,
+  version: TrimmedNonEmptyString,
+  lastSeenMs: NonNegativeInt,
+  connected: Schema.Boolean,
+  tabs: Schema.Array(WebRuntimeExtensionBrowserTab),
+});
+export type WebRuntimeExtensionAutomationClient = typeof WebRuntimeExtensionAutomationClient.Type;
+
+export const WebRuntimeExtensionAutomationInvokeInput = Schema.Struct({
+  sessionId: TrimmedNonEmptyString,
+  producerId: TrimmedNonEmptyString,
+  tabId: Schema.optionalKey(Schema.Int),
+  operation: TrimmedNonEmptyString,
+  input: Schema.optionalKey(Schema.Unknown),
+  timeoutMs: PositiveInt,
+});
+export type WebRuntimeExtensionAutomationInvokeInput =
+  typeof WebRuntimeExtensionAutomationInvokeInput.Type;
+
+export const WebRuntimeExtensionAutomationError = Schema.Struct({
+  tag: TrimmedNonEmptyString,
+  message: TrimmedNonEmptyString,
+  detail: Schema.optionalKey(Schema.Unknown),
+});
+
+export const WebRuntimeExtensionAutomationResult = Schema.Struct({
+  commandId: TrimmedNonEmptyString,
+  ok: Schema.Boolean,
+  result: Schema.optionalKey(Schema.Unknown),
+  error: Schema.optionalKey(WebRuntimeExtensionAutomationError),
+});
+export type WebRuntimeExtensionAutomationResult = typeof WebRuntimeExtensionAutomationResult.Type;
 
 export const WebRuntimeCreateSessionInput = Schema.Struct({
   label: TrimmedNonEmptyString,

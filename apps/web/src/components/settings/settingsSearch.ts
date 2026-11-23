@@ -49,6 +49,11 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  */
 export const SETTINGS_SEARCH_ITEMS = [
   {
+    id: "browser-extension",
+    title: "Browser extension",
+    to: "/settings/modules",
+  },
+  {
     id: "microvms",
     title: "Persistent microVMs",
     to: "/settings/microvms",

@@ -353,6 +353,8 @@ export const WS_METHODS = {
   webRuntimeListSessions: "webRuntime.listSessions",
   webRuntimeCreateSession: "webRuntime.createSession",
   webRuntimeCreateExtensionPairing: "webRuntime.createExtensionPairing",
+  webRuntimeListExtensionClients: "webRuntime.listExtensionClients",
+  webRuntimeInvokeExtension: "webRuntime.invokeExtension",
   webRuntimeEndSession: "webRuntime.endSession",
   webRuntimeDeleteSession: "webRuntime.deleteSession",
   webRuntimeStartProxy: "webRuntime.startProxy",
@@ -483,6 +485,21 @@ export const WsWebRuntimeCreateExtensionPairingRpc = Rpc.make(
     error: WebRuntimeRpcError,
   },
 );
+
+export const WsWebRuntimeListExtensionClientsRpc = Rpc.make(
+  WS_METHODS.webRuntimeListExtensionClients,
+  {
+    payload: Schema.Struct({}),
+    success: Schema.Array(WebRuntime.WebRuntimeExtensionAutomationClient),
+    error: WebRuntimeRpcError,
+  },
+);
+
+export const WsWebRuntimeInvokeExtensionRpc = Rpc.make(WS_METHODS.webRuntimeInvokeExtension, {
+  payload: WebRuntime.WebRuntimeExtensionAutomationInvokeInput,
+  success: WebRuntime.WebRuntimeExtensionAutomationResult,
+  error: WebRuntimeRpcError,
+});
 
 export const WsWebRuntimeEndSessionRpc = Rpc.make(WS_METHODS.webRuntimeEndSession, {
   payload: Schema.Struct({ id: TrimmedNonEmptyString }),
@@ -1493,6 +1510,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsWebRuntimeListSessionsRpc,
   WsWebRuntimeCreateSessionRpc,
   WsWebRuntimeCreateExtensionPairingRpc,
+  WsWebRuntimeListExtensionClientsRpc,
+  WsWebRuntimeInvokeExtensionRpc,
   WsWebRuntimeEndSessionRpc,
   WsWebRuntimeDeleteSessionRpc,
   WsWebRuntimeStartProxyRpc,

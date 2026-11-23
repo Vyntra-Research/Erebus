@@ -1272,6 +1272,8 @@ export interface DesktopPreviewBridge {
   ) => Promise<DesktopPreviewWebviewConfig>;
   /** Open the unpacked web capture extension folder shipped with this desktop build. */
   openCaptureExtensionFolder: () => Promise<boolean>;
+  /** Copy a packaged browser-control extension to the user's Downloads folder. */
+  downloadCaptureExtension: (browser: "chromium" | "firefox") => Promise<string | null>;
   /** Apply or remove the capture proxy for one persistent browser profile. */
   configureProxy: (
     environmentId: EnvironmentId,

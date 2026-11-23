@@ -18,6 +18,7 @@ import {
   serverEnvironmentHttpApiLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
+  browserExtensionBootstrapRouteLayer,
   httpCompressionLayer,
 } from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
@@ -532,6 +533,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
     attachmentUploadRouteLayer,
+    browserExtensionBootstrapRouteLayer,
     codexRequestGatewayHttpLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,

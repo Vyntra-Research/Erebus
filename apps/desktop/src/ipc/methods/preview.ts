@@ -38,6 +38,7 @@ import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as ElectronShell from "../../electron/ElectronShell.ts";
+import * as ElectronApp from "../../electron/ElectronApp.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as BrowserProfileRegistry from "../../preview/BrowserProfileRegistry.ts";
@@ -306,6 +307,32 @@ export const openCaptureExtensionFolder = DesktopIpc.makeIpcMethod({
     const extensionDirectory = yield* resolveWebCaptureExtensionDirectory();
     if (Option.isNone(extensionDirectory)) return false;
     return yield* (yield* ElectronShell.ElectronShell).openPath(extensionDirectory.value);
+  }),
+});
+
+const CaptureExtensionBrowser = Schema.Literals(["chromium", "firefox"]);
+
+export const downloadCaptureExtension = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_DOWNLOAD_CAPTURE_EXTENSION_CHANNEL,
+  payload: Schema.Struct({ browser: CaptureExtensionBrowser }),
+  result: Schema.NullOr(Schema.String),
+  handler: Effect.fn("desktop.ipc.preview.downloadCaptureExtension")(function* ({ browser }) {
+    const extensionDirectory = yield* resolveWebCaptureExtensionDirectory();
+    if (Option.isNone(extensionDirectory)) return null;
+
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const electronApp = yield* ElectronApp.ElectronApp;
+    const downloadsDirectory = electronApp.getPath
+      ? yield* electronApp.getPath("downloads")
+      : environment.path.join(environment.homeDirectory, "Downloads");
+    const fileName =
+      browser === "chromium" ? "erebus-chromium-extension.zip" : "erebus-firefox-extension.xpi";
+    const source = environment.path.join(extensionDirectory.value, fileName);
+    const destination = environment.path.join(downloadsDirectory, fileName);
+    yield* fileSystem.makeDirectory(downloadsDirectory, { recursive: true });
+    yield* fileSystem.copyFile(source, destination);
+    return destination;
   }),
 });
 

@@ -12,6 +12,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import { cast } from "effect/Function";
 import {
   HttpBody,
@@ -43,6 +44,7 @@ import {
   failEnvironmentInternal,
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as WebRuntimeClient from "./webRuntime/WebRuntimeClient.ts";
 import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
@@ -55,6 +57,30 @@ const DESKTOP_RENDERER_ORIGINS = [
   "t3code-dev://app",
 ];
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+const BROWSER_EXTENSION_BOOTSTRAP_PATH = "/api/browser-extension/bootstrap";
+const BrowserExtensionBootstrapInput = Schema.Struct({
+  installId: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{8,128}$/u)),
+  browser: Schema.Literals(["chromium", "firefox"]),
+  version: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+});
+const CaptureSession = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  source: Schema.String,
+  startedAt: Schema.String,
+  endedAt: Schema.NullOr(Schema.String),
+  scopeProfileId: Schema.String,
+  upstreamTlsMode: Schema.String,
+  proxy: Schema.NullOr(
+    Schema.Struct({
+      url: Schema.String,
+      caEndpoint: Schema.String,
+      upstreamTlsMode: Schema.String,
+    }),
+  ),
+});
+const CaptureSessions = Schema.Array(CaptureSession);
+const PairingToken = Schema.Struct({ token: Schema.String });
 
 export function assetResponseHeaders(filePath: string): Record<string, string> {
   const lowerPath = filePath.toLowerCase();
@@ -147,6 +173,93 @@ export const serverEnvironmentHttpApiLayer = HttpApiBuilder.group(
       }, traceRelayRequest),
     );
   }),
+);
+
+export const browserExtensionBootstrapRouteLayer = HttpRouter.add(
+  "POST",
+  BROWSER_EXTENSION_BOOTSTRAP_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const requestUrl = HttpServerRequest.toURL(request);
+    if (Option.isNone(requestUrl) || !isLoopbackHostname(requestUrl.value.hostname)) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    const origin = request.headers.origin;
+    if (
+      origin !== undefined &&
+      !origin.startsWith("chrome-extension://") &&
+      !origin.startsWith("moz-extension://")
+    ) {
+      return HttpServerResponse.text("Forbidden", { status: 403 });
+    }
+
+    const input = yield* request.json.pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(BrowserExtensionBootstrapInput)),
+      Effect.option,
+    );
+    if (Option.isNone(input)) {
+      return HttpServerResponse.text("Invalid browser extension bootstrap request.", {
+        status: 400,
+      });
+    }
+
+    const webRuntimeOption = yield* Effect.serviceOption(WebRuntimeClient.WebRuntimeClient);
+    if (Option.isNone(webRuntimeOption)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "Erebus browser control is not ready." },
+        { status: 503, headers: { "cache-control": "no-store" } },
+      );
+    }
+    const webRuntime = webRuntimeOption.value;
+    const source = `extension:${input.value.installId}`;
+    const sessions = yield* webRuntime
+      .requestJson("/v1/sessions")
+      .pipe(Effect.flatMap(Schema.decodeUnknownEffect(CaptureSessions)));
+    let session = sessions.find(
+      (candidate) => candidate.source === source && candidate.endedAt === null,
+    );
+    if (!session) {
+      const proxy = input.value.browser === "firefox";
+      session = yield* webRuntime
+        .requestJson(`/v1/sessions?proxy=${String(proxy)}`, {
+          method: "POST",
+          body: {
+            label: `${input.value.browser === "firefox" ? "Firefox" : "Chromium"} extension`,
+            source,
+          },
+        })
+        .pipe(Effect.flatMap(Schema.decodeUnknownEffect(CaptureSession)));
+    }
+    const pairing = yield* webRuntime
+      .requestJson(`/v1/sessions/${encodeURIComponent(session.id)}/pairing`, {
+        method: "POST",
+      })
+      .pipe(Effect.flatMap(Schema.decodeUnknownEffect(PairingToken)));
+    const connection = yield* webRuntime.connection;
+    const caPem = session.proxy ? yield* webRuntime.requestText("/v1/proxy/ca") : undefined;
+
+    return HttpServerResponse.jsonUnsafe(
+      {
+        serverUrl: connection.baseUrl,
+        sessionId: session.id,
+        token: pairing.token,
+        ...(session.proxy ? { proxyUrl: session.proxy.url } : {}),
+        ...(caPem ? { caPem } : {}),
+      },
+      { headers: { "cache-control": "no-store" } },
+    );
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Browser extension bootstrap failed", { cause }).pipe(
+        Effect.as(
+          HttpServerResponse.jsonUnsafe(
+            { error: "Erebus browser control is not ready." },
+            { status: 503, headers: { "cache-control": "no-store" } },
+          ),
+        ),
+      ),
+    ),
+  ),
 );
 
 class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{

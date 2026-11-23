@@ -142,6 +142,12 @@ export const WEB_CAPTURE_EXTENSION_REQUIRED_FILES = [
   "popup.html",
   "popup.js",
   "popup.css",
+  "firefox/manifest.json",
+  "firefox/firefox-background.js",
+  "firefox/firefox-content.js",
+  "erebus-chromium-extension.zip",
+  "erebus-firefox-extension.xpi",
+  "INSTALL.txt",
 ] as const;
 
 const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
@@ -1859,7 +1865,13 @@ export const stageWebRuntime = Effect.fn("stageWebRuntime")(function* (input: {
     return yield* new WebRuntimeSourceMissingError({ manifestPath });
   }
   const extensionDirectory = path.join(input.repoRoot, "native/erebus-web/extension");
-  const extensionSourceFiles = ["package.json", "pnpm-lock.yaml", "build.mjs", "manifest.json"];
+  const extensionSourceFiles = [
+    "package.json",
+    "pnpm-lock.yaml",
+    "build.mjs",
+    "manifest.json",
+    "manifest.firefox.json",
+  ];
   const missingExtensionSourceFiles: string[] = [];
   for (const fileName of extensionSourceFiles) {
     const sourcePath = path.join(extensionDirectory, fileName);

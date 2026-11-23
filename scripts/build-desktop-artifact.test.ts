@@ -126,8 +126,12 @@ const writeWebCaptureExtensionFixture = Effect.fn("test.writeWebCaptureExtension
     );
     yield* fs.writeFileString(path.join(extensionDirectory, "build.mjs"), "export {};\n");
     yield* fs.writeFileString(path.join(extensionDirectory, "manifest.json"), "{}\n");
+    yield* fs.writeFileString(path.join(extensionDirectory, "manifest.firefox.json"), "{}\n");
     for (const fileName of WEB_CAPTURE_EXTENSION_REQUIRED_FILES) {
       if (fileName === omittedOutput) continue;
+      yield* fs.makeDirectory(path.dirname(path.join(distDirectory, fileName)), {
+        recursive: true,
+      });
       yield* fs.writeFileString(path.join(distDirectory, fileName), `fixture:${fileName}`);
     }
   },
@@ -179,6 +183,10 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   );
   yield* fs.writeFileString(path.join(resourcesDir, "erebus-web/erebus-webd.exe"), "runtime");
   for (const fileName of WEB_CAPTURE_EXTENSION_REQUIRED_FILES) {
+    yield* fs.makeDirectory(
+      path.dirname(path.join(resourcesDir, "erebus-web/extension", fileName)),
+      { recursive: true },
+    );
     yield* fs.writeFileString(
       path.join(resourcesDir, "erebus-web/extension", fileName),
       `fixture:${fileName}`,

@@ -33,6 +33,8 @@ it("exports provider-compatible object schemas with described parameters", () =>
     "preview_browser_profile_delete",
     "preview_browser_profile_proxy",
     "preview_tabs",
+    "extension_browser_list",
+    "extension_browser_open",
   ]);
   for (const tool of Object.values(PreviewToolkit.tools)) {
     const schema = Tool.getJsonSchema(tool) as {
@@ -64,6 +66,17 @@ it("exports provider-compatible object schemas with described parameters", () =>
       ).toBe(true);
     }
   }
+});
+
+it("exposes explicit extension browser bootstrap tools", () => {
+  expect(PreviewToolkit.tools.extension_browser_list).toBeDefined();
+  expect(PreviewToolkit.tools.extension_browser_open).toBeDefined();
+  const openSchema = Tool.getJsonSchema(PreviewToolkit.tools.extension_browser_open) as {
+    readonly required?: readonly string[];
+    readonly properties?: Readonly<Record<string, unknown>>;
+  };
+  expect(openSchema.required).toContain("browserId");
+  expect(openSchema.properties?.url).toBeDefined();
 });
 
 it("exports exact object result schemas for preview actions", () => {
