@@ -565,7 +565,9 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         }
         return yield* new PreviewAutomationRequestQueueClosedError(requestContext);
       }
-      const result = yield* Deferred.await(deferred).pipe(Effect.timeoutOption(timeoutMs));
+      const result = yield* Deferred.await(deferred).pipe(
+        Effect.timeoutOption(`${timeoutMs} millis`),
+      );
       return yield* Option.match(result, {
         onNone: () => Effect.fail(new PreviewAutomationTimeoutError(requestContext)),
         onSome: (value) => Effect.succeed(value as A),

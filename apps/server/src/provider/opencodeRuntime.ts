@@ -430,6 +430,24 @@ export function toOpenCodeQuestionAnswers(
   });
 }
 
+export function fullAccessQuestionAnswers(
+  request: QuestionRequest,
+): Array<QuestionAnswer> | undefined {
+  const answers: Array<QuestionAnswer> = [];
+  for (const question of request.questions) {
+    const option = question.options.find(
+      (candidate) =>
+        candidate.description.trim().toLowerCase() === "allow" ||
+        candidate.label.trim().toLowerCase() === "allow",
+    );
+    if (!option) {
+      return undefined;
+    }
+    answers.push([option.description]);
+  }
+  return answers;
+}
+
 function ensureRuntimeError(
   operation: OpenCodeRuntimeError["operation"],
   detail: string,

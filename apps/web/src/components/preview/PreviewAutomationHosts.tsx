@@ -441,7 +441,7 @@ function PreviewAutomationHost(props: {
   const listWebRuntimeSessions = useAtomQueryRunner(webRuntimeEnvironment.sessions, {
     reportFailure: false,
   });
-  const listExtensionClients = useAtomQueryRunner(webRuntimeEnvironment.extensionClients, {
+  const listExtensionClients = useAtomCommand(webRuntimeEnvironment.extensionClients, {
     reportFailure: false,
   });
   const invokeExtension = useAtomCommand(webRuntimeEnvironment.invokeExtension, {
@@ -643,12 +643,28 @@ function PreviewAutomationHost(props: {
         switch (request.operation) {
           case "tabsList": {
             const activeTabId = tabId;
-            const [internalTabs, extensionClientsResult] = await Promise.all([
-              listPreviewAutomationTabs(Object.values(state.sessions), activeTabId, (listedTabId) =>
-                currentStatus(threadRef, listedTabId),
-              ),
-              listExtensionClients({ environmentId, input: {} }),
-            ]);
+            const internalTabs = await listPreviewAutomationTabs(
+              Object.values(state.sessions),
+              activeTabId,
+              (listedTabId) => currentStatus(threadRef, listedTabId),
+            );
+            let extensionClientsResult = await listExtensionClients({ environmentId, input: {} });
+            const waitForExtension =
+              typeof request.input === "object" &&
+              request.input !== null &&
+              "waitForExtension" in request.input &&
+              request.input.waitForExtension === true;
+            if (waitForExtension) {
+              const deadline = Date.now() + Math.min(request.timeoutMs - 1_000, 8_000);
+              while (
+                Date.now() < deadline &&
+                (extensionClientsResult._tag !== "Success" ||
+                  !extensionClientsResult.value.some((client) => client.connected))
+              ) {
+                await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+                extensionClientsResult = await listExtensionClients({ environmentId, input: {} });
+              }
+            }
             return {
               browsers: [
                 {

@@ -2,7 +2,7 @@ import * as NodeAssert from "node:assert/strict";
 
 import { describe, it } from "vite-plus/test";
 
-import { buildOpenCodePermissionRules } from "./opencodeRuntime.ts";
+import { buildOpenCodePermissionRules, fullAccessQuestionAnswers } from "./opencodeRuntime.ts";
 
 function actionFor(
   runtimeMode: Parameters<typeof buildOpenCodePermissionRules>[0],
@@ -40,5 +40,47 @@ describe("buildOpenCodePermissionRules", () => {
     NodeAssert.deepEqual(buildOpenCodePermissionRules("full-access"), [
       { permission: "*", pattern: "*", action: "allow" },
     ]);
+  });
+});
+
+describe("fullAccessQuestionAnswers", () => {
+  it("accepts an explicit provider authorization without opening a prompt", () => {
+    NodeAssert.deepEqual(
+      fullAccessQuestionAnswers({
+        id: "form-1",
+        sessionID: "session-1",
+        questions: [
+          {
+            header: "choice",
+            question: "Allow web search?",
+            options: [
+              { label: "Allow search", description: "allow" },
+              { label: "Disable web search", description: "disable" },
+            ],
+          },
+        ],
+      }),
+      [["allow"]],
+    );
+  });
+
+  it("does not guess an answer to an ordinary question", () => {
+    NodeAssert.equal(
+      fullAccessQuestionAnswers({
+        id: "form-2",
+        sessionID: "session-1",
+        questions: [
+          {
+            header: "target",
+            question: "Which target should I inspect?",
+            options: [
+              { label: "A", description: "First target" },
+              { label: "B", description: "Second target" },
+            ],
+          },
+        ],
+      }),
+      undefined,
+    );
   });
 });

@@ -566,6 +566,12 @@ const makeWsRpcLayer = (
                 message: "Web runtime is not installed.",
               }),
             ),
+            connectionForWorkspace: () =>
+              Effect.fail(
+                new WebRuntimeClient.WebRuntimeUnavailable({
+                  message: "Web runtime is not installed.",
+                }),
+              ),
             requestJson: () =>
               Effect.fail(
                 new WebRuntimeClient.WebRuntimeUnavailable({
@@ -573,6 +579,18 @@ const makeWsRpcLayer = (
                 }),
               ),
             requestText: () =>
+              Effect.fail(
+                new WebRuntimeClient.WebRuntimeUnavailable({
+                  message: "Web runtime is not installed.",
+                }),
+              ),
+            requestJsonForWorkspace: () =>
+              Effect.fail(
+                new WebRuntimeClient.WebRuntimeUnavailable({
+                  message: "Web runtime is not installed.",
+                }),
+              ),
+            requestTextForWorkspace: () =>
               Effect.fail(
                 new WebRuntimeClient.WebRuntimeUnavailable({
                   message: "Web runtime is not installed.",

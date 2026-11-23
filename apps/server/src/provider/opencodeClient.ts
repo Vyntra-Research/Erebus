@@ -433,6 +433,31 @@ function fieldOptions(field: FormField): ReadonlyArray<OpenCodeQuestionOption> {
   return [];
 }
 
+export function resolveOpenCodeFormOptionValue(
+  options: ReadonlyArray<{
+    readonly value: string;
+    readonly label: string;
+    readonly description?: string;
+  }>,
+  value: string,
+): string {
+  const normalized = value.trim();
+  const option = options.find(
+    (candidate) =>
+      candidate.value === normalized ||
+      candidate.label === normalized ||
+      candidate.description === normalized,
+  );
+  return option?.value ?? value;
+}
+
+function resolveFormOptionValue(field: FormField, value: string): string {
+  if (field.type !== "string" && field.type !== "multiselect") {
+    return value;
+  }
+  return resolveOpenCodeFormOptionValue(field.options ?? [], value);
+}
+
 function toQuestionRequest(form: FormInfo): OpenCodeQuestionRequest {
   return {
     id: form.id,
@@ -456,7 +481,7 @@ function toFormAnswer(form: FormInfo, answers: ReadonlyArray<OpenCodeQuestionAns
     const first = values[0] ?? "";
     switch (field.type) {
       case "multiselect":
-        answer[field.key] = values;
+        answer[field.key] = values.map((value) => resolveFormOptionValue(field, value));
         break;
       case "boolean":
         answer[field.key] = ["true", "yes", "1"].includes(first.trim().toLowerCase());
@@ -468,7 +493,7 @@ function toFormAnswer(form: FormInfo, answers: ReadonlyArray<OpenCodeQuestionAns
         break;
       }
       case "string":
-        answer[field.key] = first;
+        answer[field.key] = resolveFormOptionValue(field, first);
         break;
     }
   }
@@ -544,11 +569,13 @@ function textEventPart(
   };
 }
 
-async function* translateEvents(
+export async function* translateEvents(
   events: AsyncIterable<OpenCodeEvent>,
   forms: Map<string, FormInfo>,
 ): AsyncIterable<OpenCodeCompatEvent> {
   const tools = toolEventState();
+  const activeCompactions = new Map<string, string>();
+  let compactionSequence = 0;
   for await (const event of events) {
     switch (event.type) {
       case "session.renamed":
@@ -752,6 +779,41 @@ async function* translateEvents(
       case "session.status":
         yield { type: "session.status", properties: event.data };
         break;
+      case "session.compaction.started": {
+        const compactionID =
+          event.data.inputID ?? `${event.data.sessionID}:${compactionSequence++}`;
+        activeCompactions.set(event.data.sessionID, compactionID);
+        yield {
+          type: "session.compaction.started",
+          properties: {
+            ...event.data,
+            compactionID,
+          },
+        };
+        break;
+      }
+      case "session.compaction.ended": {
+        const compactionID =
+          activeCompactions.get(event.data.sessionID) ??
+          `${event.data.sessionID}:${compactionSequence++}`;
+        activeCompactions.delete(event.data.sessionID);
+        yield {
+          type: "session.compaction.ended",
+          properties: { ...event.data, compactionID },
+        };
+        break;
+      }
+      case "session.compaction.failed": {
+        const compactionID =
+          activeCompactions.get(event.data.sessionID) ??
+          `${event.data.sessionID}:${compactionSequence++}`;
+        activeCompactions.delete(event.data.sessionID);
+        yield {
+          type: "session.compaction.failed",
+          properties: { ...event.data, compactionID },
+        };
+        break;
+      }
       case "session.idle":
         yield {
           type: "session.status",
@@ -943,7 +1005,7 @@ export function makeOpenCodeClient(input: {
         await client.session.interrupt({ sessionID });
       },
       wait: async ({ sessionID }, options) => {
-        await client.experimental.session.wait(
+        await client.session.wait(
           { sessionID },
           options?.signal ? { signal: options.signal } : undefined,
         );

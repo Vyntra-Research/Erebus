@@ -2603,6 +2603,9 @@ describe("agent browser access", () => {
         connection: Effect.die("unused"),
         requestJson: () => Effect.die("unused"),
         requestText: () => Effect.die("unused"),
+        connectionForWorkspace: () => Effect.die("unused"),
+        requestJsonForWorkspace: () => Effect.die("unused"),
+        requestTextForWorkspace: () => Effect.die("unused"),
       });
       const issued = yield* startSessionWith(
         false,
@@ -2629,6 +2632,9 @@ describe("agent browser access", () => {
         connection: Effect.die("unused"),
         requestJson: () => Effect.die("unused"),
         requestText: () => Effect.die("unused"),
+        connectionForWorkspace: () => Effect.die("unused"),
+        requestJsonForWorkspace: () => Effect.die("unused"),
+        requestTextForWorkspace: () => Effect.die("unused"),
       });
       const parentThreadId = asThreadId("thread-web-parent");
       const childThreadId = asThreadId("thread-web-coagent");

@@ -16,6 +16,7 @@ import {
   nextRestart,
   parseReadyLine,
   runtimeEnvironment,
+  WEB_WORKSPACE_DATA_SEGMENTS,
 } from "./WebRuntimeClient.ts";
 
 describe("WebRuntimeClient readiness", () => {
@@ -99,6 +100,10 @@ describe("WebRuntimeClient readiness", () => {
     const recovered = nextRestart(failures, 65_000);
     expect(recovered.failures).toEqual([65_000]);
     expect(recovered.delayMs).toBe(500);
+  });
+
+  it("stores the complete web base inside the workspace", () => {
+    expect(WEB_WORKSPACE_DATA_SEGMENTS).toEqual([".erebus", "web"]);
   });
 
   it.effect("keeps the server layer available when the configured runtime binary is missing", () =>

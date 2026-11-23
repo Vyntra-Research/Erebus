@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type {
   DesktopPreviewBrowserProfile,
   PreviewAutomationOperation,
@@ -14,6 +15,7 @@ import type {
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import * as WebRuntimeClient from "../../../webRuntime/WebRuntimeClient.ts";
 import {
   type PreviewBrowserProfileDeleteResult,
   type PreviewBrowserProfileListResult,
@@ -56,6 +58,10 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
   McpInvocationContext.McpInvocationContext | PreviewAutomationBroker.PreviewAutomationBroker
 > {
   const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+  const webRuntime = yield* Effect.serviceOption(WebRuntimeClient.WebRuntimeClient);
+  if (scope.workspaceRoot && scope.capabilities.has("web") && Option.isSome(webRuntime)) {
+    yield* webRuntime.value.connectionForWorkspace(scope.workspaceRoot).pipe(Effect.ignore);
+  }
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   return yield* broker.invoke<A>({
     scope,
@@ -94,7 +100,7 @@ const handlers = {
     invoke<PreviewBrowserProfileProxyResult>("browserProfileProxy", input),
   preview_tabs: () => invoke<PreviewBrowserTabsResult>("tabsList", {}),
   extension_browser_list: () =>
-    invoke<PreviewBrowserTabsResult>("tabsList", {}).pipe(
+    invoke<PreviewBrowserTabsResult>("tabsList", { waitForExtension: true }).pipe(
       Effect.map((result) => ({
         browsers: result.browsers.filter((browser) => browser.kind === "extension"),
         tabs: result.tabs.filter((tab) => tab.tabId.startsWith("extension:")),

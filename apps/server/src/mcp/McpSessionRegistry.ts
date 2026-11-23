@@ -14,6 +14,7 @@ import * as McpProviderSession from "./McpProviderSession.ts";
 export interface McpCredentialRequest {
   readonly threadId: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
+  readonly workspaceRoot?: string;
   readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
 }
 
@@ -130,6 +131,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         threadId: ThreadId.make(request.threadId),
         providerSessionId,
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
+        ...(request.workspaceRoot === undefined ? {} : { workspaceRoot: request.workspaceRoot }),
         capabilities: request.capabilities ?? new Set(["preview"]),
         issuedAt,
       };

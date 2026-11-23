@@ -303,6 +303,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     readonly provider: ProviderDriverKind;
     readonly resumeCursor: unknown | undefined;
     readonly hasNativeResearchTools: boolean;
+    readonly cwd?: string;
   }) =>
     Effect.gen(function* () {
       const previewEnabled = yield* agentBrowserAccessEnabled;
@@ -329,6 +330,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const credential = yield* issueMcpCredential({
         threadId: input.threadId,
         providerInstanceId: input.providerInstanceId,
+        workspaceRoot:
+          input.cwd ?? `${serverConfig.stateDir}/standalone-workspaces/${input.threadId}`,
         capabilities,
       });
       if (credential) {
@@ -520,6 +523,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         provider: input.binding.provider,
         resumeCursor: input.binding.resumeCursor,
         hasNativeResearchTools: hasCurrentNativeControlTools(input.binding.runtimePayload),
+        ...(persistedCwd ? { cwd: persistedCwd } : {}),
       });
       const resumed = yield* adapter
         .startSession({
@@ -756,6 +760,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           hasNativeResearchTools: hasCurrentNativeControlTools(
             persistedBinding?.runtimePayload ?? null,
           ),
+          ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         });
         const session = yield* adapter
           .startSession({

@@ -81,6 +81,8 @@ const runtimeMock = {
     sessionDirectoryById: new Map<string, string>(),
     sessionUpdateCalls: [] as Array<{ sessionID: string; permission: unknown }>,
     forkCalls: [] as Array<{ sessionID: string; directory?: string }>,
+    permissionReplyCalls: [] as Array<Record<string, unknown>>,
+    questionReplyCalls: [] as Array<Record<string, unknown>>,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -106,6 +108,8 @@ const runtimeMock = {
     this.state.sessionDirectoryById.clear();
     this.state.sessionUpdateCalls.length = 0;
     this.state.forkCalls.length = 0;
+    this.state.permissionReplyCalls.length = 0;
+    this.state.questionReplyCalls.length = 0;
   },
 };
 
@@ -254,6 +258,16 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         add: async (input: Record<string, unknown>) => {
           runtimeMock.state.mcpAddCalls.push(input);
           return { data: true };
+        },
+      },
+      permission: {
+        reply: async (input: Record<string, unknown>) => {
+          runtimeMock.state.permissionReplyCalls.push(input);
+        },
+      },
+      question: {
+        reply: async (input: Record<string, unknown>) => {
+          runtimeMock.state.questionReplyCalls.push(input);
         },
       },
     }) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
@@ -873,6 +887,212 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const sessions = yield* adapter.listSessions();
       NodeAssert.equal(sessions[0]?.status, "ready");
       NodeAssert.equal(sessions[0]?.activeTurnId, undefined);
+    }),
+  );
+
+  it.effect("answers explicit authorization prompts automatically under full access", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-full-access-prompts");
+      const sessionID = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "permission.asked",
+          properties: {
+            id: "permission-1",
+            sessionID,
+            permission: "bash",
+            patterns: ["*"],
+          },
+        },
+        {
+          type: "question.asked",
+          properties: {
+            id: "form-1",
+            sessionID,
+            questions: [
+              {
+                header: "choice",
+                question: "Allow web search?",
+                options: [
+                  { label: "Allow search", description: "allow" },
+                  { label: "Disable web search", description: "disable" },
+                ],
+              },
+            ],
+          },
+        },
+      ];
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      for (
+        let attempt = 0;
+        attempt < 100 &&
+        (runtimeMock.state.permissionReplyCalls.length === 0 ||
+          runtimeMock.state.questionReplyCalls.length === 0);
+        attempt += 1
+      ) {
+        yield* Effect.yieldNow;
+      }
+
+      NodeAssert.deepEqual(runtimeMock.state.permissionReplyCalls, [
+        { sessionID, requestID: "permission-1", reply: "always" },
+      ]);
+      NodeAssert.deepEqual(runtimeMock.state.questionReplyCalls, [
+        { sessionID, requestID: "form-1", answers: [["allow"]] },
+      ]);
+    }),
+  );
+
+  it.effect("emits OpenCode automatic compaction as one lifecycle item", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-compaction");
+      const sessionID = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "session.compaction.started",
+          properties: { sessionID, reason: "auto", compactionID: "compact-1" },
+        },
+        {
+          type: "session.compaction.ended",
+          properties: {
+            sessionID,
+            reason: "auto",
+            text: "summary",
+            compactionID: "compact-1",
+          },
+        },
+      ];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(4),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      const compactionEvents = events.filter(
+        (event) => event.type === "item.started" || event.type === "item.completed",
+      );
+      NodeAssert.deepEqual(
+        compactionEvents.map((event) => ({
+          type: event.type,
+          itemId: event.itemId,
+          itemType: event.payload.itemType,
+          status: event.payload.status,
+        })),
+        [
+          {
+            type: "item.started",
+            itemId: "opencode-compaction-compact-1",
+            itemType: "context_compaction",
+            status: "inProgress",
+          },
+          {
+            type: "item.completed",
+            itemId: "opencode-compaction-compact-1",
+            itemType: "context_compaction",
+            status: "completed",
+          },
+        ],
+      );
+    }),
+  );
+
+  it.effect("does not replay a completed assistant message under a synthesized part id", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-reconcile-dedup");
+      const sessionID = "http://127.0.0.1:9999/session";
+      const messageID = "msg-dedup";
+      const text = "One response only";
+      runtimeMock.state.waitResolves = true;
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID,
+            info: { id: messageID, role: "assistant" },
+          },
+        },
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID,
+            part: {
+              id: "assistant:msg-dedup:text:0",
+              sessionID,
+              messageID,
+              type: "text",
+              text,
+              time: { start: 1, end: 2 },
+            },
+          },
+        },
+      ];
+      runtimeMock.state.messagesAfterPrompt = [
+        {
+          info: { id: messageID, role: "assistant" },
+          parts: [
+            {
+              id: "assistant:msg-dedup:text:1",
+              sessionID: "",
+              messageID,
+              type: "text",
+              text,
+              time: { start: 1, end: 2 },
+            },
+          ],
+        },
+      ];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(6),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Answer once",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/deepseek-v4.1-flash-free",
+        ),
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      const assistantCompletions = events.filter(
+        (event) =>
+          event.type === "item.completed" && event.payload.itemType === "assistant_message",
+      );
+      const assistantDeltas = events.filter(
+        (event) => event.type === "content.delta" && event.payload.streamKind === "assistant_text",
+      );
+      NodeAssert.equal(assistantCompletions.length, 1);
+      NodeAssert.equal(assistantDeltas.length, 1);
+      NodeAssert.equal(
+        assistantCompletions[0]?.type === "item.completed"
+          ? assistantCompletions[0].payload.detail
+          : undefined,
+        text,
+      );
     }),
   );
 
