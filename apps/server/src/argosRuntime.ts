@@ -71,6 +71,10 @@ export interface ManagedArgosRuntime {
   readonly pluginRoot: string;
 }
 
+export interface ManagedArgosOpenCodeRuntime extends ManagedArgosRuntime {
+  readonly skillRoot: string;
+}
+
 export interface ManagedArgosUpdateStatus {
   readonly version: string;
   readonly latestVersion: string;
@@ -539,6 +543,51 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function addManagedArgosToOpenCodeConfig(
+  configContent: string,
+  runtime: Pick<ManagedArgosOpenCodeRuntime, "mcpPath" | "skillRoot">,
+): string {
+  const parsed = JSON.parse(configContent.trim() || "{}") as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("OpenCode configuration content must be a JSON object.");
+  }
+
+  const configuredSkills = parsed.skills;
+  if (configuredSkills !== undefined && !Array.isArray(configuredSkills)) {
+    throw new Error("OpenCode configuration 'skills' must be an array.");
+  }
+  const skills = [...(configuredSkills ?? [])];
+  if (!skills.includes(runtime.skillRoot)) skills.push(runtime.skillRoot);
+
+  const configuredMcp = parsed.mcp;
+  if (configuredMcp !== undefined && !isRecord(configuredMcp)) {
+    throw new Error("OpenCode configuration 'mcp' must be an object.");
+  }
+  const mcp = configuredMcp ?? {};
+  const configuredServers = mcp.servers;
+  if (configuredServers !== undefined && !isRecord(configuredServers)) {
+    throw new Error("OpenCode configuration 'mcp.servers' must be an object.");
+  }
+
+  return JSON.stringify({
+    ...parsed,
+    skills,
+    mcp: {
+      ...mcp,
+      servers: {
+        ...configuredServers,
+        argos: {
+          type: "local",
+          command: [process.execPath, runtime.mcpPath],
+          environment: { ELECTRON_RUN_AS_NODE: "1" },
+          disabled: false,
+          protocol: "legacy",
+        },
+      },
+    },
+  });
+}
+
 async function writeManagedArgosManifest(
   manifestPath: string,
   version: string,
@@ -639,6 +688,42 @@ async function pruneOwnedRuntimeVersions(
     }
   }
 }
+
+export const installManagedArgosForOpenCode = Effect.fn("ArgosRuntime.installForOpenCode")(
+  function* (stateDir: string, options: ManagedArgosOptions = {}) {
+    const managedRuntimeRoot = NodePath.resolve(
+      options.managedRuntimeRoot ?? NodePath.join(stateDir, "managed", "argos-runtime"),
+    );
+    defaultManagedRuntimeRoot = managedRuntimeRoot;
+    const runtime = yield* refreshManagedArgosRuntime(managedRuntimeRoot, {
+      ...options,
+      managedRuntimeRoot,
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(error.detail, { operation: error.operation, cause: error.cause }),
+      ),
+      Effect.catch(() => resolveManagedArgosRuntime(managedRuntimeRoot)),
+    );
+
+    return yield* Effect.tryPromise({
+      try: async (): Promise<ManagedArgosOpenCodeRuntime> => {
+        await pruneOwnedRuntimeVersions(
+          NodePath.join(managedRuntimeRoot, "packages"),
+          runtime.version,
+        );
+        const skillRoot = NodePath.join(runtime.pluginRoot, "skills", "argos");
+        await NodeFSP.access(NodePath.join(skillRoot, "SKILL.md"));
+        return { ...runtime, skillRoot };
+      },
+      catch: (cause) =>
+        new ArgosRuntimeError({
+          operation: "install",
+          detail: "Erebus could not prepare Argos for OpenCode.",
+          cause,
+        }),
+    });
+  },
+);
 
 export const installManagedArgosForCodex = Effect.fn("ArgosRuntime.installForCodex")(function* (
   codexHome: string,

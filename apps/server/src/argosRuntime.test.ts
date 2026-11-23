@@ -11,7 +11,9 @@ import * as Schema from "effect/Schema";
 import * as Tar from "tar";
 
 import {
+  addManagedArgosToOpenCodeConfig,
   installManagedArgosForCodex,
+  installManagedArgosForOpenCode,
   refreshManagedArgosRuntime,
   resolveManagedArgosRuntime,
 } from "./argosRuntime.ts";
@@ -40,6 +42,61 @@ const decodeArgosPluginManifest = Schema.decodeUnknownEffect(
 );
 
 it.layer(NodeServices.layer)("managed Argos runtime", (it) => {
+  it("adds only the Argos MCP and technical skill to OpenCode config", () => {
+    const first = addManagedArgosToOpenCodeConfig(
+      JSON.stringify({
+        skills: ["C:/user/skills"],
+        mcp: {
+          timeout: { startup: 12_000 },
+          servers: { custom: { type: "remote", url: "https://mcp.example" } },
+        },
+      }),
+      {
+        mcpPath: "C:/erebus/managed/argos/dist/mcp.js",
+        skillRoot: "C:/erebus/managed/argos/plugins/argos/skills/argos",
+      },
+    );
+    const second = addManagedArgosToOpenCodeConfig(JSON.stringify(JSON.parse(first)), {
+      mcpPath: "C:/erebus/managed/argos/dist/mcp.js",
+      skillRoot: "C:/erebus/managed/argos/plugins/argos/skills/argos",
+    });
+
+    expect(JSON.parse(second)).toEqual({
+      skills: ["C:/user/skills", "C:/erebus/managed/argos/plugins/argos/skills/argos"],
+      mcp: {
+        timeout: { startup: 12_000 },
+        servers: {
+          custom: { type: "remote", url: "https://mcp.example" },
+          argos: {
+            type: "local",
+            command: [process.execPath, "C:/erebus/managed/argos/dist/mcp.js"],
+            environment: { ELECTRON_RUN_AS_NODE: "1" },
+            disabled: false,
+            protocol: "legacy",
+          },
+        },
+      },
+    });
+  });
+
+  it.effect("prepares the managed Argos MCP and technical skill for OpenCode", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "erebus-opencode-argos-",
+      });
+      const runtime = yield* installManagedArgosForOpenCode(stateDir, {
+        now: () => Date.UTC(2026, 10, 23),
+        fetch: (() =>
+          Promise.reject(new Error("offline fixture"))) as unknown as typeof globalThis.fetch,
+      });
+
+      expect(runtime.skillRoot).toBe(path.join(runtime.pluginRoot, "skills", "argos"));
+      expect(yield* fileSystem.exists(path.join(runtime.skillRoot, "SKILL.md"))).toBe(true);
+    }),
+  );
+
   it.effect("installs the pinned MCP and Argos skills into an isolated Codex home", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
