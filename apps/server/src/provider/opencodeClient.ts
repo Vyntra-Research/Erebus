@@ -11,6 +11,7 @@ import {
   type SessionMessageInfo,
   type SkillInfo,
 } from "@opencode/client";
+import * as NodeTimersPromises from "node:timers/promises";
 
 export interface OpenCodeModel {
   readonly id: string;
@@ -76,6 +77,42 @@ export interface OpenCodeQuestionRequest {
   readonly id: string;
   readonly sessionID: string;
   readonly questions: ReadonlyArray<OpenCodeQuestion>;
+}
+
+const OPENCODE_PLUGIN_STARTUP_TIMEOUT_MS = 5_000;
+const OPENCODE_PLUGIN_STARTUP_POLL_MS = 25;
+
+type OpenCodePluginStartupResponse = {
+  readonly data?: unknown;
+};
+
+export async function waitForOpenCodePluginStartup(input: {
+  readonly baseUrl: string;
+  readonly directory: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly fetchImpl?: (url: URL, init?: RequestInit) => Promise<Response>;
+  readonly timeoutMs?: number;
+  readonly pollMs?: number;
+}): Promise<void> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const timeoutMs = input.timeoutMs ?? OPENCODE_PLUGIN_STARTUP_TIMEOUT_MS;
+  const pollMs = input.pollMs ?? OPENCODE_PLUGIN_STARTUP_POLL_MS;
+  const endpoint = new URL("/api/plugin", normalizeOpenCodeApiUrl(input.baseUrl));
+  endpoint.searchParams.set("location.directory", input.directory);
+  const attempts = Math.max(1, pollMs > 0 ? Math.ceil(timeoutMs / pollMs) + 1 : timeoutMs + 1);
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await fetchImpl(
+      endpoint,
+      input.headers ? { headers: input.headers } : undefined,
+    );
+    if (response.status === 404) return;
+    if (response.ok) {
+      const payload = (await response.json()) as OpenCodePluginStartupResponse;
+      if (Array.isArray(payload.data) && payload.data.length > 0) return;
+    }
+    if (attempt + 1 < attempts) await NodeTimersPromises.setTimeout(pollMs);
+  }
 }
 
 export type OpenCodeQuestionAnswer = ReadonlyArray<string>;
@@ -917,7 +954,11 @@ export function makeOpenCodeClient(input: {
   const forms = new Map<string, FormInfo>();
   let locationReady: Promise<unknown> | undefined;
   const ensureLocation = () =>
-    (locationReady ??= client.location.get({ location: { directory: input.directory } }));
+    (locationReady ??= waitForOpenCodePluginStartup({
+      baseUrl: input.baseUrl,
+      directory: input.directory,
+      ...(headers ? { headers } : {}),
+    }).then(() => client.location.get({ location: { directory: input.directory } })));
 
   return {
     provider: {
