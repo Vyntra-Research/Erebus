@@ -93,6 +93,7 @@ import { runtimeRestartCleanup } from "../web-security/webSecurityPanelLogic";
 import {
   extensionAutomationBrowsers,
   extensionAutomationTabs,
+  isExtensionAutomationTargetOperation,
   parseExtensionAutomationBrowserId,
   parseExtensionAutomationTabId,
   rewriteExtensionAutomationResult,
@@ -515,7 +516,8 @@ function PreviewAutomationHost(props: {
         const openInput =
           request.operation === "open" ? (request.input as PreviewAutomationOpenInput) : null;
         const externalBrowserProducerId = parseExtensionAutomationBrowserId(openInput?.browserId);
-        if (externalTarget || externalBrowserProducerId) {
+        const extensionTargetedOperation = isExtensionAutomationTargetOperation(request.operation);
+        if (extensionTargetedOperation && (externalTarget || externalBrowserProducerId)) {
           const clientsResult = await listExtensionClients({ environmentId, input: {} });
           if (clientsResult._tag === "Failure") return raiseAtomCommandFailure(clientsResult);
           const producerId = externalTarget?.producerId ?? externalBrowserProducerId!;

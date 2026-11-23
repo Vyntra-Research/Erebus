@@ -1,4 +1,7 @@
-import type { WebRuntimeExtensionAutomationClient } from "@t3tools/contracts";
+import type {
+  PreviewAutomationOperation,
+  WebRuntimeExtensionAutomationClient,
+} from "@t3tools/contracts";
 
 const PREFIX = "extension:";
 const BROWSER_PREFIX = "extension-client:";
@@ -6,6 +9,34 @@ const BROWSER_PREFIX = "extension-client:";
 export interface ExtensionAutomationTarget {
   readonly producerId: string;
   readonly tabId: number;
+}
+
+export function isExtensionAutomationTargetOperation(
+  operation: PreviewAutomationOperation,
+): boolean {
+  switch (operation) {
+    case "status":
+    case "open":
+    case "navigate":
+    case "snapshot":
+    case "click":
+    case "type":
+    case "press":
+    case "scroll":
+    case "evaluate":
+    case "waitFor":
+    case "recordingStart":
+    case "recordingStop":
+    case "resize":
+    case "setColorScheme":
+    case "tabClose":
+    case "back":
+    case "forward":
+    case "reload":
+      return true;
+    default:
+      return false;
+  }
 }
 
 export function extensionAutomationBrowserId(producerId: string): string {

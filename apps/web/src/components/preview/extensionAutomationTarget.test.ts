@@ -4,6 +4,7 @@ import {
   extensionAutomationBrowserId,
   extensionAutomationBrowsers,
   extensionAutomationTabId,
+  isExtensionAutomationTargetOperation,
   parseExtensionAutomationBrowserId,
   parseExtensionAutomationTabId,
   rewriteExtensionAutomationResult,
@@ -57,5 +58,12 @@ describe("extension automation targets", () => {
       tabs: [{ tabId: "extension:producer:5" }],
       viewport: { width: 800 },
     });
+  });
+
+  it("keeps global tab and profile operations out of the extension command channel", () => {
+    expect(isExtensionAutomationTargetOperation("status")).toBe(true);
+    expect(isExtensionAutomationTargetOperation("tabsList")).toBe(false);
+    expect(isExtensionAutomationTargetOperation("browserProfilesList")).toBe(false);
+    expect(isExtensionAutomationTargetOperation("webRuntimeReachability")).toBe(false);
   });
 });
