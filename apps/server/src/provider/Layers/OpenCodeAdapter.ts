@@ -1188,6 +1188,64 @@ export function makeOpenCodeAdapter(
           break;
         }
 
+        case "session.compaction.started": {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              itemId: `opencode-compaction-${event.properties.compactionID}`,
+              raw: event,
+            })),
+            type: "item.started",
+            payload: {
+              itemType: "context_compaction",
+              status: "inProgress",
+              title: "Compacting context",
+              data: event.properties,
+            },
+          });
+          break;
+        }
+
+        case "session.compaction.ended": {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              itemId: `opencode-compaction-${event.properties.compactionID}`,
+              raw: event,
+            })),
+            type: "item.completed",
+            payload: {
+              itemType: "context_compaction",
+              status: "completed",
+              title: "Context compacted",
+              data: event.properties,
+            },
+          });
+          break;
+        }
+
+        case "session.compaction.failed": {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              itemId: `opencode-compaction-${event.properties.compactionID}`,
+              raw: event,
+            })),
+            type: "item.completed",
+            payload: {
+              itemType: "context_compaction",
+              status: "failed",
+              title: "Context compaction failed",
+              detail: sessionErrorMessage(event.properties.error),
+              data: event.properties,
+            },
+          });
+          break;
+        }
+
         case "session.error": {
           const message = sessionErrorMessage(event.properties.error);
           const activeTurnId = context.activeTurnId;

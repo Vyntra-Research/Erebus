@@ -340,6 +340,16 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     yield* closeConnection(queue, disconnected);
   });
 
+  const evictUnresponsiveConnection = Effect.fn(
+    "PreviewAutomationBroker.evictUnresponsiveConnection",
+  )(function* (clientId: string, queue: ClientConnection["queue"]) {
+    const disconnected = yield* SynchronizedRef.modify(state, (current) => {
+      const removed = removeConnectionFromState(current, clientId, queue);
+      return [removed.disconnected, removed.state] as const;
+    });
+    yield* Effect.forkDetach(closeConnection(queue, disconnected), { startImmediately: true });
+  });
+
   const acquireConnection = Effect.fn("PreviewAutomationBroker.acquireConnection")(function* (
     host: PreviewAutomationHost,
   ) {
@@ -565,9 +575,14 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         }
         return yield* new PreviewAutomationRequestQueueClosedError(requestContext);
       }
-      const result = yield* Deferred.await(deferred).pipe(Effect.timeoutOption(timeoutMs));
+      const result = yield* Deferred.await(deferred).pipe(
+        Effect.timeoutOption(`${timeoutMs} millis`),
+      );
       return yield* Option.match(result, {
-        onNone: () => Effect.fail(new PreviewAutomationTimeoutError(requestContext)),
+        onNone: () =>
+          evictUnresponsiveConnection(connection.clientId, connection.queue).pipe(
+            Effect.andThen(Effect.fail(new PreviewAutomationTimeoutError(requestContext))),
+          ),
         onSome: (value) => Effect.succeed(value as A),
       });
     });

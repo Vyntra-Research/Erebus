@@ -948,6 +948,68 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("emits OpenCode automatic compaction as one lifecycle item", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-compaction");
+      const sessionID = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "session.compaction.started",
+          properties: { sessionID, reason: "auto", compactionID: "compact-1" },
+        },
+        {
+          type: "session.compaction.ended",
+          properties: {
+            sessionID,
+            reason: "auto",
+            text: "summary",
+            compactionID: "compact-1",
+          },
+        },
+      ];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(4),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      const compactionEvents = events.filter(
+        (event) => event.type === "item.started" || event.type === "item.completed",
+      );
+      NodeAssert.deepEqual(
+        compactionEvents.map((event) => ({
+          type: event.type,
+          itemId: event.itemId,
+          itemType: event.payload.itemType,
+          status: event.payload.status,
+        })),
+        [
+          {
+            type: "item.started",
+            itemId: "opencode-compaction-compact-1",
+            itemType: "context_compaction",
+            status: "inProgress",
+          },
+          {
+            type: "item.completed",
+            itemId: "opencode-compaction-compact-1",
+            itemType: "context_compaction",
+            status: "completed",
+          },
+        ],
+      );
+    }),
+  );
+
   it.effect("does not replay a completed assistant message under a synthesized part id", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
