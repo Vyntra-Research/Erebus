@@ -927,7 +927,10 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
   ];
 }
 
-export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 80;
+// The bundled browser-control extension adds its install archives and runtime
+// files to the otherwise compact Windows payload. Keep a small ceiling above
+// the current package so an accidental loose dependency tree still fails.
+export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 96;
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
   {
