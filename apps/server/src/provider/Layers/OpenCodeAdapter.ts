@@ -1322,33 +1322,10 @@ export function makeOpenCodeAdapter(
             continue;
           }
 
-          const messagesExit = yield* Effect.exit(
-            runOpenCodeSdk("session.messages", () =>
-              context.client.session.messages({ sessionID: context.openCodeSessionId }),
-            ),
-          );
-          if (Exit.isFailure(messagesExit)) {
-            inactiveConfirmations = 0;
-            continue;
-          }
-
-          const hasCompletedAssistantResponse = (messagesExit.value.data ?? []).some(
-            (entry) =>
-              !baselineMessageIds.has(entry.info.id) &&
-              entry.info.role === "assistant" &&
-              (entry.info.error !== undefined ||
-                entry.parts.some((part) => {
-                  if (part.type === "tool") {
-                    return part.state.status === "completed" || part.state.status === "error";
-                  }
-                  return part.time?.end !== undefined;
-                })),
-          );
-          if (!hasCompletedAssistantResponse) {
-            inactiveConfirmations = 0;
-            continue;
-          }
-
+          // The active-session endpoint is the liveness authority. Requiring
+          // a readable assistant part here used to pin an otherwise finished
+          // turn as running whenever OpenCode had no text, or message reads
+          // lagged behind its status transition.
           inactiveConfirmations += 1;
           if (inactiveConfirmations >= 2) {
             return;
@@ -1368,7 +1345,7 @@ export function makeOpenCodeAdapter(
               { sessionID: context.openCodeSessionId },
               { signal: waitSignal },
             ),
-          ),
+          ).pipe(Effect.catch(() => waitForInactiveCompletedSession)),
           waitForInactiveCompletedSession,
         ).pipe(Effect.ensuring(Effect.sync(() => waitAbortController.abort()))),
       );
@@ -1413,6 +1390,24 @@ export function makeOpenCodeAdapter(
             detail: openCodeRuntimeErrorDetail(Cause.squash(messagesExit.cause)),
           },
         });
+        // session.wait already confirmed that OpenCode finished. A failed
+        // message read can leave the visible answer incomplete, but it must
+        // not leave the chat running forever and turn the next user message
+        // into a steer for a dead turn.
+        if (context.activeTurnId === turnId) {
+          context.activeTurnId = undefined;
+          context.activeAgent = undefined;
+          context.activeVariant = undefined;
+          yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+            })),
+            type: "turn.completed",
+            payload: { state: "completed" },
+          });
+        }
         return;
       }
 
@@ -1884,20 +1879,19 @@ export function makeOpenCodeAdapter(
         context.webToolsAvailable,
       );
 
-      const reconciliationBaseline =
-        steeringTurnId === undefined
-          ? yield* runOpenCodeSdk("session.messages", () =>
-              context.client.session.messages({ sessionID: context.openCodeSessionId }),
-            ).pipe(
-              Effect.map(
-                (messages) =>
-                  new Set(
-                    (messages.data ?? []).map((entry) => entry.info.id),
-                  ) as ReadonlySet<string>,
-              ),
-              Effect.option,
-            )
-          : Option.none<ReadonlySet<string>>();
+      // A steer stays in the current turn, but OpenCode can omit the final
+      // idle event for it just as it can for a new turn. Snapshot the message
+      // ids before either prompt kind so the same reconciliation path can
+      // settle both without replaying earlier assistant output.
+      const reconciliationBaseline = yield* runOpenCodeSdk("session.messages", () =>
+        context.client.session.messages({ sessionID: context.openCodeSessionId }),
+      ).pipe(
+        Effect.map(
+          (messages) =>
+            new Set((messages.data ?? []).map((entry) => entry.info.id)) as ReadonlySet<string>,
+        ),
+        Effect.option,
+      );
 
       context.activeTurnId = turnId;
       context.activeAgent = agent ?? (input.interactionMode === "plan" ? "plan" : undefined);
@@ -1970,7 +1964,7 @@ export function makeOpenCodeAdapter(
         ),
       );
 
-      if (steeringTurnId === undefined && Option.isSome(reconciliationBaseline)) {
+      if (Option.isSome(reconciliationBaseline)) {
         yield* reconcileTurnAfterWait(context, turnId, reconciliationBaseline.value).pipe(
           Effect.forkIn(context.sessionScope),
         );

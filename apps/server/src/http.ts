@@ -62,6 +62,14 @@ const BrowserExtensionBootstrapInput = Schema.Struct({
   installId: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{8,128}$/u)),
   browser: Schema.Literals(["chromium", "firefox"]),
   version: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  knownTargets: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        serverUrl: Schema.String,
+        sessionId: Schema.String,
+      }),
+    ),
+  ),
 });
 const CaptureSession = Schema.Struct({
   id: Schema.String,
@@ -212,39 +220,64 @@ export const browserExtensionBootstrapRouteLayer = HttpRouter.add(
     }
     const webRuntime = webRuntimeOption.value;
     const source = `extension:${input.value.installId}`;
-    const sessions = yield* webRuntime
-      .requestJson("/v1/sessions")
-      .pipe(Effect.flatMap(Schema.decodeUnknownEffect(CaptureSessions)));
-    let session = sessions.find(
-      (candidate) => candidate.source === source && candidate.endedAt === null,
+    const knownTargets = input.value.knownTargets ?? [];
+    const workspaceRoots = webRuntime.workspaces ? yield* webRuntime.workspaces : [];
+    const targets = yield* Effect.forEach(workspaceRoots, (workspaceRoot) =>
+      Effect.gen(function* () {
+        const sessions = yield* webRuntime
+          .requestJsonForWorkspace(workspaceRoot, "/v1/sessions")
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(CaptureSessions)));
+        let session = sessions.find(
+          (candidate) => candidate.source === source && candidate.endedAt === null,
+        );
+        if (!session) {
+          const proxy = input.value.browser === "firefox";
+          session = yield* webRuntime
+            .requestJsonForWorkspace(workspaceRoot, `/v1/sessions?proxy=${String(proxy)}`, {
+              method: "POST",
+              body: {
+                label: `${input.value.browser === "firefox" ? "Firefox" : "Chromium"} extension`,
+                source,
+              },
+            })
+            .pipe(Effect.flatMap(Schema.decodeUnknownEffect(CaptureSession)));
+        }
+        const connection = yield* webRuntime.connectionForWorkspace(workspaceRoot);
+        const known = knownTargets.some(
+          (target) => target.serverUrl === connection.baseUrl && target.sessionId === session.id,
+        );
+        if (known) {
+          return {
+            serverUrl: connection.baseUrl,
+            sessionId: session.id,
+            unchanged: true,
+          };
+        }
+        const pairing = yield* webRuntime
+          .requestJsonForWorkspace(
+            workspaceRoot,
+            `/v1/sessions/${encodeURIComponent(session.id)}/pairing`,
+            {
+              method: "POST",
+            },
+          )
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(PairingToken)));
+        const caPem = session.proxy
+          ? yield* webRuntime.requestTextForWorkspace(workspaceRoot, "/v1/proxy/ca")
+          : undefined;
+        return {
+          serverUrl: connection.baseUrl,
+          sessionId: session.id,
+          token: pairing.token,
+          ...(session.proxy ? { proxyUrl: session.proxy.url } : {}),
+          ...(caPem ? { caPem } : {}),
+        };
+      }),
     );
-    if (!session) {
-      const proxy = input.value.browser === "firefox";
-      session = yield* webRuntime
-        .requestJson(`/v1/sessions?proxy=${String(proxy)}`, {
-          method: "POST",
-          body: {
-            label: `${input.value.browser === "firefox" ? "Firefox" : "Chromium"} extension`,
-            source,
-          },
-        })
-        .pipe(Effect.flatMap(Schema.decodeUnknownEffect(CaptureSession)));
-    }
-    const pairing = yield* webRuntime
-      .requestJson(`/v1/sessions/${encodeURIComponent(session.id)}/pairing`, {
-        method: "POST",
-      })
-      .pipe(Effect.flatMap(Schema.decodeUnknownEffect(PairingToken)));
-    const connection = yield* webRuntime.connection;
-    const caPem = session.proxy ? yield* webRuntime.requestText("/v1/proxy/ca") : undefined;
 
     return HttpServerResponse.jsonUnsafe(
       {
-        serverUrl: connection.baseUrl,
-        sessionId: session.id,
-        token: pairing.token,
-        ...(session.proxy ? { proxyUrl: session.proxy.url } : {}),
-        ...(caPem ? { caPem } : {}),
+        targets,
       },
       { headers: { "cache-control": "no-store" } },
     );

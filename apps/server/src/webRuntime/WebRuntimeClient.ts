@@ -176,6 +176,8 @@ export class WebRuntimeClient extends Context.Service<
       path: string,
       request?: WebRuntimeRequest,
     ) => Effect.Effect<string, WebRuntimeUnavailable | WebRuntimeRequestFailed>;
+    /** Workspaces whose runtime has been initialized in this desktop process. */
+    readonly workspaces?: Effect.Effect<ReadonlyArray<string>>;
   }
 >()("erebus/webRuntime/WebRuntimeClient") {}
 
@@ -695,6 +697,10 @@ export const make = Effect.fn("webRuntime.webRuntimeClient.make")(function* () {
     ),
   );
 
+  const workspaces = SynchronizedRef.get(runtimes).pipe(
+    Effect.map((current) => [...current.values()].map((runtime) => runtime.workspaceRoot)),
+  );
+
   const connection = activeRuntime.pipe(
     Effect.flatMap(awaitPrivateConnection),
     Effect.map(publicConnection),
@@ -720,6 +726,7 @@ export const make = Effect.fn("webRuntime.webRuntimeClient.make")(function* () {
     connectionForWorkspace,
     requestJsonForWorkspace,
     requestTextForWorkspace,
+    workspaces,
   });
 });
 
