@@ -1186,7 +1186,11 @@ const make = Effect.gen(function* () {
       pendingTurnStart: true,
     });
     const currentThread = yield* resolveThreadShell(input.threadId);
-    const isLiveUserSteer =
+    // Any persisted follow-up (user, co-agent, or Judge) arriving while a
+    // provider is running must take the live-delivery path. Individual
+    // adapters decide whether that means a native steer or an interrupt and
+    // replacement turn.
+    const isLiveFollowUp =
       currentThread?.session?.status === "running" && currentThread.session.activeTurnId !== null;
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
@@ -1236,7 +1240,7 @@ const make = Effect.gen(function* () {
 
     const request: ProviderSendTurnInput = {
       threadId: input.threadId,
-      ...(isLiveUserSteer
+      ...(isLiveFollowUp
         ? {
             clientUserMessageId: input.messageId,
             delivery: "live-user-steer" as const,

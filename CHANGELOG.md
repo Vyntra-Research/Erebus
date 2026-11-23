@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.8 - 2026-11-23
+
+### Fixed
+
+- Interrupt an active OpenCode turn before delivering a live user, co-agent, or Judge follow-up, so the next message starts its own turn instead of waiting behind tool calls.
+
 ## 2.0.0-beta.7 - 2026-11-23
 
 ### Fixed
