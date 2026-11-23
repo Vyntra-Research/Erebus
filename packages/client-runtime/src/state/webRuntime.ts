@@ -38,10 +38,9 @@ export function createWebRuntimeEnvironmentAtoms<R, E>(
       tag: WS_METHODS.webRuntimeListSessions,
       staleTimeMs: 2_000,
     }),
-    extensionClients: createEnvironmentRpcQueryAtomFamily(runtime, {
+    extensionClients: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:web-runtime:extension-clients",
       tag: WS_METHODS.webRuntimeListExtensionClients,
-      staleTimeMs: 500,
     }),
     scopes: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:web-runtime:scopes",

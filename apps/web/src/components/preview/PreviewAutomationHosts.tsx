@@ -441,7 +441,7 @@ function PreviewAutomationHost(props: {
   const listWebRuntimeSessions = useAtomQueryRunner(webRuntimeEnvironment.sessions, {
     reportFailure: false,
   });
-  const listExtensionClients = useAtomQueryRunner(webRuntimeEnvironment.extensionClients, {
+  const listExtensionClients = useAtomCommand(webRuntimeEnvironment.extensionClients, {
     reportFailure: false,
   });
   const invokeExtension = useAtomCommand(webRuntimeEnvironment.invokeExtension, {

@@ -14,6 +14,7 @@ import type {
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import * as WebRuntimeClient from "../../../webRuntime/WebRuntimeClient.ts";
 import {
   type PreviewBrowserProfileDeleteResult,
   type PreviewBrowserProfileListResult,
@@ -53,9 +54,15 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
 ): Effect.fn.Return<
   A,
   import("@t3tools/contracts").PreviewAutomationError,
-  McpInvocationContext.McpInvocationContext | PreviewAutomationBroker.PreviewAutomationBroker
+  | McpInvocationContext.McpInvocationContext
+  | PreviewAutomationBroker.PreviewAutomationBroker
+  | WebRuntimeClient.WebRuntimeClient
 > {
   const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+  if (scope.workspaceRoot && scope.capabilities.has("web")) {
+    const webRuntime = yield* WebRuntimeClient.WebRuntimeClient;
+    yield* webRuntime.connectionForWorkspace(scope.workspaceRoot).pipe(Effect.ignore);
+  }
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   return yield* broker.invoke<A>({
     scope,
