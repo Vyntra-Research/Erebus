@@ -22,6 +22,10 @@ import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
+import {
+  addManagedArgosToOpenCodeConfig,
+  installManagedArgosForOpenCode,
+} from "../../argosRuntime.ts";
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { CoagentToolController } from "../../coagents/Services/CoagentToolController.ts";
@@ -147,24 +151,44 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             ),
           )
         : null;
-      const processEnv = managedResearchSkills
-        ? yield* Effect.try({
-            try: () => ({
-              ...baseProcessEnv,
-              OPENCODE_CONFIG_CONTENT: addErebusResearchSkillsToOpenCodeConfig(
-                resolveOpenCodeConfigContent(baseProcessEnv),
-                managedResearchSkills,
-              ),
-            }),
-            catch: (cause) =>
-              new ProviderDriverError({
-                driver: DRIVER_KIND,
-                instanceId,
-                detail: `Failed to add Erebus research skills to OpenCode: ${String(cause)}`,
-                cause,
-              }),
-          })
-        : baseProcessEnv;
+      const managedArgos = enabled
+        ? yield* installManagedArgosForOpenCode(serverConfig.stateDir).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderDriverError({
+                  driver: DRIVER_KIND,
+                  instanceId,
+                  detail: cause.detail,
+                  cause,
+                }),
+            ),
+          )
+        : null;
+      const processEnv =
+        managedResearchSkills && managedArgos
+          ? yield* Effect.try({
+              try: () => {
+                const withResearchSkills = addErebusResearchSkillsToOpenCodeConfig(
+                  resolveOpenCodeConfigContent(baseProcessEnv),
+                  managedResearchSkills,
+                );
+                return {
+                  ...baseProcessEnv,
+                  OPENCODE_CONFIG_CONTENT: addManagedArgosToOpenCodeConfig(
+                    withResearchSkills,
+                    managedArgos,
+                  ),
+                };
+              },
+              catch: (cause) =>
+                new ProviderDriverError({
+                  driver: DRIVER_KIND,
+                  instanceId,
+                  detail: `Failed to configure Erebus skills and Argos for OpenCode: ${String(cause)}`,
+                  cause,
+                }),
+            })
+          : baseProcessEnv;
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,

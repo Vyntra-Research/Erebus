@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.5 - 2026-11-23
+
+### Fixed
+
+- Give OpenCode sessions the managed Argos tools and technical skill.
+
 ## 2.0.0-beta.4 - 2026-11-23
 
 ### Fixed
