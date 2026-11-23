@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-beta.7 - 2026-11-23
+
+### Fixed
+
+- Let the browser extension serve independent workspace capture sessions while keeping each controlled tab attached to one session.
+- Keep OpenCode turns from remaining active after a completed steer, delayed idle event, or failed final message read.
+
 ## 2.0.0-beta.6 - 2026-11-23
 
 ### Fixed
