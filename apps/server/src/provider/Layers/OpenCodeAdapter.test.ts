@@ -67,6 +67,8 @@ const runtimeMock = {
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
     promptCalls: [] as Array<unknown>,
     waitCalls: [] as string[],
+    activeCalls: 0,
+    activeResponses: [] as Array<Readonly<Record<string, { readonly type: "running" }>>>,
     mcpAddCalls: [] as Array<Record<string, unknown>>,
     promptAsyncError: null as Error | null,
     waitResolves: false,
@@ -94,6 +96,8 @@ const runtimeMock = {
     this.state.revertCalls.length = 0;
     this.state.promptCalls.length = 0;
     this.state.waitCalls.length = 0;
+    this.state.activeCalls = 0;
+    this.state.activeResponses = [];
     this.state.mcpAddCalls.length = 0;
     this.state.promptAsyncError = null;
     this.state.waitResolves = false;
@@ -154,6 +158,10 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
       session: {
+        active: async () => {
+          runtimeMock.state.activeCalls += 1;
+          return runtimeMock.state.activeResponses.shift() ?? {};
+        },
         create: async (input: Record<string, unknown>) => {
           runtimeMock.state.sessionCreateUrls.push(baseUrl);
           runtimeMock.state.sessionCreateInputs.push(input);
@@ -884,6 +892,69 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         "Recovered response",
       );
       NodeAssert.deepEqual(runtimeMock.state.waitCalls, [sessionID]);
+      const sessions = yield* adapter.listSessions();
+      NodeAssert.equal(sessions[0]?.status, "ready");
+      NodeAssert.equal(sessions[0]?.activeTurnId, undefined);
+    }),
+  );
+
+  it.effect("finishes a turn when session.wait hangs after OpenCode becomes inactive", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-inactive-fallback");
+      const sessionID = "http://127.0.0.1:9999/session";
+      runtimeMock.state.activeResponses = [{ [sessionID]: { type: "running" } }, {}, {}];
+      runtimeMock.state.messagesAfterPrompt = [
+        {
+          info: { id: "msg-inactive-fallback", role: "assistant" },
+          parts: [
+            {
+              id: "part-inactive-fallback",
+              sessionID,
+              messageID: "msg-inactive-fallback",
+              type: "text",
+              text: "Finished despite the stuck wait request",
+              time: { start: 1, end: 2 },
+            },
+          ],
+        },
+      ];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(6),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Finish without session.wait",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/deepseek-v4.1-flash-free",
+        ),
+      });
+
+      yield* advanceTestClock(750);
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        [
+          "session.started",
+          "thread.started",
+          "turn.started",
+          "content.delta",
+          "item.completed",
+          "turn.completed",
+        ],
+      );
+      NodeAssert.deepEqual(runtimeMock.state.waitCalls, [sessionID]);
+      NodeAssert.equal(runtimeMock.state.activeCalls, 3);
       const sessions = yield* adapter.listSessions();
       NodeAssert.equal(sessions[0]?.status, "ready");
       NodeAssert.equal(sessions[0]?.activeTurnId, undefined);

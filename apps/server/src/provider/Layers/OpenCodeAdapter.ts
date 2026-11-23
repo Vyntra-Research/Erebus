@@ -1297,13 +1297,80 @@ export function makeOpenCodeAdapter(
       turnId: TurnId,
       baselineMessageIds: ReadonlySet<string>,
     ) {
+      const waitForInactiveCompletedSession = Effect.gen(function* () {
+        let inactiveConfirmations = 0;
+
+        while (true) {
+          yield* Effect.sleep("250 millis");
+
+          if (
+            context.eventsAbortController.signal.aborted ||
+            (yield* Ref.get(context.stopped)) ||
+            context.activeTurnId !== turnId
+          ) {
+            return;
+          }
+
+          const activeExit = yield* Effect.exit(
+            runOpenCodeSdk("session.active", () => context.client.session.active()),
+          );
+          if (
+            Exit.isFailure(activeExit) ||
+            Object.hasOwn(activeExit.value, context.openCodeSessionId)
+          ) {
+            inactiveConfirmations = 0;
+            continue;
+          }
+
+          const messagesExit = yield* Effect.exit(
+            runOpenCodeSdk("session.messages", () =>
+              context.client.session.messages({ sessionID: context.openCodeSessionId }),
+            ),
+          );
+          if (Exit.isFailure(messagesExit)) {
+            inactiveConfirmations = 0;
+            continue;
+          }
+
+          const hasCompletedAssistantResponse = (messagesExit.value.data ?? []).some(
+            (entry) =>
+              !baselineMessageIds.has(entry.info.id) &&
+              entry.info.role === "assistant" &&
+              (entry.info.error !== undefined ||
+                entry.parts.some((part) => {
+                  if (part.type === "tool") {
+                    return part.state.status === "completed" || part.state.status === "error";
+                  }
+                  return part.time?.end !== undefined;
+                })),
+          );
+          if (!hasCompletedAssistantResponse) {
+            inactiveConfirmations = 0;
+            continue;
+          }
+
+          inactiveConfirmations += 1;
+          if (inactiveConfirmations >= 2) {
+            return;
+          }
+        }
+      });
+
+      const waitAbortController = new AbortController();
+      const waitSignal = AbortSignal.any([
+        context.eventsAbortController.signal,
+        waitAbortController.signal,
+      ]);
       const waitExit = yield* Effect.exit(
-        runOpenCodeSdk("session.wait", () =>
-          context.client.session.wait(
-            { sessionID: context.openCodeSessionId },
-            { signal: context.eventsAbortController.signal },
+        Effect.raceFirst(
+          runOpenCodeSdk("session.wait", () =>
+            context.client.session.wait(
+              { sessionID: context.openCodeSessionId },
+              { signal: waitSignal },
+            ),
           ),
-        ),
+          waitForInactiveCompletedSession,
+        ).pipe(Effect.ensuring(Effect.sync(() => waitAbortController.abort()))),
       );
       if (context.eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
         return;
