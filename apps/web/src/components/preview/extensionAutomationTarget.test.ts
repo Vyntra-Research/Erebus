@@ -4,6 +4,7 @@ import {
   extensionAutomationBrowserId,
   extensionAutomationBrowsers,
   extensionAutomationTabId,
+  extensionNavigateInput,
   isExtensionAutomationTargetOperation,
   parseExtensionAutomationBrowserId,
   parseExtensionAutomationTabId,
@@ -58,6 +59,19 @@ describe("extension automation targets", () => {
       tabs: [{ tabId: "extension:producer:5" }],
       viewport: { width: 800 },
     });
+  });
+
+  it("resolves navigation targets without leaving undefined values in JSON input", () => {
+    const input = extensionNavigateInput(
+      {
+        target: { kind: "url", url: "https://example.com/old" },
+        readiness: "load",
+      },
+      "https://example.com/new",
+    );
+
+    expect(input).toEqual({ url: "https://example.com/new", readiness: "load" });
+    expect(Object.hasOwn(input, "target")).toBe(false);
   });
 
   it("keeps global tab and profile operations out of the extension command channel", () => {

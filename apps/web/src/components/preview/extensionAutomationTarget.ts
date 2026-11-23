@@ -1,4 +1,5 @@
 import type {
+  PreviewAutomationNavigateInput,
   PreviewAutomationOperation,
   WebRuntimeExtensionAutomationClient,
 } from "@t3tools/contracts";
@@ -9,6 +10,14 @@ const BROWSER_PREFIX = "extension-client:";
 export interface ExtensionAutomationTarget {
   readonly producerId: string;
   readonly tabId: number;
+}
+
+export function extensionNavigateInput(
+  input: PreviewAutomationNavigateInput,
+  resolvedUrl: string,
+): PreviewAutomationNavigateInput {
+  const { target: _target, ...inputWithoutTarget } = input;
+  return { ...inputWithoutTarget, url: resolvedUrl };
 }
 
 export function isExtensionAutomationTargetOperation(

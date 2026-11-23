@@ -92,6 +92,8 @@ import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
 import { runtimeRestartCleanup } from "../web-security/webSecurityPanelLogic";
 import {
   extensionAutomationBrowsers,
+  extensionNavigateInput,
+  extensionAutomationTabId,
   extensionAutomationTabs,
   isExtensionAutomationTargetOperation,
   parseExtensionAutomationBrowserId,
@@ -533,7 +535,7 @@ function PreviewAutomationHost(props: {
               environmentId,
               navigateInput.target ?? { kind: "url", url: navigateInput.url! },
             );
-            input = { ...navigateInput, url: resolution.resolvedUrl, target: undefined };
+            input = extensionNavigateInput(navigateInput, resolution.resolvedUrl);
           } else if (request.operation === "open") {
             const { browserId: _browserId, ...extensionOpenInput } = openInput!;
             input = extensionOpenInput.url
@@ -570,6 +572,24 @@ function PreviewAutomationHost(props: {
             if (remote?.tag) error._tag = remote.tag;
             if (remote?.detail !== undefined) error.detail = remote.detail;
             throw error;
+          }
+          if (request.operation === "recordingStop") {
+            const recording = invocation.value.result as Record<string, unknown> | undefined;
+            const mimeType = recording?.mimeType;
+            const dataBase64 = recording?.dataBase64;
+            if (
+              !externalTarget ||
+              !previewBridge ||
+              typeof mimeType !== "string" ||
+              typeof dataBase64 !== "string"
+            ) {
+              throw new Error("The browser extension returned an invalid recording.");
+            }
+            const logicalTabId = extensionAutomationTabId(client.producerId, externalTarget.tabId);
+            const binary = window.atob(dataBase64);
+            const data = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+            const artifact = await previewBridge.recording.save(logicalTabId, mimeType, data);
+            return { ...artifact, tabId: logicalTabId };
           }
           return rewriteExtensionAutomationResult(client.producerId, invocation.value.result);
         }
