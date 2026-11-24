@@ -10,6 +10,7 @@ import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../package.json" with { type: "json" };
+import * as ServerConfig from "../config.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
@@ -17,6 +18,15 @@ import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
 } from "./toolkits/preview/handlers.ts";
+import {
+  ComputerSnapshotToolkitHandlersLive,
+  ComputerStandardToolkitHandlersLive,
+} from "./toolkits/computer/handlers.ts";
+import {
+  ComputerSnapshotTool,
+  ComputerSnapshotToolkit,
+  ComputerStandardToolkit,
+} from "./toolkits/computer/tools.ts";
 import {
   PreviewSnapshotTool,
   PreviewSnapshotToolkit,
@@ -230,6 +240,102 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 );
 
+const registerComputerSnapshot = Effect.fn("McpHttpServer.registerComputerSnapshot")(function* () {
+  const server = yield* McpServer.McpServer;
+  const built = yield* ComputerSnapshotToolkit;
+  const tool = ComputerSnapshotTool;
+  const config = yield* ServerConfig.ServerConfig;
+  yield* server.addTool({
+    tool: new McpSchema.Tool({
+      name: tool.name,
+      description: Tool.getDescription(tool),
+      inputSchema: Tool.getJsonSchema(tool),
+      annotations: {
+        ...Context.getOption(tool.annotations, Tool.Title).pipe(
+          Option.map((title) => ({ title })),
+          Option.getOrUndefined,
+        ),
+        readOnlyHint: Context.get(tool.annotations, Tool.Readonly),
+        destructiveHint: Context.get(tool.annotations, Tool.Destructive),
+        idempotentHint: Context.get(tool.annotations, Tool.Idempotent),
+        openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
+      },
+    }),
+    annotations: tool.annotations,
+    handle: (payload) =>
+      Effect.withFiber((fiber) => {
+        const invocation = Context.getUnsafe(
+          fiber.context,
+          McpInvocationContext.McpInvocationContext,
+        );
+        return built.handle("computer_get_window_state", payload).pipe(
+          Stream.unwrap,
+          Stream.run(Sink.last()),
+          Effect.flatMap(Effect.fromOption),
+          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.provideService(ServerConfig.ServerConfig, config),
+          Effect.matchCauseEffect({
+            onFailure: (cause) => {
+              const failure = Cause.findErrorOption(cause);
+              const message = Option.isSome(failure)
+                ? failure.value.message
+                : "Computer Use observation failed.";
+              return Effect.succeed(
+                new McpSchema.CallToolResult({
+                  isError: true,
+                  content: [{ type: "text", text: message }],
+                }),
+              );
+            },
+            onSuccess: ({ encodedResult }) => {
+              const snapshot = encodedResult as {
+                readonly screenshot?: {
+                  readonly mimeType: "image/png";
+                  readonly data: string;
+                  readonly width: number;
+                  readonly height: number;
+                };
+                readonly [key: string]: unknown;
+              };
+              const { screenshot, ...metadata } = snapshot;
+              return Effect.succeed(
+                new McpSchema.CallToolResult({
+                  isError: false,
+                  structuredContent: metadata,
+                  content: [
+                    { type: "text", text: JSON.stringify(metadata) },
+                    ...(screenshot
+                      ? [
+                          {
+                            type: "image" as const,
+                            data: new Uint8Array(Buffer.from(screenshot.data, "base64")),
+                            mimeType: screenshot.mimeType,
+                          },
+                        ]
+                      : []),
+                  ],
+                }),
+              );
+            },
+          }),
+        );
+      }),
+  });
+});
+
+const ComputerStandardToolkitRegistrationLive = McpServer.toolkit(ComputerStandardToolkit).pipe(
+  Layer.provide(ComputerStandardToolkitHandlersLive),
+);
+
+const ComputerSnapshotRegistrationLive = Layer.effectDiscard(registerComputerSnapshot()).pipe(
+  Layer.provide(ComputerSnapshotToolkitHandlersLive),
+);
+
+export const ComputerToolkitRegistrationLive = Layer.mergeAll(
+  ComputerStandardToolkitRegistrationLive,
+  ComputerSnapshotRegistrationLive,
+);
+
 export const WebToolkitRegistrationLive = McpServer.toolkit(WebToolkit).pipe(
   Layer.provide(WebToolkitHandlersLive),
 );
@@ -252,6 +358,7 @@ const McpTransportLive = McpServer.layerHttp({
 // Each endpoint owns its tool registry; only the credential registry is shared.
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
+  ComputerToolkitRegistrationLive,
   WebToolkitRegistrationLive,
   WebModuleToolkitRegistrationLive,
   MicroVmToolkitRegistrationLive,

@@ -135,6 +135,10 @@ export function webRuntimeExecutableName(platform: typeof BuildPlatform.Type): s
   return platform === "win" ? "erebus-webd.exe" : "erebus-webd";
 }
 
+export function computerUseExecutableName(platform: typeof BuildPlatform.Type): string {
+  return platform === "win" ? "erebus-computer-use.exe" : "erebus-computer-use";
+}
+
 export const WEB_CAPTURE_EXTENSION_INSTALL_ARGS = ["install", "--frozen-lockfile"] as const;
 export const WEB_CAPTURE_EXTENSION_REQUIRED_FILES = [
   "manifest.json",
@@ -628,6 +632,7 @@ const WindowsPackagedPayloadValidationReason = Schema.Literals([
   "unpacked-native-missing",
   "resource-monitor-missing",
   "web-runtime-missing",
+  "computer-use-missing",
   "web-extension-missing",
   "file-limit-exceeded",
 ]);
@@ -655,6 +660,9 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedErrorCla
     }
     if (this.reason === "web-runtime-missing") {
       return "Windows packaged payload is missing the web runtime executable.";
+    }
+    if (this.reason === "computer-use-missing") {
+      return "Windows packaged payload is missing the Computer Use runtime executable.";
     }
     if (this.reason === "web-extension-missing") {
       return `Windows packaged payload is missing ${String(this.missingFiles?.length ?? 0)} web capture extension files.`;
@@ -951,6 +959,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/erebus-web",
     to: "erebus-web",
+  },
+  {
+    from: "apps/desktop/prod-resources/computer-use",
+    to: "computer-use",
   },
 ] as const;
 
@@ -2004,6 +2016,79 @@ export const stageWebRuntime = Effect.fn("stageWebRuntime")(function* (input: {
   yield* fs.copy(extensionDistDirectory, path.join(destinationDirectory, "extension"));
 });
 
+export const stageComputerUse = Effect.fn("stageComputerUse")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly verbose: boolean;
+}) {
+  if (input.platform !== "win") return;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const manifestPath = path.join(input.repoRoot, "native/computer-use/Cargo.toml");
+  if (!(yield* fs.exists(manifestPath))) {
+    return yield* Effect.die(new Error(`Computer Use source was not found at ${manifestPath}.`));
+  }
+  const executableName = computerUseExecutableName(input.platform);
+  const rustTargets = resolveResourceMonitorRustTargets(input.platform, input.arch);
+  const reuse = yield* Config.boolean("T3CODE_DESKTOP_REUSE_COMPUTER_USE").pipe(
+    Config.withDefault(false),
+  );
+  const builtBinaries: string[] = [];
+
+  for (const rustTarget of rustTargets) {
+    if (!reuse) {
+      const spawnCommand = yield* resolveSpawnCommand("cargo", [
+        "build",
+        "--locked",
+        "--release",
+        "--manifest-path",
+        manifestPath,
+        "--target",
+        rustTarget,
+      ]);
+      yield* runCommand(
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          cwd: input.repoRoot,
+          shell: spawnCommand.shell,
+        }),
+        {
+          label: `cargo build computer use (${rustTarget})`,
+          verbose: input.verbose,
+        },
+      );
+    }
+
+    const binaryPath = path.join(
+      input.repoRoot,
+      "native/computer-use/target",
+      rustTarget,
+      "release",
+      executableName,
+    );
+    if (!(yield* fs.exists(binaryPath))) {
+      return yield* Effect.die(
+        new Error(`Computer Use build output was not found at ${binaryPath}.`),
+      );
+    }
+    builtBinaries.push(binaryPath);
+  }
+
+  const destinationDirectory = path.join(input.stageResourcesDir, "computer-use");
+  const destinationPath = path.join(destinationDirectory, executableName);
+  yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
+  yield* fs.makeDirectory(destinationDirectory, { recursive: true });
+  if (builtBinaries.length === 1) {
+    yield* fs.copyFile(builtBinaries[0]!, destinationPath);
+  } else {
+    yield* runCommand(
+      ChildProcess.make("lipo", ["-create", ...builtBinaries, "-output", destinationPath]),
+      { label: "lipo computer use universal binary", verbose: input.verbose },
+    );
+  }
+});
+
 function generateMacIconSet(
   sourcePng: string,
   targetIcns: string,
@@ -2928,6 +3013,15 @@ export const validateWindowsPackagedPayload = Effect.fn(
     });
   }
 
+  const computerUsePath = path.join(resourcesDir, "computer-use", computerUseExecutableName("win"));
+  if (!(yield* isFile(computerUsePath))) {
+    return yield* new WindowsPackagedPayloadValidationError({
+      reason: "computer-use-missing",
+      packagedAppDir,
+      missingFiles: ["computer-use/erebus-computer-use.exe"],
+    });
+  }
+
   const missingWebExtensionFiles: string[] = [];
   for (const fileName of WEB_CAPTURE_EXTENSION_REQUIRED_FILES) {
     const extensionPath = path.join(resourcesDir, "erebus-web", "extension", fileName);
@@ -3179,6 +3273,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     verbose: options.verbose,
   });
   yield* stageWebRuntime({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
+  yield* stageComputerUse({
     repoRoot,
     stageResourcesDir,
     platform: options.platform,

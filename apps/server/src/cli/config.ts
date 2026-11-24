@@ -312,6 +312,7 @@ export const resolveServerConfig = (
     const desktopTelemetryControlFd = bootstrap?.desktopTelemetryControlFd;
     const resourceMonitorPath = bootstrap?.resourceMonitorPath;
     const webRuntimePath = bootstrap?.webRuntimePath;
+    const computerUsePath = bootstrap?.computerUsePath;
     const autoBootstrapProjectFromCwd = Option.getOrElse(
       resolveOptionPrecedence(
         Option.fromUndefinedOr(options?.forceAutoBootstrapProjectFromCwd),
@@ -390,6 +391,7 @@ export const resolveServerConfig = (
       desktopTelemetryControlFd,
       resourceMonitorPath,
       ...(webRuntimePath ? { webRuntimePath } : {}),
+      ...(computerUsePath ? { computerUsePath } : {}),
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
       tailscaleServeEnabled,

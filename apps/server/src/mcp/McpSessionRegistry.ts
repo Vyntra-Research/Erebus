@@ -149,6 +149,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           endpoint,
           previewEnabled: scope.capabilities.has("preview"),
           webEnabled: scope.capabilities.has("web"),
+          computerEnabled: scope.capabilities.has("computer"),
           ...(scope.capabilities.has("researchFallback") ? { researchFallbackEndpoint } : {}),
           authorizationHeader: `Bearer ${rawToken}`,
         },

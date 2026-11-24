@@ -29,6 +29,7 @@ import {
   type ProviderSession,
 } from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -308,11 +309,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     Effect.gen(function* () {
       const previewEnabled = yield* agentBrowserAccessEnabled;
       const webEnabled = yield* webToolsEnabled;
+      const platform = yield* HostProcessPlatform;
+      const computerEnabled = platform === "win32" && process.env.EREBUS_COMPUTER_USE !== "0";
       // OpenCode receives Erebus control through MCP. Codex accepts dynamic
       // tools only on thread/start, so an older resumed Codex thread also needs
       // the authenticated fallback when it predates the current toolset.
       const researchFallbackEnabled = needsResearchMcpFallback(input);
-      if (!previewEnabled && !webEnabled && !researchFallbackEnabled) {
+      if (!previewEnabled && !webEnabled && !computerEnabled && !researchFallbackEnabled) {
         // Revoke as well as clear. Every other prepare path reaches
         // `issueActiveMcpCredential`, which revokes the thread first, so
         // skipping it here would leave a previously issued bearer token valid
@@ -326,6 +329,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const capabilities = new Set<McpInvocationContext.McpCapability>();
       if (previewEnabled) capabilities.add("preview");
       if (webEnabled) capabilities.add("web");
+      if (computerEnabled) capabilities.add("computer");
       if (researchFallbackEnabled) capabilities.add("researchFallback");
       const credential = yield* issueMcpCredential({
         threadId: input.threadId,
