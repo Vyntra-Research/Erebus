@@ -1,11 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off - Computer Use owns a long-lived NDJSON child process with per-request deadlines.
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
-import path from "node:path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
-const BINARY_NAME =
-  process.platform === "win32" ? "erebus-computer-use.exe" : "erebus-computer-use";
+const BINARY_NAMES = ["erebus-computer-use.exe", "erebus-computer-use"] as const;
 
 export class ComputerUseError extends Error {
   readonly code: string;
@@ -37,29 +36,35 @@ function resolveBinaryPath(): string | undefined {
 
   let directory = process.cwd();
   for (let depth = 0; depth < 5; depth += 1) {
-    candidates.push(
-      path.join(directory, "native", "computer-use", "target", "release", BINARY_NAME),
-      path.join(directory, "native", "computer-use", "target", "debug", BINARY_NAME),
-      path.join(directory, "computer-use", BINARY_NAME),
-    );
-    const parent = path.dirname(directory);
+    for (const binaryName of BINARY_NAMES) {
+      candidates.push(
+        NodePath.join(directory, "native", "computer-use", "target", "release", binaryName),
+        NodePath.join(directory, "native", "computer-use", "target", "debug", binaryName),
+        NodePath.join(directory, "computer-use", binaryName),
+      );
+    }
+    const parent = NodePath.dirname(directory);
     if (parent === directory) break;
     directory = parent;
   }
 
   const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
   if (resourcesPath) {
-    candidates.push(path.join(resourcesPath, "computer-use", BINARY_NAME));
+    for (const binaryName of BINARY_NAMES) {
+      candidates.push(NodePath.join(resourcesPath, "computer-use", binaryName));
+    }
   }
-  candidates.push(
-    path.join(path.dirname(process.execPath), "resources", "computer-use", BINARY_NAME),
-  );
+  for (const binaryName of BINARY_NAMES) {
+    candidates.push(
+      NodePath.join(NodePath.dirname(process.execPath), "resources", "computer-use", binaryName),
+    );
+  }
 
-  return candidates.find((candidate) => existsSync(candidate));
+  return candidates.find((candidate) => NodeFS.existsSync(candidate));
 }
 
 class ComputerUseRuntime {
-  private child: ChildProcessWithoutNullStreams | undefined;
+  private child: NodeChildProcess.ChildProcessWithoutNullStreams | undefined;
   private buffer = "";
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
@@ -108,7 +113,7 @@ class ComputerUseRuntime {
     });
   }
 
-  private ensureChild(): ChildProcessWithoutNullStreams {
+  private ensureChild(): NodeChildProcess.ChildProcessWithoutNullStreams {
     if (this.child && this.child.exitCode === null && !this.child.killed) {
       return this.child;
     }
@@ -120,7 +125,10 @@ class ComputerUseRuntime {
       );
     }
 
-    const child = spawn(binary, [], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const child = NodeChildProcess.spawn(binary, [], {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => this.handleData(chunk));
     child.stderr.setEncoding("utf8");
