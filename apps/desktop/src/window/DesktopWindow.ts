@@ -28,6 +28,7 @@ import * as PreviewManager from "../preview/Manager.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as TurnFinishedIndicator from "./TurnFinishedIndicator.ts";
 import { makeQuitHoldHandler } from "./QuitHold.ts";
 
 const TITLEBAR_HEIGHT = 40;
@@ -118,6 +119,11 @@ export class DesktopWindow extends Context.Service<
     // the main window.
     readonly zoomMain: (direction: MainWindowZoomDirection) => Effect.Effect<void>;
     readonly syncAppearance: Effect.Effect<void>;
+    // Reflects a finished chat turn in the taskbar/dock until the user returns
+    // to the window. The shell ignores reports while the window is focused.
+    readonly reportTurnFinished: (
+      outcome: TurnFinishedIndicator.TurnFinishedOutcome,
+    ) => Effect.Effect<void>;
     readonly setCloseToTrayEnabled?: (
       enabled: boolean,
     ) => Effect.Effect<void, DesktopWindowTrayError>;
@@ -321,6 +327,10 @@ export const make = Effect.gen(function* () {
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
   const electronApp = yield* ElectronApp.ElectronApp;
+  const turnFinishedIndicator = TurnFinishedIndicator.makeTurnFinishedIndicator({
+    platform: environment.platform,
+    electronWindow,
+  });
   // Window-side latch for the primary backend's readiness. Set by
   // handleBackendReady (driven by the pool's onReady callback), cleared
   // by handleBackendNotReady (driven by onShutdown). Only consumed by
@@ -1047,6 +1057,7 @@ export const make = Effect.gen(function* () {
         syncWindowAppearance(window, shouldUseDarkColors, environment.platform),
       );
     }).pipe(Effect.withSpan("desktop.window.syncAppearance")),
+    reportTurnFinished: turnFinishedIndicator.report,
     setCloseToTrayEnabled,
     prepareForQuit: Effect.sync(() => {
       closeToTrayEnabled = false;

@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import { HttpClient } from "effect/unstable/http";
 
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
@@ -29,7 +30,14 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
-import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
+import { fetchGithubReleaseTags } from "./githubReleaseFeed.ts";
+import {
+  compareDesktopVersions,
+  isDesktopVersionAllowedOnChannel,
+  resolveDefaultDesktopUpdateChannel,
+  selectNewestDesktopVersion,
+  stripReleaseTagPrefix,
+} from "./updateChannels.ts";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -257,6 +265,7 @@ export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const httpClient = yield* HttpClient.HttpClient;
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
   const activeUpdateActionRef = yield* Ref.make<Option.Option<UpdateAction>>(Option.none());
@@ -350,6 +359,68 @@ export const make = Effect.gen(function* () {
     });
   });
 
+  // A regular check only points the provider at the track it should read.
+  // `allowDowngrade` and `fullChangelog` belong to the selected channel (and to
+  // the channel-change flow, which temporarily forces a downgrade), so leave
+  // them untouched here.
+  const applyUpdaterChannelForCheck = Effect.fn("desktop.updates.applyUpdaterChannelForCheck")(
+    function* (channel: DesktopUpdateChannel) {
+      yield* electronUpdater.setChannel(channel);
+      yield* electronUpdater.setAllowPrerelease(channel !== "latest");
+    },
+  );
+
+  const prepareUpdaterChannelForCheck = Effect.fn("desktop.updates.prepareUpdaterChannelForCheck")(
+    function* (selectedChannel: DesktopUpdateChannel) {
+      if (selectedChannel !== "nightly") {
+        yield* applyUpdaterChannelForCheck(selectedChannel);
+        return;
+      }
+
+      // The GitHub provider only walks tags whose prerelease identifier matches
+      // the configured channel, so a plain nightly check can never see a stable
+      // or beta release. Nightly accepts every track, so resolve the newest
+      // release across all of them from the same feed the updater reads and point
+      // the provider at that track for this check. If the feed is unavailable,
+      // fall back to the nightly track rather than failing the check.
+      const appUpdateYmlConfig = Option.getOrUndefined(yield* Ref.get(appUpdateYmlConfigRef));
+      const owner = appUpdateYmlConfig?.owner;
+      const repo = appUpdateYmlConfig?.repo;
+      if (appUpdateYmlConfig?.provider !== "github" || !owner || !repo) {
+        yield* applyUpdaterChannelForCheck("nightly");
+        return;
+      }
+
+      const tags = yield* fetchGithubReleaseTags({ owner, repo }).pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.catch((error) =>
+          logUpdaterWarning("failed to read release tracks; using nightly only", {
+            message: error.message,
+          }).pipe(Effect.as<ReadonlyArray<string>>([])),
+        ),
+      );
+      const newestVersion = selectNewestDesktopVersion("nightly", tags.map(stripReleaseTagPrefix));
+      if (
+        newestVersion === null ||
+        compareDesktopVersions(newestVersion, environment.appVersion) <= 0
+      ) {
+        // Nothing newer than the running build on any accepted track: keep the
+        // nightly provider so it can still find a newer nightly.
+        yield* applyUpdaterChannelForCheck("nightly");
+        return;
+      }
+
+      const resolvedChannel = resolveDefaultDesktopUpdateChannel(newestVersion);
+      if (resolvedChannel !== "nightly") {
+        yield* logUpdaterInfo("nightly track resolved to a newer release", {
+          version: newestVersion,
+          channel: resolvedChannel,
+        });
+      }
+      yield* applyUpdaterChannelForCheck(resolvedChannel);
+    },
+  );
+
   const shouldEnableAutoUpdates = resolveDisabledReason.pipe(Effect.map(Option.isNone));
 
   const checkForUpdates = Effect.fn("desktop.updates.checkForUpdates")(function* (
@@ -376,6 +447,7 @@ export const make = Effect.gen(function* () {
       const checkedAt = yield* currentIsoTimestamp;
       yield* setState(reduceDesktopUpdateStateOnCheckStart(state, checkedAt));
       yield* logUpdaterInfo("checking for updates", { reason });
+      yield* prepareUpdaterChannelForCheck(state.channel);
 
       return yield* electronUpdater.checkForUpdates.pipe(
         Effect.flatMap((result) => {
@@ -609,11 +681,24 @@ export const make = Effect.gen(function* () {
       Effect.flatMap(
         Effect.fn("desktop.updates.applyUpdateAvailable")(function* (info) {
           const state = yield* Ref.get(updateStateRef);
-          if (resolveDefaultDesktopUpdateChannel(info.version) !== state.channel) {
-            yield* logUpdaterInfo("ignoring update that does not match selected channel", {
-              version: info.version,
-              channel: state.channel,
-            });
+          const isNewerThanRunning = compareDesktopVersions(info.version, state.currentVersion) > 0;
+          // A deliberate track change may install a lower version (for example
+          // leaving Nightly for Stable), but a routine poll must never present
+          // a downgrade as an update.
+          const isTrackSwitch =
+            resolveDefaultDesktopUpdateChannel(state.currentVersion) !== state.channel;
+          if (
+            !isDesktopVersionAllowedOnChannel(state.channel, info.version) ||
+            (!isNewerThanRunning && !isTrackSwitch)
+          ) {
+            yield* logUpdaterInfo(
+              "ignoring update that does not apply to the current installation",
+              {
+                version: info.version,
+                currentVersion: state.currentVersion,
+                channel: state.channel,
+              },
+            );
             const checkedAt = yield* currentIsoTimestamp;
             yield* setState(reduceDesktopUpdateStateOnNoUpdate(state, checkedAt));
             yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);

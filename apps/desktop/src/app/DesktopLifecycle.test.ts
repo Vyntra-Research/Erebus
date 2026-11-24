@@ -102,6 +102,7 @@ function makeDesktopWindowLayer(
     dispatchMenuAction: () => Effect.void,
     zoomMain: () => Effect.void,
     syncAppearance: Effect.void,
+    reportTurnFinished: () => Effect.void,
     prepareForQuit: input.prepareForQuit ?? Effect.void,
   });
 }

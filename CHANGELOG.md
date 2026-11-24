@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0-beta.10 - 2026-11-24
+
+### Added
+
+- Show a taskbar or dock indicator when any chat turn finishes while Erebus is in the background. A failed turn keeps a distinct error indicator until you return to the window.
+
+### Fixed
+
+- Let the Beta and Nightly update tracks install newer Stable releases, so a beta promoted to Stable is no longer skipped. Nightly also picks up newer Beta and Stable releases.
+
 ## 2.0.0-beta.9 - 2026-11-23
 
 ### Added

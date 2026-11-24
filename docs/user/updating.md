@@ -5,8 +5,8 @@ Erebus checks GitHub Releases when it starts and at regular intervals. Downloads
 Choose an update track under **Settings → About**:
 
 - **Stable** receives full releases only.
-- **Beta** receives prereleases for testing features before they reach Stable.
-- **Nightly** receives automated development builds.
+- **Beta** receives full releases and prereleases, including a beta once it is promoted to Stable.
+- **Nightly** receives full releases, prereleases, and automated development builds, whichever is newest.
 
 Changing the track checks its feed immediately. You can return to Stable from Beta or Nightly through the same setting.
 
