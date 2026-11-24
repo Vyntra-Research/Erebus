@@ -10,6 +10,7 @@ import {
   OrchestrationCommand,
   OrchestrationDispatchCommandError,
   OrchestrationEvent,
+  OrchestrationEventMetadata,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
@@ -1020,4 +1021,17 @@ it("isProviderSendTurnSupportedImageMimeType accepts raster formats and rejects 
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/png"), true);
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("IMAGE/JPEG"), true);
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/svg+xml"), false);
+});
+
+it("decodes legacy imported event origins without failing event replay", () => {
+  const decode = Schema.decodeUnknownSync(OrchestrationEventMetadata);
+
+  assert.deepEqual(
+    decode({ origin: { surface: "codex-import", sourceThreadId: "legacy-thread" } }),
+    { origin: {} },
+  );
+  assert.deepEqual(decode({ origin: { surface: "desktop", appVersion: "2.0.0" } }), {
+    origin: { surface: "desktop", appVersion: "2.0.0" },
+  });
+  assert.deepEqual(decode({ origin: { surface: "unknown-legacy-surface" } }), { origin: {} });
 });

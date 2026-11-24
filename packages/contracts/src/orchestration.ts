@@ -1788,10 +1788,45 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
  * provider/server-originated events and on commands from clients too old to
  * report it.
  */
-export const OrchestrationClientOrigin = Schema.Struct({
+/**
+ * Client identity stamped on live commands. Optional and attribution-only:
+ * persisted events from older builds must still decode, so the wire schema
+ * below drops surfaces this contract no longer knows instead of rejecting the
+ * whole event.
+ */
+const OrchestrationClientOriginWire = Schema.Struct({
   surface: Schema.optional(ClientSurface),
   appVersion: Schema.optional(TrimmedNonEmptyString),
 });
+
+const OrchestrationClientOriginSource = Schema.Struct({
+  surface: Schema.optional(Schema.Unknown),
+  appVersion: Schema.optional(Schema.Unknown),
+});
+
+const isClientSurface = Schema.is(ClientSurface);
+
+export const OrchestrationClientOrigin = OrchestrationClientOriginSource.pipe(
+  Schema.decodeTo(
+    OrchestrationClientOriginWire,
+    SchemaTransformation.transform<
+      typeof OrchestrationClientOriginWire.Encoded,
+      typeof OrchestrationClientOriginSource.Type
+    >({
+      decode: (origin) => {
+        const decoded: Record<string, unknown> = {};
+        if (isClientSurface(origin.surface)) {
+          decoded.surface = origin.surface;
+        }
+        if (origin.appVersion !== undefined) {
+          decoded.appVersion = origin.appVersion;
+        }
+        return decoded as typeof OrchestrationClientOriginWire.Encoded;
+      },
+      encode: (origin) => origin,
+    }),
+  ),
+);
 export type OrchestrationClientOrigin = typeof OrchestrationClientOrigin.Type;
 
 export const OrchestrationEventMetadata = Schema.Struct({

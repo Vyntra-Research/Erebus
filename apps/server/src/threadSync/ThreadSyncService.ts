@@ -1424,18 +1424,55 @@ export const make = Effect.gen(function* () {
 
     let cursor = state.lastBindingEventSequence;
     while (cursor < latestSequence) {
-      const events = yield* Stream.runCollect(
-        engine.readEvents(cursor, BINDING_REPLAY_PAGE_SIZE),
-      ).pipe(
-        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
-        Effect.mapError((cause) =>
-          syncError("status", "io-failed", `Could not recover sync bindings: ${String(cause)}`),
-        ),
-      );
-      if (events.length === 0) {
+      const page =
+        engine.readEventsByTypes === undefined
+          ? yield* Stream.runCollect(engine.readEvents(cursor, BINDING_REPLAY_PAGE_SIZE)).pipe(
+              Effect.map((chunk) => {
+                const events = Array.from(chunk);
+                return {
+                  events: events.filter((event) => event.type === "thread.sync-imported"),
+                  // The full replay decoded every event in the page, including
+                  // legacy events the binding replay ignores. Remember the last
+                  // sequence so the next page never re-reads them.
+                  scannedThrough: events.at(-1)?.sequence ?? null,
+                };
+              }),
+              Effect.mapError((cause) =>
+                syncError(
+                  "status",
+                  "io-failed",
+                  `Could not recover sync bindings: ${String(cause)}`,
+                ),
+              ),
+            )
+          : yield* Stream.runCollect(
+              engine.readEventsByTypes(cursor, ["thread.sync-imported"], BINDING_REPLAY_PAGE_SIZE),
+            ).pipe(
+              Effect.map((chunk) => ({
+                events: Array.from(chunk),
+                scannedThrough: null,
+              })),
+              Effect.mapError((cause) =>
+                syncError(
+                  "status",
+                  "io-failed",
+                  `Could not recover sync bindings: ${String(cause)}`,
+                ),
+              ),
+            );
+      if (page.scannedThrough !== null) {
+        state = replayThreadSyncBindingEvents(state, page.events);
+        state = {
+          ...state,
+          lastBindingEventSequence: Math.max(
+            state.lastBindingEventSequence ?? 0,
+            page.scannedThrough,
+          ),
+        };
+      } else if (page.events.length === 0) {
         state = { ...state, lastBindingEventSequence: latestSequence };
       } else {
-        state = replayThreadSyncBindingEvents(state, events);
+        state = replayThreadSyncBindingEvents(state, page.events);
       }
       yield* saveState(state);
       cursor = state.lastBindingEventSequence ?? latestSequence;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.11 - 2026-11-24
+
+### Fixed
+
+- Recover thread sync when the local event history contains legacy events. Imported events stamped with the old `codex-import` client surface and old thread-created rows no longer fail the whole status; binding recovery now reads only the sync events it needs.
+
 ## 2.0.0-beta.10 - 2026-11-24
 
 ### Added
