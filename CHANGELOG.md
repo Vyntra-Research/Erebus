@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.12 - 2026-11-24
+
+### Fixed
+
+- Start the web capture runtime promptly on large capture stores. The startup orphan-blob sweep now uses body-hash indexes instead of scanning every request, response, and WebSocket row, so the runtime no longer misses its startup window and the browser extension stays connected.
+
 ## 2.0.0-beta.11 - 2026-11-24
 
 ### Fixed
