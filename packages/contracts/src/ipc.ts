@@ -1134,6 +1134,9 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
+export const DesktopTurnFinishedOutcomeSchema = Schema.Literals(["success", "error"]);
+export type DesktopTurnFinishedOutcome = typeof DesktopTurnFinishedOutcomeSchema.Type;
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   /**
@@ -1223,6 +1226,13 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  /**
+   * Reports that a chat turn reached a terminal state. The desktop shell keeps
+   * a taskbar/dock indicator until the window regains focus, and ignores
+   * reports while the window is already focused. Optional: older desktop shells
+   * lack it, and the web build never calls it.
+   */
+  reportTurnFinished?: (outcome: DesktopTurnFinishedOutcome) => Promise<void>;
   /**
    * Desktop-only preview surface. Present iff the renderer is hosted by the
    * Electron desktop build; web builds have `preview === undefined`.

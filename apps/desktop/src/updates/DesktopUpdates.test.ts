@@ -12,6 +12,7 @@ import * as Option from "effect/Option";
 import * as References from "effect/References";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
+import { HttpClient } from "effect/unstable/http";
 
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
@@ -251,6 +252,12 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     ),
     Layer.provideMerge(environmentLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("unexpected HTTP request")),
+      ),
+    ),
   );
 
   return {
@@ -433,6 +440,69 @@ describe("DesktopUpdates", () => {
         const available = yield* updates.getState;
         assert.equal(available.status, "available");
         assert.equal(available.availableVersion, "1.0.0-beta.2");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("accepts a newer stable release on the beta channel", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        yield* updates.setChannel("beta");
+        harness.emit("update-available", { version: "1.3.0" });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "available");
+        assert.equal(state.availableVersion, "1.3.0");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("does not present a lower version as an update", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", { version: "1.2.2" });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.notEqual(state.status, "available");
+        assert.isNull(state.availableVersion);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("accepts stable and beta releases on the nightly channel", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        yield* updates.setChannel("nightly");
+        harness.emit("update-available", { version: "1.3.0" });
+        yield* flushCallbacks;
+
+        const stable = yield* updates.getState;
+        assert.equal(stable.status, "available");
+        assert.equal(stable.availableVersion, "1.3.0");
+
+        harness.emit("update-available", { version: "1.4.0-beta.1" });
+        yield* flushCallbacks;
+
+        const beta = yield* updates.getState;
+        assert.equal(beta.status, "available");
+        assert.equal(beta.availableVersion, "1.4.0-beta.1");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

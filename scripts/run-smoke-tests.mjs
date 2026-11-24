@@ -29,6 +29,11 @@ const suites = [
       "src/backend/DesktopBackendConfiguration.test.ts",
       "src/preview/BrowserProfileRegistry.test.ts",
       "src/electron/ElectronShell.test.ts",
+      "src/updates/updateChannels.test.ts",
+      "src/updates/githubReleaseFeed.test.ts",
+      "src/updates/DesktopUpdates.test.ts",
+      "src/window/TurnFinishedIndicator.test.ts",
+      "src/window/turnFinishedIndicator.logic.test.ts",
     ],
   },
   {
@@ -37,6 +42,7 @@ const suites = [
       "src/rightPanelStore.test.ts",
       "src/components/preview/extensionAutomationTarget.test.ts",
       "src/components/preview/previewAutomationErrors.test.ts",
+      "src/components/TurnFinishedNotifier.logic.test.ts",
     ],
   },
   {

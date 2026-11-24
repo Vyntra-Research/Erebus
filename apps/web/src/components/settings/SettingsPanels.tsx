@@ -400,7 +400,7 @@ function AboutVersionSection() {
       {hasDesktopBridge ? (
         <SettingsRow
           title="Update track"
-          description="Stable follows full releases. Beta follows prereleases. Nightly follows automated nightly builds."
+          description="Stable follows full releases. Beta also follows prereleases, including a beta once it is promoted to Stable. Nightly also follows automated nightly builds."
           control={
             <Select
               value={selectedUpdateChannel}
