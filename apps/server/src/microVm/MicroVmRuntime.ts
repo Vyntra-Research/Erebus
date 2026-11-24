@@ -1,7 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - Microsandbox uses a host-local runtime and paths.
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 import {
   MicroVmError,
@@ -13,9 +15,54 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import type * as Microsandbox from "microsandbox";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 type MicrosandboxModule = typeof import("microsandbox");
+
+/**
+ * Sandbox handles that keep a local VM resident. Microsandbox's explicit
+ * detached mode is broken on the Windows preview (the background boot exits
+ * with access denied), but an attached handle stays alive while it is
+ * referenced. The server owns this process for the lifetime of the app, so a
+ * module-level registry preserves the handle across per-tool runtime
+ * instances.
+ */
+const liveSandboxes = new Map<string, Microsandbox.Sandbox>();
+
+const liveSandboxKey = (home: string, name: string): string => `${home}\0${name}`;
+
+export function resolveMicrosandboxBinaryPaths(input: {
+  readonly platform: NodeJS.Platform;
+  readonly arch: string;
+  readonly resourcesPath?: string | undefined;
+  readonly moduleDirectory: string;
+}): { readonly msbPath: string; readonly libkrunfwPath: string } | null {
+  if (input.platform !== "win32") return null;
+  const packageName =
+    input.arch === "arm64" ? "microsandbox-win32-arm64-msvc" : "microsandbox-win32-x64-msvc";
+  const roots: string[] = [];
+  if (input.resourcesPath !== undefined && input.resourcesPath.length > 0) {
+    roots.push(NodePath.join(input.resourcesPath, "server.asar.unpacked", "node_modules"));
+  }
+  const unpackedModuleDirectory = input.moduleDirectory.replace(
+    `${NodePath.sep}server.asar${NodePath.sep}`,
+    `${NodePath.sep}server.asar.unpacked${NodePath.sep}`,
+  );
+  roots.push(NodePath.resolve(unpackedModuleDirectory, "../../..", "node_modules"));
+
+  const seen = new Set<string>();
+  for (const root of roots) {
+    if (seen.has(root)) continue;
+    seen.add(root);
+    const packageDirectory = NodePath.join(root, "@superradcompany", packageName);
+    const msbPath = NodePath.join(packageDirectory, "bin", "msb.exe");
+    const libkrunfwPath = NodePath.join(packageDirectory, "lib", "libkrunfw.dll");
+    if (NodeFS.existsSync(msbPath) && NodeFS.existsSync(libkrunfwPath)) {
+      return { msbPath, libkrunfwPath };
+    }
+  }
+  return null;
+}
 
 export function buildMicroVmModifyOptions(
   current: MicroVmInfo,
@@ -149,9 +196,20 @@ async function configureWindowlessWindowsRuntime(
   sdk: MicrosandboxModule,
   home: string,
   platform: NodeJS.Platform,
+  arch: NodeJS.Architecture,
 ): Promise<void> {
   if (platform !== "win32") return;
-  const runtime = await sdk.ensureRuntime({ home });
+  const packaged = resolveMicrosandboxBinaryPaths({
+    platform,
+    arch,
+    resourcesPath: (process as NodeJS.Process & { readonly resourcesPath?: string }).resourcesPath,
+    moduleDirectory: NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
+  });
+  const runtime = await sdk.ensureRuntime(
+    packaged === null
+      ? { home }
+      : { home, msbPath: packaged.msbPath, libkrunfwPath: packaged.libkrunfwPath },
+  );
   const version = (await sdk.resolveRuntimeVersion(runtime.msbPath)) ?? "unknown";
   const runtimeDir = NodePath.join(home, "runtime");
   await NodeFSP.mkdir(runtimeDir, { recursive: true });
@@ -314,14 +372,34 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
 
   const sdk = yield* attempt("load", () => import("microsandbox"));
   const platform = yield* HostProcessPlatform;
-  yield* attempt("prepare-runtime", () => configureWindowlessWindowsRuntime(sdk, home, platform));
+  const arch = yield* HostProcessArchitecture;
+  yield* attempt("prepare-runtime", () =>
+    configureWindowlessWindowsRuntime(sdk, home, platform, arch),
+  );
   sdk.setDefaultBackend("local");
 
   const getHandle = (name: string) => attempt("get", () => sdk.Sandbox.get(name));
   const getRunning = (name: string) =>
     getHandle(name).pipe(
       Effect.flatMap((handle) =>
-        attempt("connect", () => handle.connectOrStart({ detached: true })),
+        attempt("connect", async () => {
+          const key = liveSandboxKey(home, name);
+          const cached = liveSandboxes.get(key);
+          if (cached) {
+            try {
+              const current = await sdk.Sandbox.get(name);
+              if (current.status === "running" || current.status === "starting") {
+                return cached;
+              }
+            } catch {
+              // Fall through and reconnect below.
+            }
+            liveSandboxes.delete(key);
+          }
+          const sandbox = await handle.connectOrStart({ detached: false });
+          liveSandboxes.set(key, sandbox);
+          return sandbox;
+        }),
       ),
     );
 
@@ -366,7 +444,6 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
         .memory(memory)
         .maxMemory(maxMemory)
         .workdir(workdir)
-        .detached(true)
         .ephemeral(false)
         .labels({
           "erebus.managed": "true",
@@ -387,7 +464,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
       }
       try {
         const sandbox = await builder.create();
-        await sandbox.detach();
+        liveSandboxes.set(liveSandboxKey(home, name), sandbox);
         return toInfo(await sdk.Sandbox.get(name));
       } catch (createCause) {
         if (hasErrorCode(createCause, "sandboxAlreadyExists")) throw createCause;
@@ -404,8 +481,8 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
         }
 
         try {
-          const recovered = await partial.connectOrStart({ detached: true });
-          await recovered.detach();
+          const recovered = await partial.connectOrStart({ detached: false });
+          liveSandboxes.set(liveSandboxKey(home, name), recovered);
           return toInfo(await partial.refresh());
         } catch (recoveryCause) {
           try {
@@ -428,22 +505,25 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
     getHandle(input.name).pipe(
       Effect.flatMap((handle) =>
         attempt("control", async () => {
+          const key = liveSandboxKey(home, input.name);
           switch (input.action) {
             case "start": {
-              const sandbox = await handle.startDetached();
-              await sandbox.detach();
+              const sandbox = await handle.start();
+              liveSandboxes.set(key, sandbox);
               break;
             }
             case "stop":
               await handle.requestStop();
+              liveSandboxes.delete(key);
               break;
             case "restart": {
-              const sandbox = await handle.restart({ detached: true });
-              await sandbox.detach();
+              const sandbox = await handle.restart({ detached: false });
+              liveSandboxes.set(key, sandbox);
               break;
             }
             case "kill":
               await handle.kill();
+              liveSandboxes.delete(key);
               break;
           }
           return toInfo(await handle.refresh());
@@ -459,6 +539,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
           const current = await toInfo(refreshed);
           const options = buildMicroVmModifyOptions(current, input);
           if (options !== null) await refreshed.modify(options);
+          liveSandboxes.delete(liveSandboxKey(home, input.name));
           return toInfo(await refreshed.refresh());
         }),
       ),
@@ -475,6 +556,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
             );
           }
           await current.destroy({ force: input.force ?? false });
+          liveSandboxes.delete(liveSandboxKey(home, input.name));
         }),
       ),
     );

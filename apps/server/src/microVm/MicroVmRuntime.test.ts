@@ -8,6 +8,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   buildMicroVmModifyOptions,
   materializeWindowlessWindowsExecutable,
+  resolveMicrosandboxBinaryPaths,
 } from "./MicroVmRuntime.ts";
 
 const crashedVm = {
@@ -77,6 +78,49 @@ function consoleExecutable(): Buffer {
   bytes.write("preserved", optionalHeader + 96, "ascii");
   return bytes;
 }
+
+describe("resolveMicrosandboxBinaryPaths", () => {
+  it("finds the unpacked Windows runtime pair next to server.asar", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "erebus-msb-packaged-"));
+    const packageDirectory = NodePath.join(
+      directory,
+      "server.asar.unpacked",
+      "node_modules",
+      "@superradcompany",
+      "microsandbox-win32-x64-msvc",
+    );
+    try {
+      await NodeFSP.mkdir(NodePath.join(packageDirectory, "bin"), { recursive: true });
+      await NodeFSP.mkdir(NodePath.join(packageDirectory, "lib"), { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(packageDirectory, "bin", "msb.exe"), "msb");
+      await NodeFSP.writeFile(NodePath.join(packageDirectory, "lib", "libkrunfw.dll"), "dll");
+
+      expect(
+        resolveMicrosandboxBinaryPaths({
+          platform: "win32",
+          arch: "x64",
+          resourcesPath: directory,
+          moduleDirectory: NodePath.join(directory, "server.asar", "apps", "server", "dist"),
+        }),
+      ).toEqual({
+        msbPath: NodePath.join(packageDirectory, "bin", "msb.exe"),
+        libkrunfwPath: NodePath.join(packageDirectory, "lib", "libkrunfw.dll"),
+      });
+    } finally {
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not resolve packaged Windows binaries on other platforms", () => {
+    expect(
+      resolveMicrosandboxBinaryPaths({
+        platform: "linux",
+        arch: "x64",
+        moduleDirectory: "/srv/erebus/apps/server/dist",
+      }),
+    ).toBeNull();
+  });
+});
 
 describe("materializeWindowlessWindowsExecutable", () => {
   it("copies a console executable and changes only its PE subsystem", async () => {
