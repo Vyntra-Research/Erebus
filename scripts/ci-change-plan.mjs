@@ -148,7 +148,12 @@ export function classifyCiChanges(changes) {
         "native/libghostty-vt/",
       ]),
     );
-  const rust = full || files.some((file) => file.startsWith("native/resource-monitor/"));
+  const rust =
+    full ||
+    files.some(
+      (file) =>
+        file.startsWith("native/resource-monitor/") || file.startsWith("native/computer-use/"),
+    );
   const webRuntime =
     full ||
     files.some((file) => file === "native/erebus-web" || file.startsWith("native/erebus-web/"));

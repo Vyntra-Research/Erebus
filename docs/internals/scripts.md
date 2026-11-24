@@ -36,6 +36,8 @@ The inherited `T3CODE_*`, `.t3`, `@t3tools/*`, and `t3code://` names remain comp
 - `vp run build:desktop` builds the desktop and server pipeline.
 - `vp check` runs formatting and lint rules.
 - `vp run typecheck` runs workspace TypeScript checks.
+- `pnpm test` runs the cross-platform smoke suite.
+- `pnpm test:full` runs the Linux-only full suite from the Full Tests workflow.
 - `vp test run <files>` runs focused tests.
 - `cargo test --locked --manifest-path native/resource-monitor/Cargo.toml` tests the Rust monitor.
 
