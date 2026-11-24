@@ -34,6 +34,7 @@ Setup lives in the [root README](../README.md). Contribution policy is in [CONTR
 - [Resource telemetry](./internals/resource-telemetry.md)
 - [Environment authorization](./internals/environment-auth.md)
 - [CI gates](./internals/ci.md)
+- [Testing](./internals/testing.md)
 - [Engineering work artifacts](./internals/work-artifacts.md)
 
 ### Runbooks

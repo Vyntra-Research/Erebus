@@ -115,6 +115,17 @@ describe("CI change plan", () => {
     });
   });
 
+  it("runs native checks for Computer Use changes", () => {
+    expect(classifyCiChanges([change("native/computer-use/src/main.rs")])).toMatchObject({
+      build: false,
+      desktop: false,
+      libraries: false,
+      node: false,
+      rust: true,
+      webRuntime: false,
+    });
+  });
+
   it("validates the web runtime and extension when the submodule changes", () => {
     expect(classifyCiChanges([change("native/erebus-web")])).toMatchObject({
       build: false,

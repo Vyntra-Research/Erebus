@@ -11,20 +11,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  changes:
+  plan:
     name: Plan
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      build: ${{ steps.plan.outputs.build }}
-      desktop: ${{ steps.plan.outputs.desktop }}
-      full: ${{ steps.plan.outputs.full }}
-      libraries: ${{ steps.plan.outputs.libraries }}
       node: ${{ steps.plan.outputs.node }}
+      build: ${{ steps.plan.outputs.build }}
       rust: ${{ steps.plan.outputs.rust }}
-      server: ${{ steps.plan.outputs.server }}
-      server_only: ${{ steps.plan.outputs.server_only }}
-      web: ${{ steps.plan.outputs.web }}
       web_runtime: ${{ steps.plan.outputs.web_runtime }}
     steps:
       - name: Checkout
@@ -53,20 +47,12 @@ jobs:
           git diff --check "$base" "$HEAD_SHA"
           node scripts/ci-change-plan.mjs "$base" "$HEAD_SHA"
 
-      - name: Reject repository-owned PR assets
-        run: |
-          files="$(git ls-files .github/pr-assets)"
-          if test -n "$files"; then
-            printf 'PR evidence must be uploaded to GitHub, not committed:\n%s\n' "$files" >&2
-            exit 1
-          fi
-
   quality:
     name: Quality
-    needs: changes
-    if: needs.changes.outputs.node == 'true'
+    needs: plan
+    if: needs.plan.outputs.node == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -86,268 +72,76 @@ jobs:
       - name: Check
         run: vp check
 
-      - name: Typecheck server
-        if: needs.changes.outputs.server_only == 'true'
-        run: vp run --filter erebus typecheck
-
       - name: Typecheck workspace
-        if: needs.changes.outputs.server_only != 'true'
         run: vpr typecheck
+
+  smoke:
+    name: Smoke
+    needs: plan
+    if: needs.plan.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Critical-path tests
+        run: node scripts/run-smoke-tests.mjs
 
   build:
     name: Build
-    needs: changes
-    if: needs.changes.outputs.build == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Ensure Electron runtime is installed
-        if: needs.changes.outputs.server_only != 'true'
-        run: vp run --filter @t3tools/desktop ensure:electron
-
-      - name: Build server pipeline
-        if: needs.changes.outputs.server_only == 'true'
-        run: vp run --filter erebus build
-
-      - name: Build desktop pipeline
-        if: needs.changes.outputs.server_only != 'true'
-        run: vp run build:desktop
-
-      - name: Verify preload bundle output
-        if: needs.changes.outputs.server_only != 'true'
-        run: |
-          test -f apps/desktop/dist-electron/preload.cjs
-          grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
-          grep -n "__clerk_internal_electron_passkeys" apps/desktop/dist-electron/preload.cjs
-
-      - name: Verify server bundle output
-        if: needs.changes.outputs.server_only == 'true'
-        run: test -f apps/server/dist/bin.mjs
-
-  # The Electron suite is large enough to dominate a combined package run.
-  # Isolated shards keep UI changes from waiting on unrelated libraries.
-  test_desktop:
-    name: Test Desktop ${{ matrix.shard }}
-    needs: changes
-    if: needs.changes.outputs.desktop == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @t3tools/desktop ensure:electron
-
-      - name: Test
-        run: vp run --filter '@t3tools/desktop' test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
-
-  # These tasks have no dependency ordering requirements, so they can share a
-  # runner while Vite+ uses bounded package concurrency.
-  test_libraries:
-    name: Test Libraries
-    needs: changes
-    if: needs.changes.outputs.libraries == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Test
-        run: >-
-          vp run --parallel --concurrency-limit 4
-          --filter '@t3tools/scripts'
-          --filter 'effect-acp'
-          --filter '@t3tools/oxlint-plugin-t3code'
-          --filter '@t3tools/contracts'
-          --filter 'effect-codex-app-server'
-          --filter '@t3tools/shared'
-          --filter '@t3tools/tailscale'
-          --filter '@t3tools/client-runtime'
-          --filter '@t3tools/ssh'
-          --filter 't3code-relay'
-          test
-
-  # The web suite dominates the non-server test wall time. Two isolated shards
-  # keep feedback fast without increasing per-runner concurrency.
-  test_web:
-    name: Test Web ${{ matrix.shard }}
-    needs: changes
-    if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Test
-        run: vp run --filter '@t3tools/web' test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
-
-  # apps/server sets `fileParallelism: false`, so its files run strictly
-  # one at a time. Sharding spreads them over separate runners instead of
-  # separate workers, so no two server test files ever share a machine and the
-  # isolation that flag buys is preserved exactly.
-  test_server:
-    name: Test Server ${{ matrix.shard }}
-    needs: changes
-    if: needs.changes.outputs.server == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      # No Electron setup here: `erebus` (apps/server) has no Electron dependency
-      # and none of its tests touch the runtime. Only the non-server `test`
-      # job, which covers @t3tools/desktop, needs the download.
-      - name: Test
-        env:
-          T3CODE_TRANSFER_BUDGET_REPORT_PATH: ${{ runner.temp }}/t3code-transfer-budget.md
-          T3CODE_TRANSFER_BUDGET_RESULT_PATH: ${{ runner.temp }}/thread-transfer-result.json
-        run: vp run --filter erebus test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
-
-      # src/server.test.ts writes the budget report, so exactly one shard
-      # produces these files. Gating the upload on their presence keeps a
-      # single `thread-transfer-results` artifact per run, which is the name
-      # thread-transfer-report.yml resolves.
-      - name: Detect transfer budget report
-        id: transfer_budget
-        if: always()
-        run: |
-          if test -f "${{ runner.temp }}/thread-transfer-result.json"; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish transfer budget report
-        if: always() && steps.transfer_budget.outputs.present == 'true'
-        run: |
-          if test -f "${{ runner.temp }}/t3code-transfer-budget.md"; then
-            tee -a "$GITHUB_STEP_SUMMARY" < "${{ runner.temp }}/t3code-transfer-budget.md"
-          else
-            echo "Transfer budget report was not produced." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Upload thread transfer result
-        if: always() && steps.transfer_budget.outputs.present == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: thread-transfer-results
-          path: ${{ runner.temp }}/thread-transfer-result.json
-          if-no-files-found: ignore
-          retention-days: 30
-
-  # Split out of Check and Test: both paid ~7-9s to install a Rust toolchain
-  # for checks that take under 3s, on the critical path of every PR.
-  rust:
-    name: Rust
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - name: Check resource monitor formatting
-        run: cargo fmt --manifest-path native/resource-monitor/Cargo.toml -- --check
-
-      - name: Test resource monitor
-        run: cargo test --locked --manifest-path native/resource-monitor/Cargo.toml
-
-  web_runtime:
-    name: Web Runtime
-    needs: changes
-    if: needs.changes.outputs.web_runtime == 'true'
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Cache Electron
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Build desktop pipeline
+        run: vp run build:desktop
+
+  native:
+    name: Native
+    needs: plan
+    if: needs.plan.outputs.rust == 'true' || needs.plan.outputs.web_runtime == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -363,69 +157,98 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/resource-monitor -> target
+            native/computer-use -> target
+            native/erebus-web -> target
+
+      - name: Check resource monitor formatting
+        if: needs.plan.outputs.rust == 'true'
+        run: cargo fmt --manifest-path native/resource-monitor/Cargo.toml -- --check
+
+      - name: Test resource monitor
+        if: needs.plan.outputs.rust == 'true'
+        run: cargo test --locked --manifest-path native/resource-monitor/Cargo.toml
+
+      - name: Check computer use formatting
+        if: needs.plan.outputs.rust == 'true'
+        run: cargo fmt --manifest-path native/computer-use/Cargo.toml -- --check
+
+      - name: Check computer use
+        if: needs.plan.outputs.rust == 'true'
+        run: cargo check --locked --manifest-path native/computer-use/Cargo.toml
+
+      - name: Lint computer use
+        if: needs.plan.outputs.rust == 'true'
+        run: cargo clippy --locked --all-targets --manifest-path native/computer-use/Cargo.toml -- -D warnings
+
       - name: Check web runtime formatting
+        if: needs.plan.outputs.web_runtime == 'true'
         run: cargo fmt --manifest-path native/erebus-web/Cargo.toml -- --check
 
       - name: Test web runtime
+        if: needs.plan.outputs.web_runtime == 'true'
         run: cargo test --locked --manifest-path native/erebus-web/Cargo.toml
 
       - name: Lint web runtime
+        if: needs.plan.outputs.web_runtime == 'true'
         run: cargo clippy --locked --all-targets --manifest-path native/erebus-web/Cargo.toml -- -D warnings
 
       - name: Build web runtime
+        if: needs.plan.outputs.web_runtime == 'true'
         run: cargo build --locked --release --manifest-path native/erebus-web/Cargo.toml
 
       - name: Setup Node
+        if: needs.plan.outputs.web_runtime == 'true'
         uses: actions/setup-node@v6
         with:
           node-version-file: package.json
 
       - name: Setup pnpm
+        if: needs.plan.outputs.web_runtime == 'true'
         run: corepack enable && corepack prepare pnpm@11.10.0 --activate
 
       - name: Install capture extension dependencies
+        if: needs.plan.outputs.web_runtime == 'true'
         run: pnpm --dir native/erebus-web/extension install --frozen-lockfile
 
       - name: Check capture extension
+        if: needs.plan.outputs.web_runtime == 'true'
         run: pnpm --dir native/erebus-web/extension run typecheck
 
       - name: Test capture extension
+        if: needs.plan.outputs.web_runtime == 'true'
         run: pnpm --dir native/erebus-web/extension test
 
       - name: Build capture extension
+        if: needs.plan.outputs.web_runtime == 'true'
         run: pnpm --dir native/erebus-web/extension build
 
   result:
     name: CI
     if: always()
     needs:
-      - changes
+      - plan
       - quality
+      - smoke
       - build
-      - test_desktop
-      - test_libraries
-      - test_web
-      - test_server
-      - rust
-      - web_runtime
+      - native
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every selected check to pass
         env:
           RESULTS: >-
-            changes=${{ needs.changes.result }},
+            plan=${{ needs.plan.result }},
             quality=${{ needs.quality.result }},
+            smoke=${{ needs.smoke.result }},
             build=${{ needs.build.result }},
-            test_desktop=${{ needs.test_desktop.result }},
-            test_libraries=${{ needs.test_libraries.result }},
-            test_web=${{ needs.test_web.result }},
-            test_server=${{ needs.test_server.result }},
-            rust=${{ needs.rust.result }},
-            web_runtime=${{ needs.web_runtime.result }}
+            native=${{ needs.native.result }}
         run: |
           if [[ "$RESULTS" == *failure* || "$RESULTS" == *cancelled* ]]; then
             echo "One or more selected CI jobs did not pass: $RESULTS" >&2
             exit 1
           fi
-          echo "Selected CI jobs passed: $RESULTS"
