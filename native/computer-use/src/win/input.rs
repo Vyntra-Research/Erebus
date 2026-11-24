@@ -79,30 +79,35 @@ pub fn drag(from_x: i32, from_y: i32, to_x: i32, to_y: i32) {
 pub fn type_text(text: &str) {
     let normalized = text.replace("\r\n", "\n").replace('\r', "");
     let mut inputs: Vec<INPUT> = Vec::new();
+    let flush = |inputs: &mut Vec<INPUT>| {
+        if inputs.is_empty() {
+            return;
+        }
+        send_inputs(inputs);
+        inputs.clear();
+        thread::sleep(Duration::from_millis(2));
+    };
+
     for unit in normalized.encode_utf16().take(20_000) {
         match unit {
-            0x0A => {
-                inputs.push(key_input(0x0D, false, false));
-                inputs.push(key_input(0x0D, true, false));
-            }
-            0x09 => {
-                inputs.push(key_input(0x09, false, false));
-                inputs.push(key_input(0x09, true, false));
+            0x0A | 0x09 => {
+                flush(&mut inputs);
+                let vk = if unit == 0x0A { 0x0D } else { 0x09 };
+                key_event(vk, false, false);
+                thread::sleep(Duration::from_millis(18));
+                key_event(vk, true, false);
+                thread::sleep(Duration::from_millis(40));
             }
             _ => {
                 inputs.push(unicode_input(unit, false));
                 inputs.push(unicode_input(unit, true));
+                if inputs.len() >= 128 {
+                    flush(&mut inputs);
+                }
             }
         }
-        if inputs.len() >= 128 {
-            send_inputs(&inputs);
-            inputs.clear();
-            thread::sleep(Duration::from_millis(2));
-        }
     }
-    if !inputs.is_empty() {
-        send_inputs(&inputs);
-    }
+    flush(&mut inputs);
 }
 
 pub fn press_chord(chord: &str) -> Result<(), ToolError> {
@@ -333,28 +338,6 @@ fn key_event(vk: u16, up: bool, extended: bool) {
         },
     };
     send_inputs(&[input]);
-}
-
-fn key_input(vk: u16, up: bool, extended: bool) -> INPUT {
-    let mut bits: u32 = 0;
-    if up {
-        bits |= KEYEVENTF_KEYUP.0;
-    }
-    if extended {
-        bits |= KEYEVENTF_EXTENDEDKEY.0;
-    }
-    INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VIRTUAL_KEY(vk),
-                wScan: 0,
-                dwFlags: KEYBD_EVENT_FLAGS(bits),
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    }
 }
 
 fn unicode_input(unit: u16, up: bool) -> INPUT {

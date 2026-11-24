@@ -1,7 +1,7 @@
 use uiautomation::core::UIAutomation;
 use uiautomation::patterns::{
     UIExpandCollapsePattern, UIInvokePattern, UIScrollPattern, UISelectionItemPattern,
-    UITogglePattern, UIValuePattern,
+    UITextPattern, UITogglePattern, UIValuePattern,
 };
 use uiautomation::types::{ControlType, Handle, ScrollAmount};
 use uiautomation::{UIElement, UITreeWalker};
@@ -16,6 +16,7 @@ pub struct TreeResult {
     pub text: String,
     pub elements: Vec<UIElement>,
     pub focused_element: Option<String>,
+    pub document_text: Option<String>,
 }
 
 pub fn capture_tree(automation: &UIAutomation, window_id: u64) -> Result<TreeResult, ToolError> {
@@ -25,7 +26,15 @@ pub fn capture_tree(automation: &UIAutomation, window_id: u64) -> Result<TreeRes
     let walker = automation.get_control_view_walker().map_err(uia_error)?;
     let mut elements = Vec::new();
     let mut text = String::new();
-    walk(&walker, &root, 0, &mut elements, &mut text);
+    let mut document_text = None;
+    walk(
+        &walker,
+        &root,
+        0,
+        &mut elements,
+        &mut text,
+        &mut document_text,
+    );
     let focused_element = automation
         .get_focused_element()
         .ok()
@@ -34,6 +43,7 @@ pub fn capture_tree(automation: &UIAutomation, window_id: u64) -> Result<TreeRes
         text,
         elements,
         focused_element,
+        document_text,
     })
 }
 
@@ -43,6 +53,7 @@ fn walk(
     depth: usize,
     elements: &mut Vec<UIElement>,
     text: &mut String,
+    document_text: &mut Option<String>,
 ) {
     if elements.len() >= MAX_NODES {
         return;
@@ -56,6 +67,19 @@ fn walk(
     text.push_str(&describe(element));
     text.push('\n');
 
+    if document_text.is_none()
+        && matches!(
+            element.get_control_type().ok(),
+            Some(ControlType::Document | ControlType::Edit)
+        )
+        && let Ok(pattern) = element.get_pattern::<UITextPattern>()
+        && let Ok(range) = pattern.get_document_range()
+        && let Ok(value) = range.get_text(20_000)
+        && !value.is_empty()
+    {
+        *document_text = Some(value);
+    }
+
     if depth >= MAX_DEPTH {
         return;
     }
@@ -64,7 +88,7 @@ fn walk(
         Err(_) => return,
     };
     loop {
-        walk(walker, &child, depth + 1, elements, text);
+        walk(walker, &child, depth + 1, elements, text, document_text);
         if elements.len() >= MAX_NODES {
             break;
         }
@@ -86,6 +110,10 @@ fn describe(element: &UIElement) -> String {
             )
             .to_lowercase()
         });
+    let is_text_document = matches!(
+        element.get_control_type().ok(),
+        Some(ControlType::Document | ControlType::Edit)
+    );
     let name = element.get_name().unwrap_or_default();
     let mut line = format!("{control_type} \"{}\"", truncate(&sanitize(&name), 160));
 
@@ -95,7 +123,15 @@ fn describe(element: &UIElement) -> String {
             .and_then(|pattern| pattern.get_value())
         && !value.is_empty()
     {
-        line.push_str(&format!(" value=\"{}\"", truncate(&sanitize(&value), 160)));
+        let label = if is_text_document {
+            "valueNormalized"
+        } else {
+            "value"
+        };
+        line.push_str(&format!(
+            " {label}=\"{}\"",
+            truncate(&sanitize(&value), 160)
+        ));
     }
 
     if element.is_enabled() == Ok(false) {

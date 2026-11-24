@@ -3,26 +3,36 @@ import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ServerConfig from "../../../config.ts";
 import {
+  ComputerUseError,
   requestComputerUse,
   setComputerUseBinaryPath,
 } from "../../../computerUse/ComputerUseClient.ts";
 import {
   ComputerSnapshotToolkit,
   ComputerStandardToolkit,
+  ComputerUseToolError,
   type ComputerSnapshotResult,
 } from "./tools.ts";
+
+const fail = (code: string, message: string) => new ComputerUseToolError({ code, message });
 
 const invoke = <A>(method: string, params?: unknown) =>
   Effect.gen(function* () {
     const invocation = yield* McpInvocationContext.McpInvocationContext;
     if (!invocation.capabilities.has("computer")) {
-      return yield* Effect.fail("Computer Use is not enabled for this agent session.");
+      return yield* Effect.fail(
+        fail("unavailable", "Computer Use is not enabled for this agent session."),
+      );
     }
     const config = yield* ServerConfig.ServerConfig;
     yield* Effect.sync(() => setComputerUseBinaryPath(config.computerUsePath));
     return yield* Effect.tryPromise({
       try: () => requestComputerUse<A>(method, params),
-      catch: (error) => (error instanceof Error ? error.message : String(error)),
+      catch: (error) =>
+        fail(
+          error instanceof ComputerUseError ? error.code : "computer_use_error",
+          error instanceof Error ? error.message : String(error),
+        ),
     });
   });
 

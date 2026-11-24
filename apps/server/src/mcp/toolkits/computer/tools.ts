@@ -7,6 +7,14 @@ import * as ServerConfig from "../../../config.ts";
 const dependencies = [McpInvocationContext.McpInvocationContext, ServerConfig.ServerConfig];
 const JsonResult = Schema.Record(Schema.String, Schema.Unknown);
 
+export class ComputerUseToolError extends Schema.TaggedErrorClass<ComputerUseToolError>()(
+  "ComputerUseToolError",
+  {
+    code: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
 const WindowId = Schema.Int.annotate({
   description: "Exact window id returned by computer_list_windows or computer_list_apps.",
 });
@@ -46,6 +54,7 @@ export const ComputerScreenshotSchema = Schema.Struct({
 export const ComputerAccessibilitySchema = Schema.Struct({
   tree: Schema.String,
   focusedElement: Schema.NullOr(Schema.String),
+  documentText: Schema.NullOr(Schema.String),
 });
 
 export const ComputerSnapshotResult = Schema.Struct({
@@ -57,7 +66,7 @@ export type ComputerSnapshotResult = typeof ComputerSnapshotResult.Type;
 
 export const ComputerSnapshotTool = Tool.make("computer_get_window_state", {
   description:
-    "Observe one window before acting. Returns a bounded screenshot of the window and, with includeText=true, an accessibility tree whose bracketed indexes address elements. Element indexes and screenshot coordinates are valid only for this observation; re-observe after every action that can change the UI. Prefer includeText=true and elementIndex over raw coordinates when the window exposes accessibility. Screenshots are window-relative and work while the window is occluded.",
+    "Observe one window before acting. Returns a bounded screenshot of the window and, with includeText=true, an accessibility tree whose bracketed indexes address elements. accessibility.documentText carries the real multiline document text from UI Automation TextPattern; value fields normalize newlines to spaces. Element indexes and screenshot coordinates are valid only for this observation; re-observe after every action that can change the UI. Prefer elementIndex over raw coordinates when the window exposes accessibility. Screenshots are window-relative and work while the window is occluded.",
   parameters: Schema.Struct({
     windowId: WindowId,
     includeScreenshot: Schema.optionalKey(Schema.Boolean).annotate({
@@ -69,7 +78,7 @@ export const ComputerSnapshotTool = Tool.make("computer_get_window_state", {
     }),
   }),
   success: ComputerSnapshotResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Observe a desktop window")
@@ -83,7 +92,7 @@ export const ComputerListAppsTool = Tool.make("computer_list_apps", {
     "List running desktop applications and their targetable windows, grouped by executable. Start here, then keep the exact returned window id. Never invent or reconstruct a window id.",
   parameters: Schema.Struct({}),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "List desktop apps")
@@ -97,7 +106,7 @@ export const ComputerListWindowsTool = Tool.make("computer_list_windows", {
     "List open targetable windows with their window id, app, title, and foreground state. Use computer_list_apps when you need grouping by application.",
   parameters: Schema.Struct({}),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "List desktop windows")
@@ -115,7 +124,7 @@ export const ComputerLaunchAppTool = Tool.make("computer_launch_app", {
     }),
   }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Launch a desktop app")
@@ -129,7 +138,7 @@ export const ComputerActivateWindowTool = Tool.make("computer_activate_window", 
     "Bring an open window to the foreground. Input actions already activate their target window; use this only when you need to focus the window without acting.",
   parameters: Schema.Struct({ windowId: WindowId }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Activate a window")
@@ -156,7 +165,7 @@ export const ComputerClickTool = Tool.make("computer_click", {
     ),
   }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Click in a window")
@@ -173,7 +182,7 @@ export const ComputerTypeTextTool = Tool.make("computer_type_text", {
     text: Schema.String.annotate({ description: "Literal text to type." }),
   }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Type text into a window")
@@ -190,7 +199,7 @@ export const ComputerPressKeyTool = Tool.make("computer_press_key", {
     key: Schema.String.annotate({ description: "Key or +-separated chord." }),
   }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Press a key")
@@ -210,7 +219,7 @@ export const ComputerScrollTool = Tool.make("computer_scroll", {
     scrollY: Schema.Int.annotate({ description: "Vertical scroll delta." }),
   }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Scroll a window")
@@ -228,7 +237,7 @@ export const ComputerSetValueTool = Tool.make("computer_set_value", {
     value: Schema.String.annotate({ description: "Replacement value." }),
   }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Set an element value")
@@ -248,7 +257,7 @@ export const ComputerDragTool = Tool.make("computer_drag", {
     toY: ScreenshotY,
   }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Drag in a window")
@@ -266,7 +275,7 @@ export const ComputerSecondaryActionTool = Tool.make("computer_secondary_action"
     action: Schema.String.annotate({ description: "Secondary action label." }),
   }),
   success: JsonResult,
-  failure: Schema.String,
+  failure: ComputerUseToolError,
   dependencies,
 })
   .annotate(Tool.Title, "Invoke a secondary action")

@@ -93,6 +93,7 @@ impl ComputerUse {
         let info = windows::window_info(params.window_id)?;
 
         let screenshot = if params.include_screenshot {
+            std::thread::sleep(std::time::Duration::from_millis(120));
             let captured = capture::capture_window(params.window_id)?;
             let encoded = capture::encode_screenshot(captured)?;
             let (origin_x, origin_y, width, height) = windows::window_rect(params.window_id)?;
@@ -137,6 +138,7 @@ impl ComputerUse {
             Some(json!({
                 "tree": tree.text,
                 "focusedElement": tree.focused_element,
+                "documentText": tree.document_text,
             }))
         } else {
             self.snapshots.remove(&params.window_id);

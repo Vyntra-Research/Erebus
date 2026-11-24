@@ -275,13 +275,18 @@ const registerComputerSnapshot = Effect.fn("McpHttpServer.registerComputerSnapsh
           Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
           Effect.provideService(ServerConfig.ServerConfig, config),
           Effect.matchCauseEffect({
-            onFailure: () =>
-              Effect.succeed(
+            onFailure: (cause) => {
+              const failure = Cause.findErrorOption(cause);
+              const message = Option.isSome(failure)
+                ? failure.value.message
+                : "Computer Use observation failed.";
+              return Effect.succeed(
                 new McpSchema.CallToolResult({
                   isError: true,
-                  content: [{ type: "text", text: "Computer Use observation failed." }],
+                  content: [{ type: "text", text: message }],
                 }),
-              ),
+              );
+            },
             onSuccess: ({ encodedResult }) => {
               const snapshot = encodedResult as {
                 readonly screenshot?: {
