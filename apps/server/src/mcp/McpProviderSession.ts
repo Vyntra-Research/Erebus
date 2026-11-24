@@ -8,6 +8,7 @@ export interface McpProviderSessionConfig {
   readonly endpoint: string;
   readonly previewEnabled: boolean;
   readonly webEnabled?: boolean;
+  readonly computerEnabled?: boolean;
   readonly researchFallbackEndpoint?: string;
   readonly authorizationHeader: string;
 }

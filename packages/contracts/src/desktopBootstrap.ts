@@ -21,6 +21,7 @@ export const DesktopBackendBootstrap = Schema.Struct({
   desktopTelemetryControlFd: Schema.optionalKey(PositiveInt),
   resourceMonitorPath: Schema.optionalKey(TrimmedNonEmptyString),
   webRuntimePath: Schema.optionalKey(TrimmedNonEmptyString),
+  computerUsePath: Schema.optionalKey(TrimmedNonEmptyString),
 });
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;

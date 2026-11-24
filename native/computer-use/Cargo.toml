@@ -1,0 +1,35 @@
+[package]
+name = "erebus-computer-use"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Windows desktop automation runtime for Erebus"
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.22.1"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2.0.17"
+
+[target.'cfg(windows)'.dependencies]
+uiautomation = { version = "0.25.3", features = ["input"] }
+windows = { version = "0.62.2", features = [
+  "Win32",
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-capture = "2.0.1"
+
+[profile.release]
+lto = "thin"
+strip = true

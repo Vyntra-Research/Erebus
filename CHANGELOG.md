@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-beta.9 - 2026-11-23
+
+### Added
+
+- Add provider-agnostic Windows Computer Use. The native runtime lists desktop apps and windows, captures window screenshots through Windows Graphics Capture, reads indexed UI Automation trees, and performs element or screenshot-coordinate click, type, key, scroll, drag, and value actions. Every provider receives the same MCP tools.
+- Show a topmost, click-through overlay while Computer Use is active.
+
 ## 2.0.0-beta.8 - 2026-11-23
 
 ### Fixed

@@ -170,6 +170,7 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   yield* fs.makeDirectory(path.join(resourcesDir, "resource-monitor"), { recursive: true });
   yield* fs.makeDirectory(path.join(resourcesDir, "erebus-web"), { recursive: true });
   yield* fs.makeDirectory(path.join(resourcesDir, "erebus-web/extension"), { recursive: true });
+  yield* fs.makeDirectory(path.join(resourcesDir, "computer-use"), { recursive: true });
   yield* fs.copyFile(generatedAsarPath, path.join(resourcesDir, WINDOWS_SERVER_ASAR_RESOURCE));
   if (input.copyUnpackedNatives) {
     yield* fs.copy(
@@ -182,6 +183,10 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
     "monitor",
   );
   yield* fs.writeFileString(path.join(resourcesDir, "erebus-web/erebus-webd.exe"), "runtime");
+  yield* fs.writeFileString(
+    path.join(resourcesDir, "computer-use/erebus-computer-use.exe"),
+    "computer-use",
+  );
   for (const fileName of WEB_CAPTURE_EXTENSION_REQUIRED_FILES) {
     yield* fs.makeDirectory(
       path.dirname(path.join(resourcesDir, "erebus-web/extension", fileName)),
@@ -575,6 +580,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         {
           from: "apps/desktop/prod-resources/erebus-web",
           to: "erebus-web",
+        },
+        {
+          from: "apps/desktop/prod-resources/computer-use",
+          to: "computer-use",
         },
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
       ]);
@@ -1652,6 +1661,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       {
         from: "apps/desktop/prod-resources/erebus-web",
         to: "erebus-web",
+      },
+      {
+        from: "apps/desktop/prod-resources/computer-use",
+        to: "computer-use",
       },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [
