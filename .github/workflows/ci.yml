@@ -98,7 +98,7 @@ jobs:
           run-install: true
 
       - name: Critical-path tests
-        run: pnpm test:smoke
+        run: node scripts/run-smoke-tests.mjs
 
   build:
     name: Build

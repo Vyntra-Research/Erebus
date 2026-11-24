@@ -23,6 +23,7 @@ impl ToolError {
         }
     }
 
+    #[allow(dead_code)]
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::new("invalid_params", message)
     }

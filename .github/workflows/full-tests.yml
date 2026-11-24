@@ -27,7 +27,7 @@ jobs:
           run-install: true
 
       - name: Full suite
-        run: pnpm test:full
+        run: node scripts/run-full-tests.mjs
 
   windows:
     name: Windows smoke
@@ -50,4 +50,4 @@ jobs:
           run-install: true
 
       - name: Critical-path tests
-        run: pnpm test:smoke
+        run: node scripts/run-smoke-tests.mjs
