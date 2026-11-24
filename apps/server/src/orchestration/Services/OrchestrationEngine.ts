@@ -42,6 +42,16 @@ export interface OrchestrationEngineShape {
     limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
 
+  /**
+   * Read only events of the requested types. Falls back to filtering a full
+   * replay when the store does not implement the typed query.
+   */
+  readonly readEventsByTypes?: (
+    fromSequenceExclusive: number,
+    eventTypes: ReadonlyArray<OrchestrationEvent["type"]>,
+    limit?: number,
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
+
   /** Read the newest matching event type from one aggregate stream. */
   readonly readLatestAggregateEventType: OrchestrationEventStoreShape["readLatestAggregateEventType"];
 

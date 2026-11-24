@@ -47,6 +47,22 @@ export interface OrchestrationEventStoreShape {
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
 
   /**
+   * Replay only events of the requested types after the provided sequence.
+   *
+   * Consumers that need one event kind (thread sync binding recovery) must not
+   * fail on legacy events of other kinds whose payloads no longer decode.
+   *
+   * @param sequenceExclusive - Sequence cursor (exclusive).
+   * @param eventTypes - Event types to include.
+   * @param limit - Maximum number of events to emit.
+   */
+  readonly readFromSequenceByTypes?: (
+    sequenceExclusive: number,
+    eventTypes: ReadonlyArray<OrchestrationEvent["type"]>,
+    limit?: number,
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
+
+  /**
    * Read all events from the beginning of the stream.
    *
    * @returns Stream containing all stored events.

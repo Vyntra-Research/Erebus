@@ -118,6 +118,134 @@ layer("OrchestrationEventStore", (it) => {
           ),
         );
       }
+
+      yield* sql`
+        DELETE FROM orchestration_events
+        WHERE event_id = ${EventId.make("evt-store-invalid-json")}
+      `;
+    }),
+  );
+
+  it.effect("reads only requested event types without decoding legacy payloads", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-01-01T00:00:00.000Z";
+
+      yield* eventStore.append({
+        type: "project.created",
+        eventId: EventId.make("evt-typed-read-project"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-typed-read"),
+        occurredAt: now,
+        commandId: CommandId.make("cmd-typed-read"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-typed-read"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-typed-read"),
+          title: "Typed Read Project",
+          workspaceRoot: "/tmp/project-typed-read",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      // Legacy thread.created rows may carry only a threadId. Full replay must
+      // reject them, but a typed read must never decode them at all.
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        )
+        VALUES (
+          ${EventId.make("evt-typed-read-orphan")},
+          ${"thread"},
+          ${ThreadId.make("thread-typed-read-orphan")},
+          ${0},
+          ${"thread.created"},
+          ${now},
+          ${null},
+          ${null},
+          ${null},
+          ${"server"},
+          ${'{"threadId":"thread-typed-read-orphan"}'},
+          ${"{}"}
+        )
+      `;
+
+      const fullReplay = yield* Effect.result(
+        Stream.runCollect(eventStore.readFromSequence(0, 10)),
+      );
+      assert.equal(fullReplay._tag, "Failure");
+
+      const typed = yield* Stream.runCollect(
+        eventStore.readFromSequenceByTypes!(0, ["project.created"], 10),
+      ).pipe(Effect.map((chunk) => Array.from(chunk)));
+      assert.ok(typed.some((event) => event.eventId === EventId.make("evt-typed-read-project")));
+
+      const onlyBindings = yield* Stream.runCollect(
+        eventStore.readFromSequenceByTypes!(0, ["thread.sync-imported"], 10),
+      ).pipe(Effect.map((chunk) => Array.from(chunk)));
+      assert.equal(onlyBindings.length, 0);
+
+      yield* sql`
+        DELETE FROM orchestration_events
+        WHERE event_id = ${EventId.make("evt-typed-read-orphan")}
+      `;
+    }),
+  );
+
+  it.effect("decodes persisted legacy event origins without failing the read", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-01-01T00:00:00.000Z";
+
+      const appended = yield* eventStore.append({
+        type: "project.created",
+        eventId: EventId.make("evt-legacy-origin"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-legacy-origin"),
+        occurredAt: now,
+        commandId: CommandId.make("cmd-legacy-origin"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-legacy-origin"),
+        metadata: { origin: { surface: "desktop", appVersion: now } },
+        payload: {
+          projectId: ProjectId.make("project-legacy-origin"),
+          title: "Legacy Origin Project",
+          workspaceRoot: "/tmp/project-legacy-origin",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      yield* sql`
+        UPDATE orchestration_events
+        SET metadata_json = ${'{"origin":{"surface":"codex-import","sourceThreadId":"legacy-thread"}}'}
+        WHERE event_id = ${appended.eventId}
+      `;
+
+      const replayed = yield* Stream.runCollect(
+        eventStore.readFromSequence(appended.sequence - 1, 1),
+      ).pipe(Effect.map((chunk) => Array.from(chunk)));
+      assert.equal(replayed.length, 1);
+      assert.equal(replayed[0]?.eventId, appended.eventId);
+      assert.deepEqual(replayed[0]?.metadata.origin, {});
     }),
   );
 

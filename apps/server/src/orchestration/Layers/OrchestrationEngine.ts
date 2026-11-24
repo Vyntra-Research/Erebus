@@ -488,6 +488,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive, limit) =>
     eventStore.readFromSequence(fromSequenceExclusive, limit);
+  const readEventsByTypes: NonNullable<OrchestrationEngineShape["readEventsByTypes"]> = (
+    fromSequenceExclusive,
+    eventTypes,
+    limit,
+  ) =>
+    eventStore.readFromSequenceByTypes === undefined
+      ? eventStore
+          .readFromSequence(fromSequenceExclusive, limit)
+          .pipe(Stream.filter((event) => eventTypes.includes(event.type)))
+      : eventStore.readFromSequenceByTypes(fromSequenceExclusive, eventTypes, limit);
   const readLatestAggregateEventType: OrchestrationEngineShape["readLatestAggregateEventType"] = (
     input,
   ) => eventStore.readLatestAggregateEventType(input);
@@ -506,6 +516,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   return {
     readEvents,
+    readEventsByTypes,
     readLatestAggregateEventType,
     dispatch,
     // Each access creates a fresh PubSub subscription so that multiple
