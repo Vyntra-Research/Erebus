@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-beta.18 - 2026-11-25
+
+### Fixed
+
+- Make internal browser session import complete reliably. Local and session storage are restored through CDP after navigation, and a failed follow-up status probe no longer discards the successful import.
+- Bump the capture extension to 1.0.1 so a reloaded extension is distinguishable from the previous build.
+
 ## 2.0.0-beta.17 - 2026-11-25
 
 ### Fixed
