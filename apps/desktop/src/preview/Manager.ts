@@ -3410,27 +3410,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       },
       { discard: true },
     );
-    yield* withControlSession(tabId, wc, "sessionImport.storage", (send) =>
-      Effect.gen(function* () {
-        yield* send("DOMStorage.enable");
-        for (const origin of session.origins) {
-          for (const [key, value] of Object.entries(origin.localStorage)) {
-            yield* send("DOMStorage.setDOMStorageItem", {
-              storageId: { securityOrigin: origin.origin, isLocalStorage: true },
-              key,
-              value,
-            });
-          }
-          for (const [key, value] of Object.entries(origin.sessionStorage ?? {})) {
-            yield* send("DOMStorage.setDOMStorageItem", {
-              storageId: { securityOrigin: origin.origin, isLocalStorage: false },
-              key,
-              value,
-            });
-          }
-        }
-      }),
-    );
     yield* attemptPromise(
       { operation: "sessionImport.navigate", tabId, webContentsId: wc.id },
       () =>
@@ -3446,6 +3425,50 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           throw error;
         }),
     );
+    const targetOrigin = (() => {
+      try {
+        return new URL(session.url).origin;
+      } catch {
+        return null;
+      }
+    })();
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      if (targetOrigin === null) break;
+      try {
+        if (new URL(wc.getURL()).origin === targetOrigin) break;
+      } catch {
+        // Wait for a valid navigation target.
+      }
+      yield* Effect.sleep("200 millis");
+    }
+    const matching = session.origins.find((candidate) => candidate.origin === targetOrigin);
+    if (
+      matching !== undefined &&
+      (Object.keys(matching.localStorage).length > 0 ||
+        Object.keys(matching.sessionStorage ?? {}).length > 0)
+    ) {
+      const localJson = yield* encodeJson(
+        { operation: "sessionImport.storage", tabId, webContentsId: wc.id },
+        matching.localStorage,
+      );
+      const sessionJson = yield* encodeJson(
+        { operation: "sessionImport.storage", tabId, webContentsId: wc.id },
+        matching.sessionStorage ?? {},
+      );
+      const expression = `(() => {
+        const local = ${localJson};
+        const session = ${sessionJson};
+        for (const [key, value] of Object.entries(local)) localStorage.setItem(key, value);
+        for (const [key, value] of Object.entries(session)) sessionStorage.setItem(key, value);
+      })()`;
+      yield* withControlSession(tabId, wc, "sessionImport.storage", (send) =>
+        send("Runtime.evaluate", {
+          expression,
+          returnByValue: true,
+          awaitPromise: false,
+        }).pipe(Effect.asVoid),
+      );
+    }
   });
 
   const resolveClickPoint = Effect.fn("PreviewManager.resolveClickPoint")(function* (

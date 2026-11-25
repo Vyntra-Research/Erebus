@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.20 - 2026-11-25
+
+### Fixed
+
+- Wait for the imported URL to become the active origin before writing internal-browser storage. CDP `DOMStorage` before navigation fails with `Frame not found for the given storage id`; the import now navigates first, tolerates `ERR_ABORTED`, waits for the target origin, and then applies localStorage/sessionStorage through `Runtime.evaluate`.
+
 ## 2.0.0-beta.19 - 2026-11-25
 
 ### Fixed
