@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.0-beta.13 - 2026-11-25
+
+### Added
+
+- Add persistent desktop microVMs. A desktop profile boots Debian with LXQt and Chromium, publishes noVNC on a loopback host port, and exposes `microvm_desktop` to probe readiness, restart the guest, or open the live desktop in the existing browser preview pane. The first boot installs desktop packages and can take a few minutes.
+- Publish loopback TCP or UDP ports when creating or modifying a microVM, so guest services can be reached from the host without exposing them on the LAN.
+
+### Fixed
+
+- Keep attached MicroVM handles resident after exec, copy, and desktop startup. Detaching an attached handle crashes the guest on the Windows preview, which made the next operation restart the VM and dropped running jobs.
+
 ## 2.0.0-beta.12 - 2026-11-24
 
 ### Fixed

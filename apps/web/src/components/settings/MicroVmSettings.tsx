@@ -21,6 +21,7 @@ import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import {
   Dialog,
   DialogDescription,
@@ -73,6 +74,7 @@ function MicroVmCreateDialog({
   const [cpus, setCpus] = useState("2");
   const [memory, setMemory] = useState("2048");
   const [sourcePath, setSourcePath] = useState("");
+  const [desktop, setDesktop] = useState(false);
   const [pending, setPending] = useState(false);
 
   const submit = useCallback(async () => {
@@ -86,6 +88,7 @@ function MicroVmCreateDialog({
         cpus: Number(cpus),
         memoryMiB: Number(memory),
         ...(sourcePath.trim() ? { sourcePath: sourcePath.trim() } : {}),
+        ...(desktop ? { desktop: {} } : {}),
       },
     });
     setPending(false);
@@ -106,6 +109,7 @@ function MicroVmCreateDialog({
   }, [
     cpus,
     create,
+    desktop,
     environmentId,
     image,
     memory,
@@ -173,6 +177,20 @@ function MicroVmCreateDialog({
                 placeholder="Optional absolute path"
                 onChange={(event) => setSourcePath(event.currentTarget.value)}
               />
+            </label>
+            <label className="flex items-start gap-2 text-xs font-medium sm:col-span-2">
+              <Checkbox
+                className="mt-0.5"
+                checked={desktop}
+                onCheckedChange={(checked) => setDesktop(Boolean(checked))}
+              />
+              <span>
+                Desktop profile
+                <span className="block font-normal text-muted-foreground">
+                  Boots LXQt with Chromium and publishes noVNC on a loopback port. The first start
+                  installs packages and can take several minutes.
+                </span>
+              </span>
             </label>
           </div>
           <DialogFooter>
@@ -454,7 +472,7 @@ export function MicroVmSettings() {
               <SettingsRow
                 key={vm.id}
                 title={vm.name}
-                description={`${vm.image} · ${vm.cpus}/${vm.maxCpus} CPU · ${vm.memoryMiB}/${vm.maxMemoryMiB} MiB · ${formatBytes(vm.storageBytes)}`}
+                description={`${vm.image} · ${vm.cpus}/${vm.maxCpus} CPU · ${vm.memoryMiB}/${vm.maxMemoryMiB} MiB · ${formatBytes(vm.storageBytes)}${vm.desktop ? " · desktop" : ""}`}
                 status={
                   <span className="text-xs capitalize text-muted-foreground">{vm.status}</span>
                 }

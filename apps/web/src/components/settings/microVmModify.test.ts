@@ -15,6 +15,8 @@ const vm: MicroVmInfo = {
   maxMemoryMiB: 1024,
   rootDiskMiB: 4096,
   workdir: "/workspace",
+  ports: [],
+  desktop: null,
   projectId: null,
   threadId: null,
   createdAt: null,

@@ -1,14 +1,45 @@
+// @effect-diagnostics nodeBuiltinImport:off - the desktop probe is a loopback health check.
+import * as NodeHttp from "node:http";
 import * as Effect from "effect/Effect";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as MicroVmRuntime from "../../../microVm/MicroVmRuntime.ts";
+import { MicroVmError } from "@t3tools/contracts";
+import type { PreviewAutomationStatus } from "@t3tools/contracts";
 import {
   MicroVmToolkit,
   type MicroVmCopyInput,
+  type MicroVmDesktopActionInput,
   type MicroVmExecInput,
   type MicroVmJobInput,
 } from "./tools.ts";
+
+const probeDesktop = (
+  viewerUrl: string,
+): Promise<{ readonly ready: boolean; readonly statusCode: number | null }> =>
+  new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: { readonly ready: boolean; readonly statusCode: number | null }) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    const request = NodeHttp.get(viewerUrl, { timeout: 5_000 }, (response) => {
+      response.resume();
+      const statusCode = response.statusCode ?? null;
+      finish({
+        ready: statusCode !== null && statusCode >= 200 && statusCode < 400,
+        statusCode,
+      });
+    });
+    request.once("timeout", () => {
+      request.destroy();
+      finish({ ready: false, statusCode: null });
+    });
+    request.once("error", () => finish({ ready: false, statusCode: null }));
+  });
 
 const handlers = {
   microvm_list: Effect.fn("MicroVmToolkit.list")(function* () {
@@ -72,6 +103,79 @@ const handlers = {
     if (input.direction === "in") yield* runtime.copyIn(copy);
     else yield* runtime.copyOut(copy);
     return { copied: true };
+  }),
+  microvm_desktop: Effect.fn("MicroVmToolkit.desktop")(function* (
+    input: MicroVmDesktopActionInput,
+  ) {
+    yield* McpInvocationContext.McpInvocationContext;
+    const config = yield* ServerConfig.ServerConfig;
+    const runtime = yield* MicroVmRuntime.make(config.stateDir);
+    let info = yield* runtime.get(input.name);
+    if (info.desktop === null) {
+      return yield* new MicroVmError({
+        operation: "desktop",
+        detail: `${info.name} was not created with a desktop profile.`,
+      });
+    }
+    if (input.action === "restart") {
+      info = yield* runtime.control({ name: input.name, action: "restart" });
+    } else {
+      info = yield* runtime.ensureDesktop(input.name);
+    }
+    const desktop = info.desktop;
+    if (desktop === null) {
+      return yield* new MicroVmError({
+        operation: "desktop",
+        detail: `${info.name} lost its desktop profile.`,
+      });
+    }
+    const probe = yield* Effect.promise(() => probeDesktop(desktop.viewerUrl));
+    if (input.action !== "open" || !probe.ready) {
+      return {
+        name: info.name,
+        desktop,
+        ready: probe.ready,
+        statusCode: probe.statusCode,
+        preview: null,
+      };
+    }
+    const scope = yield* McpInvocationContext.requireMcpCapability("preview").pipe(
+      Effect.mapError(
+        (cause) =>
+          new MicroVmError({
+            operation: "desktop-open",
+            detail: cause.message,
+          }),
+      ),
+    );
+    const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const preview = yield* broker
+      .invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "open",
+        input: {
+          url: desktop.viewerUrl,
+          open: true,
+          show: true,
+          reuseExistingTab: false,
+        },
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new MicroVmError({
+              operation: "desktop-open",
+              detail: cause.message,
+            }),
+        ),
+      );
+    return {
+      name: info.name,
+      desktop,
+      ready: true,
+      statusCode: probe.statusCode,
+      preview,
+    };
   }),
   microvm_remove: Effect.fn("MicroVmToolkit.remove")(function* (input) {
     yield* McpInvocationContext.McpInvocationContext;
