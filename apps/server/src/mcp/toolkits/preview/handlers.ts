@@ -10,6 +10,7 @@ import type {
   PreviewAutomationSetColorSchemeResult,
   PreviewAutomationSnapshot,
   PreviewAutomationStatus,
+  PreviewBrowserSession,
   PreviewTabId,
 } from "@t3tools/contracts";
 
@@ -112,6 +113,9 @@ const handlers = {
       ...(input.url === undefined ? {} : { url: input.url }),
       reuseExistingTab: false,
     }),
+  preview_session_export: (input) => invokeTargeted<PreviewBrowserSession>("sessionExport", input),
+  preview_session_import: (input) =>
+    invokeTargeted<PreviewAutomationStatus>("sessionImport", input),
   preview_tab_close: (input) =>
     invokeTargeted<PreviewBrowserTabCloseResult>("tabClose", input ?? {}),
   preview_back: (input) => invokeTargeted<PreviewAutomationStatus>("back", input, input.timeoutMs),

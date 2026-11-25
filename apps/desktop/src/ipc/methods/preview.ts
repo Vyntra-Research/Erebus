@@ -16,6 +16,7 @@ import {
   DesktopPreviewAutomationWaitForInputSchema,
   DesktopPreviewConfigInputSchema,
   DesktopPreviewConfigureProxyInputSchema,
+  DesktopPreviewImportSessionInputSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
   DesktopPreviewRecordingSaveInputSchema,
@@ -519,6 +520,16 @@ export const automationSnapshot = DesktopIpc.makeIpcMethod({
   }),
 });
 
+export const importSession = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_IMPORT_SESSION_CHANNEL,
+  payload: DesktopPreviewImportSessionInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.importSession")(function* ({ tabId, session }) {
+    const manager = yield* PreviewManager.PreviewManager;
+    yield* manager.importSession(tabId, session);
+  }),
+});
+
 export const automationClick = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_CLICK_CHANNEL,
   payload: DesktopPreviewAutomationClickInputSchema,
@@ -623,6 +634,7 @@ export const methods = [
   closePictureInPicture,
   automationStatus,
   automationSnapshot,
+  importSession,
   automationClick,
   automationType,
   automationPress,

@@ -7,7 +7,7 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as MicroVmRuntime from "../../../microVm/MicroVmRuntime.ts";
 import { MicroVmError } from "@t3tools/contracts";
-import type { PreviewAutomationStatus } from "@t3tools/contracts";
+import type { PreviewAutomationStatus, PreviewBrowserSession } from "@t3tools/contracts";
 import {
   MicroVmToolkit,
   type MicroVmCopyInput,
@@ -176,6 +176,55 @@ const handlers = {
       statusCode: probe.statusCode,
       preview,
     };
+  }),
+  microvm_browser_start: Effect.fn("MicroVmToolkit.browserStart")(function* (input: {
+    name: string;
+    url?: string | undefined;
+    proxyUrl?: string | undefined;
+    caPem?: string | undefined;
+  }) {
+    yield* McpInvocationContext.McpInvocationContext;
+    const config = yield* ServerConfig.ServerConfig;
+    const runtime = yield* MicroVmRuntime.make(config.stateDir);
+    yield* runtime.ensureDesktop(input.name);
+    const proxyUrl =
+      input.proxyUrl === undefined
+        ? undefined
+        : (() => {
+            try {
+              const url = new URL(input.proxyUrl);
+              if (
+                url.hostname === "127.0.0.1" ||
+                url.hostname === "localhost" ||
+                url.hostname === "[::1]" ||
+                url.hostname === "::1"
+              ) {
+                url.hostname = "host.microsandbox.internal";
+              }
+              return url.toString();
+            } catch {
+              return input.proxyUrl;
+            }
+          })();
+    const result = yield* runtime.desktopBrowserStart(input.name, {
+      ...(input.url === undefined ? {} : { url: input.url }),
+      ...(proxyUrl === undefined ? {} : { proxyUrl }),
+      ...(input.caPem === undefined ? {} : { caPem: input.caPem }),
+      ...(proxyUrl === undefined ? {} : { restart: true }),
+    });
+    return { ok: true, started: result.started };
+  }),
+  microvm_browser_import: Effect.fn("MicroVmToolkit.browserImport")(function* (input: {
+    name: string;
+    session: PreviewBrowserSession;
+  }) {
+    yield* McpInvocationContext.McpInvocationContext;
+    const config = yield* ServerConfig.ServerConfig;
+    const runtime = yield* MicroVmRuntime.make(config.stateDir);
+    yield* runtime.ensureDesktop(input.name);
+    yield* runtime.desktopBrowserStart(input.name, { url: input.session.url });
+    yield* runtime.desktopBrowserImport(input.name, input.session);
+    return { ok: true };
   }),
   microvm_remove: Effect.fn("MicroVmToolkit.remove")(function* (input) {
     yield* McpInvocationContext.McpInvocationContext;

@@ -29,6 +29,7 @@ import type {
   PreviewAutomationStatus,
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
+  PreviewBrowserSession,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
@@ -3371,6 +3372,82 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  const importSession = Effect.fn("PreviewManager.importSession")(function* (
+    tabId: string,
+    session: PreviewBrowserSession,
+  ) {
+    const wc = yield* requireWebContents(tabId);
+    yield* Effect.forEach(
+      session.cookies,
+      (cookie) => {
+        if (cookie.domain.length === 0) return Effect.void;
+        const host = cookie.domain.replace(/^\./, "");
+        const path = cookie.path.startsWith("/") ? cookie.path : `/${cookie.path}`;
+        const url = `${cookie.secure === false ? "http" : "https"}://${host}${path}`;
+        const sameSite =
+          cookie.sameSite === "Strict"
+            ? ("strict" as const)
+            : cookie.sameSite === "Lax"
+              ? ("lax" as const)
+              : cookie.sameSite === "None"
+                ? ("no_restriction" as const)
+                : undefined;
+        return attemptPromise(
+          { operation: "sessionImport.cookie", tabId, webContentsId: wc.id },
+          () =>
+            wc.session.cookies.set({
+              url,
+              name: cookie.name,
+              value: cookie.value,
+              domain: cookie.domain,
+              path,
+              secure: cookie.secure ?? false,
+              httpOnly: cookie.httpOnly ?? false,
+              ...(cookie.expires === undefined ? {} : { expirationDate: cookie.expires }),
+              ...(sameSite === undefined ? {} : { sameSite }),
+            }),
+        );
+      },
+      { discard: true },
+    );
+    yield* attemptPromise(
+      { operation: "sessionImport.navigate", tabId, webContentsId: wc.id },
+      () => wc.loadURL(session.url),
+    );
+    const origin = (() => {
+      try {
+        return new URL(session.url).origin;
+      } catch {
+        return null;
+      }
+    })();
+    const matching = session.origins.find((candidate) => candidate.origin === origin);
+    if (
+      matching !== undefined &&
+      (Object.keys(matching.localStorage).length > 0 ||
+        Object.keys(matching.sessionStorage ?? {}).length > 0)
+    ) {
+      const localJson = yield* encodeJson(
+        { operation: "sessionImport.storage", tabId, webContentsId: wc.id },
+        matching.localStorage,
+      );
+      const sessionJson = yield* encodeJson(
+        { operation: "sessionImport.storage", tabId, webContentsId: wc.id },
+        matching.sessionStorage ?? {},
+      );
+      const expression = `(() => {
+        const local = ${localJson};
+        const session = ${sessionJson};
+        for (const [key, value] of Object.entries(local)) localStorage.setItem(key, value);
+        for (const [key, value] of Object.entries(session)) sessionStorage.setItem(key, value);
+      })()`;
+      yield* attemptPromise(
+        { operation: "sessionImport.storage", tabId, webContentsId: wc.id },
+        () => wc.executeJavaScript(expression, true),
+      );
+    }
+  });
+
   const resolveClickPoint = Effect.fn("PreviewManager.resolveClickPoint")(function* (
     tabId: string,
     send: SendCommand,
@@ -3946,6 +4023,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     automationStatus,
     automationType,
     automationWaitFor,
+    importSession,
     cancelPickElement,
     captureScreenshot,
     closeTab,
@@ -4353,6 +4431,10 @@ export class PreviewManager extends Context.Service<
       tabId: string,
       input: PreviewAutomationWaitForInput,
     ) => Effect.Effect<void, PreviewManagerError>;
+    readonly importSession: (
+      tabId: string,
+      session: PreviewBrowserSession,
+    ) => Effect.Effect<void, PreviewManagerError>;
     readonly subscribeStateChanges: (listener: Listener) => Effect.Effect<void, never, Scope.Scope>;
     readonly subscribePointerEvents: (
       listener: PointerEventListener,
@@ -4468,6 +4550,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     automationScroll: operations.automationScroll,
     automationEvaluate: operations.automationEvaluate,
     automationWaitFor: operations.automationWaitFor,
+    importSession: operations.importSession,
     subscribeStateChanges: operations.subscribeStateChanges,
     subscribePointerEvents: operations.subscribePointerEvents,
     subscribeRecordingFrames: operations.subscribeRecordingFrames,

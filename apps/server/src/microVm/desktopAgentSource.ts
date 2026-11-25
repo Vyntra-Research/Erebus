@@ -10,7 +10,11 @@ import base64
 import json
 import os
 import re
+import socket
+import socketserver
 import subprocess
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = ""
@@ -228,6 +232,119 @@ def launch(payload):
     )
 
 
+def port_open(port, timeout=0.25):
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def browser_start(payload):
+    restart = bool(payload.get("restart", False))
+    if restart:
+        subprocess.run(["pkill", "-f", "remote-debugging-port=9222"], env=ENV)
+        time.sleep(1)
+    if port_open(9222) and not restart:
+        return {"started": False}
+
+    proxy_url = payload.get("proxyUrl")
+    ca_pem = payload.get("caPem")
+    if isinstance(ca_pem, str) and ca_pem.strip():
+        ca_path = "/usr/local/share/ca-certificates/erebus-capture.crt"
+        with open(ca_path, "w", encoding="utf-8") as ca_file:
+            ca_file.write(ca_pem)
+        subprocess.run(["update-ca-certificates"], env=ENV, capture_output=True)
+        os.makedirs("/root/.pki/nssdb", exist_ok=True)
+        subprocess.run(
+            [
+                "certutil",
+                "-d",
+                "sql:/root/.pki/nssdb",
+                "-A",
+                "-t",
+                "C,,",
+                "-n",
+                "Erebus Capture",
+                "-i",
+                ca_path,
+            ],
+            env=ENV,
+            capture_output=True,
+        )
+
+    args = [
+        "chromium",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--remote-debugging-port=9222",
+        "--remote-debugging-address=0.0.0.0",
+        "--remote-allow-origins=*",
+        "--user-data-dir=/root/.config/erebus-chromium",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--window-size=1280,800",
+    ]
+    if isinstance(proxy_url, str) and proxy_url.strip():
+        args.append(f"--proxy-server={proxy_url.strip()}")
+        args.append("--ignore-certificate-errors")
+    url = str(payload.get("url", "about:blank")).strip() or "about:blank"
+    args.append(url)
+    subprocess.Popen(
+        args,
+        env=ENV,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    for _ in range(40):
+        if port_open(9222):
+            return {"started": True}
+        time.sleep(0.25)
+    fail("Chromium did not open the remote debugging port")
+
+
+class CdpRelayHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        try:
+            upstream = socket.create_connection(("127.0.0.1", 9222), timeout=5)
+        except OSError:
+            return
+        upstream.settimeout(None)
+
+        def pump(source, target):
+            try:
+                while True:
+                    data = source.recv(65536)
+                    if not data:
+                        break
+                    target.sendall(data)
+            except OSError:
+                pass
+            finally:
+                try:
+                    target.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+
+        first = threading.Thread(target=pump, args=(self.request, upstream), daemon=True)
+        second = threading.Thread(target=pump, args=(upstream, self.request), daemon=True)
+        first.start()
+        second.start()
+        first.join()
+        second.join()
+        try:
+            upstream.close()
+        except OSError:
+            pass
+
+
+class CdpRelayServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ErebusDesktopAgent/1"
 
@@ -256,6 +373,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(200, observe())
             if path == "/windows":
                 return self.send_json(200, {"windows": windows(), "activeWindowId": active_window_id()})
+            if path == "/browser/status":
+                return self.send_json(200, {"running": port_open(9222)})
             return self.send_json(404, {"error": "not found"})
         except Exception as error:
             return self.send_json(500, {"error": str(error)})
@@ -296,12 +415,22 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/launch":
                 launch(payload)
                 return self.send_json(200, {"ok": True})
+            if path == "/browser/start":
+                return self.send_json(200, browser_start(payload))
+            if path == "/browser/stop":
+                subprocess.run(["pkill", "-f", "remote-debugging-port=9222"], env=ENV)
+                return self.send_json(200, {"ok": True})
             return self.send_json(404, {"error": "not found"})
         except Exception as error:
             return self.send_json(500, {"error": str(error)})
 
 
 if __name__ == "__main__":
+    try:
+        relay = CdpRelayServer(("0.0.0.0", 9224), CdpRelayHandler)
+        threading.Thread(target=relay.serve_forever, daemon=True).start()
+    except OSError:
+        pass
     server = ThreadingHTTPServer(("0.0.0.0", 9223), Handler)
     server.daemon_threads = True
     server.serve_forever()

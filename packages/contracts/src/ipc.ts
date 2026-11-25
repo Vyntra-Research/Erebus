@@ -75,6 +75,7 @@ import {
   PreviewAutomationStreamEvent,
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
+  PreviewBrowserSession,
 } from "./previewAutomation.ts";
 import type {
   ClientOrchestrationCommand,
@@ -1109,6 +1110,11 @@ export const DesktopPreviewAutomationClickInputSchema = Schema.Struct({
   input: PreviewAutomationClickInput,
 });
 
+export const DesktopPreviewImportSessionInputSchema = Schema.Struct({
+  tabId: DesktopPreviewTabIdSchema,
+  session: PreviewBrowserSession,
+});
+
 export const DesktopPreviewAutomationTypeInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   input: PreviewAutomationTypeInput,
@@ -1329,6 +1335,7 @@ export interface DesktopPreviewBridge {
   automation: {
     status: (tabId: string) => Promise<PreviewAutomationStatus>;
     snapshot: (tabId: string) => Promise<PreviewAutomationSnapshot>;
+    importSession: (tabId: string, session: PreviewBrowserSession) => Promise<void>;
     click: (tabId: string, input: PreviewAutomationClickInput) => Promise<void>;
     type: (tabId: string, input: PreviewAutomationTypeInput) => Promise<void>;
     press: (tabId: string, input: PreviewAutomationPressInput) => Promise<void>;

@@ -55,10 +55,39 @@ export const PREVIEW_AUTOMATION_OPERATIONS = [
   "back",
   "forward",
   "reload",
+  "sessionExport",
+  "sessionImport",
 ] as const;
 
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_OPERATIONS);
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
+
+export const PreviewBrowserSessionCookie = Schema.Struct({
+  name: Schema.String,
+  value: Schema.String,
+  domain: Schema.String,
+  path: Schema.String,
+  expires: Schema.optional(Schema.Number),
+  httpOnly: Schema.optional(Schema.Boolean),
+  secure: Schema.optional(Schema.Boolean),
+  sameSite: Schema.optional(Schema.Literals(["Strict", "Lax", "None"])),
+});
+export type PreviewBrowserSessionCookie = typeof PreviewBrowserSessionCookie.Type;
+
+export const PreviewBrowserStorageOrigin = Schema.Struct({
+  origin: Schema.String,
+  localStorage: Schema.Record(Schema.String, Schema.String),
+  sessionStorage: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+});
+export type PreviewBrowserStorageOrigin = typeof PreviewBrowserStorageOrigin.Type;
+
+export const PreviewBrowserSession = Schema.Struct({
+  url: Schema.String,
+  title: Schema.optional(Schema.String),
+  cookies: Schema.Array(PreviewBrowserSessionCookie),
+  origins: Schema.Array(PreviewBrowserStorageOrigin),
+});
+export type PreviewBrowserSession = typeof PreviewBrowserSession.Type;
 
 const PreviewAutomationTabTargetFields = {
   tabId: Schema.optional(

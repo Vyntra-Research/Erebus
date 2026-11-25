@@ -271,6 +271,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_STATUS_CHANNEL, { tabId }),
       snapshot: (tabId) =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL, { tabId }),
+      importSession: (tabId, session) =>
+        ipcRenderer.invoke(IpcChannels.PREVIEW_IMPORT_SESSION_CHANNEL, { tabId, session }),
       click: (tabId, input) =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_CLICK_CHANNEL, { tabId, input }),
       type: (tabId, input) =>

@@ -55,6 +55,7 @@ export const MicroVmDesktop = Schema.Struct({
   width: Schema.Int,
   height: Schema.Int,
   agentPort: optional(PortNumber),
+  browserCdpPort: optional(PortNumber),
 });
 export type MicroVmDesktop = typeof MicroVmDesktop.Type;
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-beta.16 - 2026-11-25
+
+### Added
+
+- Export cookies, localStorage, and sessionStorage from extension-controlled tabs with `preview_session_export`. Import the snapshot into the internal browser with `preview_session_import` or into a desktop microVM browser with `microvm_browser_import`.
+- Start Chromium inside a desktop microVM with `microvm_browser_start`. It can use the Erebus capture proxy, so the VM browser produces the same HTTP, HTTPS, and WebSocket evidence as other browsers. Desktop VMs now allow the loopback host proxy and expose a token-protected CDP relay for session injection.
+
 ## 2.0.0-beta.15 - 2026-11-25
 
 ### Changed

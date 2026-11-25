@@ -12,6 +12,7 @@ import {
   type PreviewAutomationOpenInput,
   type PreviewAutomationResizeInput,
   type PreviewAutomationResizeResult,
+  type PreviewBrowserSession,
   type PreviewAutomationSetColorSchemeInput,
   type PreviewAutomationSetColorSchemeResult,
   type PreviewAutomationHost as PreviewAutomationHostState,
@@ -971,6 +972,13 @@ function PreviewAutomationHost(props: {
               "load",
               input.timeoutMs ?? request.timeoutMs,
             );
+            return await currentStatus(threadRef, ready.tabId);
+          }
+          case "sessionImport": {
+            const ready = await requireReadyTab();
+            const input = request.input as { readonly session: PreviewBrowserSession };
+            assertPreviewRuntimeCurrent(threadRef, ready.tabId, ready.runtimeTabId, request);
+            await ready.bridge.automation.importSession(ready.runtimeTabId, input.session);
             return await currentStatus(threadRef, ready.tabId);
           }
           case "resize": {

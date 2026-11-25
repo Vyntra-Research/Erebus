@@ -17,11 +17,13 @@ import {
   type MicroVmPort,
   type MicroVmPortInput,
   type MicroVmRemoveInput,
+  type PreviewBrowserSession,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import type * as Microsandbox from "microsandbox";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
+import { importSessionIntoDesktopBrowser } from "./DesktopBrowser.ts";
 import { DESKTOP_AGENT_GUEST_PORT, DESKTOP_AGENT_SOURCE } from "./desktopAgentSource.ts";
 
 type MicrosandboxModule = typeof import("microsandbox");
@@ -30,6 +32,7 @@ const PORTS_LABEL = "erebus.ports";
 const DESKTOP_LABEL = "erebus.desktop";
 const DESKTOP_SCRIPT = "erebus-desktop";
 const DESKTOP_GUEST_PORT = 6080;
+const BROWSER_CDP_GUEST_PORT = 9224;
 const DEFAULT_DESKTOP_WIDTH = 1440;
 const DEFAULT_DESKTOP_HEIGHT = 900;
 const DEFAULT_DESKTOP_IMAGE = "debian:bookworm-slim";
@@ -173,12 +176,14 @@ const parseDesktopLabel = (value: string | undefined): DesktopLabelState | null 
   const width = record.width;
   const height = record.height;
   const agentPort = record.agentPort;
+  const browserCdpPort = record.browserCdpPort;
   if (
     typeof hostPort !== "number" ||
     typeof guestPort !== "number" ||
     typeof width !== "number" ||
     typeof height !== "number" ||
-    (agentPort !== undefined && typeof agentPort !== "number")
+    (agentPort !== undefined && typeof agentPort !== "number") ||
+    (browserCdpPort !== undefined && typeof browserCdpPort !== "number")
   ) {
     return null;
   }
@@ -189,6 +194,7 @@ const parseDesktopLabel = (value: string | undefined): DesktopLabelState | null 
       width,
       height,
       ...(typeof agentPort === "number" ? { agentPort } : {}),
+      ...(typeof browserCdpPort === "number" ? { browserCdpPort } : {}),
       viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
     },
     agentToken: typeof record.agentToken === "string" ? record.agentToken : null,
@@ -210,7 +216,7 @@ if [ ! -f /var/lib/erebus-desktop-ready ]; then
     apt-get install -y --no-install-recommends \\
       breeze-icon-theme ca-certificates dbus-x11 lxqt-core novnc openbox \\
       qterminal tigervnc-standalone-server websockify chromium xdotool xdg-utils \\
-      scrot wmctrl python3
+      scrot wmctrl python3 libnss3-tools
   }
   if ! install_desktop; then
     dpkg --configure -a || true
@@ -354,6 +360,23 @@ export function buildMicroVmModifyOptions(
       ) {
         throw new Error(
           "The desktop agent host port cannot be remapped to another guest port while the desktop is enabled.",
+        );
+      }
+    }
+    if (current.desktop.browserCdpPort !== undefined) {
+      const browserEndpoint = `${current.desktop.browserCdpPort}\u0000tcp`;
+      if (removedEndpoints.has(browserEndpoint)) {
+        throw new Error("The desktop browser port cannot be removed while the desktop is enabled.");
+      }
+      const browserReplacement = addPorts.find(
+        (port) => port.hostPort === current.desktop?.browserCdpPort && port.protocol === "tcp",
+      );
+      if (
+        browserReplacement !== undefined &&
+        browserReplacement.guestPort !== BROWSER_CDP_GUEST_PORT
+      ) {
+        throw new Error(
+          "The desktop browser host port cannot be remapped to another guest port while the desktop is enabled.",
         );
       }
     }
@@ -707,6 +730,14 @@ const requestDesktopAgent = (
 export interface MicroVmDesktopAgent {
   readonly port: number;
   readonly token: string;
+  readonly cdpPort: number | null;
+}
+
+export interface MicroVmBrowserStartInput {
+  readonly url?: string;
+  readonly proxyUrl?: string;
+  readonly caPem?: string;
+  readonly restart?: boolean;
 }
 
 export interface MicroVmRuntimeService {
@@ -725,6 +756,14 @@ export interface MicroVmRuntimeService {
     path: string,
     body?: unknown,
   ) => Effect.Effect<unknown, MicroVmError>;
+  readonly desktopBrowserStart: (
+    name: string,
+    input: MicroVmBrowserStartInput,
+  ) => Effect.Effect<{ readonly started: boolean }, MicroVmError>;
+  readonly desktopBrowserImport: (
+    name: string,
+    session: PreviewBrowserSession,
+  ) => Effect.Effect<void, MicroVmError>;
   readonly jobs: (name: string) => Effect.Effect<Microsandbox.JobPage, MicroVmError>;
   readonly jobLogs: (
     name: string,
@@ -834,6 +873,9 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
         const usedHostPorts = new Set(ports.map((port) => port.hostPort));
         const hostPort = input.desktop.hostPort ?? (await findAvailableHostPort(usedHostPorts));
         const agentPort = await findAvailableHostPort(new Set([...usedHostPorts, hostPort]));
+        const browserCdpPort = await findAvailableHostPort(
+          new Set([...usedHostPorts, hostPort, agentPort]),
+        );
         const desktopPort: MicroVmPort = {
           hostPort,
           guestPort: DESKTOP_GUEST_PORT,
@@ -846,14 +888,21 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
           hostBind: "127.0.0.1",
           protocol: "tcp",
         };
-        validatePorts([...ports, desktopPort, agentPortMapping]);
-        ports.push(desktopPort, agentPortMapping);
+        const browserPortMapping: MicroVmPort = {
+          hostPort: browserCdpPort,
+          guestPort: BROWSER_CDP_GUEST_PORT,
+          hostBind: "127.0.0.1",
+          protocol: "tcp",
+        };
+        validatePorts([...ports, desktopPort, agentPortMapping, browserPortMapping]);
+        ports.push(desktopPort, agentPortMapping, browserPortMapping);
         desktop = {
           hostPort,
           guestPort: DESKTOP_GUEST_PORT,
           width,
           height,
           agentPort,
+          browserCdpPort,
           viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
         };
         agentToken = NodeCrypto.randomUUID();
@@ -881,6 +930,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
                   width: desktop.width,
                   height: desktop.height,
                   agentPort: desktop.agentPort,
+                  browserCdpPort: desktop.browserCdpPort,
                   agentToken,
                 }),
               }
@@ -891,6 +941,11 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
           port.protocol === "udp"
             ? builder.portUdpBind(port.hostBind, port.hostPort, port.guestPort)
             : builder.portBind(port.hostBind, port.hostPort, port.guestPort);
+      }
+      if (desktop !== null) {
+        builder = builder.network((network) =>
+          network.policy(sdk.NetworkPolicy.fromProfiles(["public", "host"])),
+        );
       }
       if (desktop !== null) {
         builder = builder
@@ -1096,7 +1151,11 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
               `${name} has no desktop agent. Desktop VMs created before Computer Use support must be recreated.`,
             );
           }
-          return { port: state.desktop.agentPort, token: state.agentToken };
+          return {
+            port: state.desktop.agentPort,
+            token: state.agentToken,
+            cdpPort: state.desktop.browserCdpPort ?? null,
+          };
         }),
       ),
     );
@@ -1129,6 +1188,31 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
           });
         }),
       ),
+    );
+
+  const desktopBrowserStart: MicroVmRuntimeService["desktopBrowserStart"] = (name, input) =>
+    desktopAgentRequest(name, "/browser/start", input).pipe(
+      Effect.map((raw) => {
+        const record =
+          typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+        return { started: record.started === true };
+      }),
+    );
+
+  const desktopBrowserImport: MicroVmRuntimeService["desktopBrowserImport"] = (name, session) =>
+    desktopAgent(name).pipe(
+      Effect.flatMap((agent) => {
+        if (agent.cdpPort === null) {
+          return Effect.fail(
+            new MicroVmError({
+              operation: "browser-import",
+              detail: `${name} has no desktop browser debugging port. Recreate the desktop VM.`,
+            }),
+          );
+        }
+        const cdpPort = agent.cdpPort;
+        return attempt("browser-import", () => importSessionIntoDesktopBrowser(cdpPort, session));
+      }),
     );
 
   const jobLogs: MicroVmRuntimeService["jobLogs"] = (name, jobId, tail) =>
@@ -1177,6 +1261,8 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
     ensureDesktop,
     desktopAgent,
     desktopAgentRequest,
+    desktopBrowserStart,
+    desktopBrowserImport,
     jobs,
     jobLogs,
     stopJob,
