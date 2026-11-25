@@ -8,6 +8,7 @@ import {
   MicroVmRemoveInput,
   PreviewAutomationStatus,
   PreviewBrowserSession,
+  PreviewSessionSnapshot,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
@@ -65,6 +66,7 @@ export const MicroVmDesktopTool = Tool.make("microvm_desktop", {
     ready: Schema.Boolean,
     statusCode: Schema.NullOr(Schema.Int),
     preview: Schema.NullOr(PreviewAutomationStatus),
+    internalPreview: Schema.NullOr(PreviewSessionSnapshot),
   }),
   failure: MicroVmError,
   dependencies: desktopDependencies,

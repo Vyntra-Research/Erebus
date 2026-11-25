@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.0-beta.17 - 2026-11-25
+
+### Fixed
+
+- Open a desktop microVM in the thread's internal Review preview instead of routing it through whichever automation host was last focused. The VM viewer now uses the server preview session for the active thread, so it appears in the app even when an external extension browser is connected.
+- Let session export and import choose a host that supports the operation when the provider session's assigned host is the other browser type.
+
+### Added
+
+- Add a regression test for extension session export.
+
 ## 2.0.0-beta.16 - 2026-11-25
 
 ### Added
