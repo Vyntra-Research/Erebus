@@ -979,7 +979,15 @@ function PreviewAutomationHost(props: {
             const input = request.input as { readonly session: PreviewBrowserSession };
             assertPreviewRuntimeCurrent(threadRef, ready.tabId, ready.runtimeTabId, request);
             await ready.bridge.automation.importSession(ready.runtimeTabId, input.session);
-            return await currentStatus(threadRef, ready.tabId);
+            return await currentStatus(threadRef, ready.tabId).catch(() => ({
+              available: true,
+              visible:
+                useBrowserSurfaceStore.getState().byTabId[ready.runtimeTabId]?.visible ?? false,
+              tabId: ready.tabId,
+              url: input.session.url,
+              title: input.session.title ?? null,
+              loading: false,
+            }));
           }
           case "resize": {
             const ready = await requireReadyTab();

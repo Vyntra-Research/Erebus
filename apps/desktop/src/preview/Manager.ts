@@ -3441,9 +3441,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         for (const [key, value] of Object.entries(local)) localStorage.setItem(key, value);
         for (const [key, value] of Object.entries(session)) sessionStorage.setItem(key, value);
       })()`;
-      yield* attemptPromise(
-        { operation: "sessionImport.storage", tabId, webContentsId: wc.id },
-        () => wc.executeJavaScript(expression, true),
+      yield* withControlSession(tabId, wc, "sessionImport.storage", (send) =>
+        send("Runtime.evaluate", {
+          expression,
+          returnByValue: true,
+          awaitPromise: false,
+        }).pipe(Effect.asVoid),
       );
     }
   });
