@@ -22,6 +22,7 @@ import {
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import { resolveModelInputChars } from "@t3tools/shared/serverSettings";
 import {
   memo,
   type ReactNode,
@@ -997,6 +998,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
     [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   );
+  const selectedModelMaxInputChars = useMemo(
+    () => resolveModelInputChars(settings, selectedModelSelection),
+    [settings, selectedModelSelection],
+  );
   const selectedModelForPicker = selectedModel;
   // Instance-keyed option list so the picker can show each configured
   // instance (built-in + custom) as a first-class sidebar entry. The
@@ -1432,11 +1437,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   useEffect(() => {
     if (composerSubmissionError === null) return;
-    const nextError = getComposerPromptLengthValidationMessage(prompt);
+    const nextError = getComposerPromptLengthValidationMessage(prompt, selectedModelMaxInputChars);
     if (nextError !== composerSubmissionError) {
       setComposerSubmissionError(nextError);
     }
-  }, [composerSubmissionError, prompt]);
+  }, [composerSubmissionError, prompt, selectedModelMaxInputChars]);
 
   useEffect(() => {
     setProviderInputSubmissionError(null);
@@ -1970,18 +1975,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
         return;
       }
-      const submission = submitComposerDraft({
-        prompt: promptRef.current,
-        submissionTarget: activePendingProgress ? "pending-user-input" : "provider-turn",
-        event,
-        onSend: (sendEvent) => {
-          // ChatView reports its final composed-input preflight through the
-          // composer handle before its first asynchronous send step.
-          providerInputRejectedRef.current = false;
-          onSend(sendEvent, intent);
-          return !providerInputRejectedRef.current;
+      const submission = submitComposerDraft(
+        {
+          prompt: promptRef.current,
+          submissionTarget: activePendingProgress ? "pending-user-input" : "provider-turn",
+          event,
+          onSend: (sendEvent) => {
+            // ChatView reports its final composed-input preflight through the
+            // composer handle before its first asynchronous send step.
+            providerInputRejectedRef.current = false;
+            onSend(sendEvent, intent);
+            return !providerInputRejectedRef.current;
+          },
         },
-      });
+        selectedModelMaxInputChars,
+      );
       setComposerSubmissionError(submission.validationMessage);
       if (!submission.didDispatch) return;
       if (shouldBlurMobileComposerOnSubmit()) {
@@ -1996,6 +2004,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       noProviderAvailable,
       onSend,
       promptRef,
+      selectedModelMaxInputChars,
       shouldBlurMobileComposerOnSubmit,
     ],
   );
@@ -2903,11 +2912,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedProviderModels,
       }),
       validateProviderInput: (providerInput: string) => {
-        const validationMessage = getComposerSubmissionValidationMessage({
-          prompt: promptRef.current,
-          providerInput,
-          submissionTarget: "provider-turn",
-        });
+        const validationMessage = getComposerSubmissionValidationMessage(
+          {
+            prompt: promptRef.current,
+            providerInput,
+            submissionTarget: "provider-turn",
+          },
+          selectedModelMaxInputChars,
+        );
         providerInputRejectedRef.current = validationMessage !== null;
         setProviderInputSubmissionError(validationMessage);
         return validationMessage === null;
@@ -2935,6 +2947,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       isComposerModelPickerOpen,
       readComposerSnapshot,
       selectedModel,
+      selectedModelMaxInputChars,
       selectedModelOptionsForDispatch,
       selectedModelSelection,
       noProviderAvailable,

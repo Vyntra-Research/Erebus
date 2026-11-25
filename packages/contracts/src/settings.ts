@@ -9,7 +9,7 @@ import {
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   ProviderOptionSelections,
 } from "./model.ts";
-import { ModelSelection } from "./orchestration.ts";
+import { ModelSelection, PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS } from "./orchestration.ts";
 import {
   DEFAULT_PREVIEW_APPEARANCE,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
@@ -722,6 +722,16 @@ export const PentestModulesSettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type PentestModulesSettings = typeof PentestModulesSettings.Type;
 
+export const ModelInputLimit = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+  maxInputChars: Schema.Int.check(
+    Schema.isGreaterThan(0),
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS),
+  ),
+});
+export type ModelInputLimit = typeof ModelInputLimit.Type;
+
 export const ServerSettings = Schema.Struct({
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -811,6 +821,14 @@ export const ServerSettings = Schema.Struct({
   // See providerInstance.ts for the forward/backward compatibility invariant.
   providerInstances: Schema.Record(ProviderInstanceId, ProviderInstanceConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  /**
+   * Per-model overrides for the maximum characters accepted in one provider
+   * turn. Missing entries use PROVIDER_SEND_TURN_MAX_INPUT_CHARS. Values are
+   * bounded by PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS at decode time.
+   */
+  modelInputLimits: Schema.Array(ModelInputLimit).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
   ),
   codexAccountRouting: CodexAccountRoutingSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
@@ -1042,6 +1060,7 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // The web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
+  modelInputLimits: Schema.optionalKey(Schema.Array(ModelInputLimit)),
   codexAccountRouting: Schema.optionalKey(
     Schema.Struct({
       enabled: Schema.optionalKey(Schema.Boolean),

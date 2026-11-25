@@ -1,7 +1,10 @@
 import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { submitComposerDraft } from "./composerSubmission";
+import {
+  getComposerPromptLengthValidationMessage,
+  submitComposerDraft,
+} from "./composerSubmission";
 
 describe("submitComposerDraft", () => {
   it("keeps an oversized draft editable and sends a corrected follow-up", () => {
@@ -149,6 +152,27 @@ describe("submitComposerDraft", () => {
     expect(result).toEqual({ validationMessage: null, didDispatch: true });
     expect(onSend).toHaveBeenCalledOnce();
     expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("uses a custom model input limit for provider turns", () => {
+    const message = getComposerPromptLengthValidationMessage("x".repeat(201), 200);
+    expect(message).toBe(
+      "Prompt is 1 character over the 200-character limit. Shorten or split it before sending.",
+    );
+
+    const onSend = vi.fn();
+    const result = submitComposerDraft(
+      {
+        prompt: "x".repeat(200),
+        submissionTarget: "provider-turn",
+        event: undefined,
+        onSend,
+      },
+      200,
+    );
+
+    expect(result).toEqual({ validationMessage: null, didDispatch: true });
+    expect(onSend).toHaveBeenCalledOnce();
   });
 
   it("dispatches pending user input answers on their separate response path", () => {

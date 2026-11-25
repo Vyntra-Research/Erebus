@@ -280,6 +280,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/providers",
   },
   {
+    id: "provider-model-input-limits",
+    title: "Model input limits",
+    to: "/settings/providers",
+  },
+  {
     id: "agent-browser-access",
     title: "Agent browser access",
     to: "/settings/integrations",

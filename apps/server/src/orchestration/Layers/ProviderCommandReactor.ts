@@ -10,6 +10,7 @@ import {
   type ProviderSendTurnInput,
   type ProviderThreadGoal,
   type ProviderTurnStartResult,
+  PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderDriverKind,
   type ProjectId,
@@ -38,7 +39,10 @@ import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import {
+  ProviderAdapterRequestError,
+  ProviderAdapterValidationError,
+} from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { isCodexUsageLimitDetail } from "../../provider/codexUsageLimit.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
@@ -54,6 +58,7 @@ import {
 import { forkParked, ServerActivation } from "../../serverActivation.ts";
 import { canReplaceThreadTitle, DEFAULT_THREAD_TITLE } from "../threadTitles.ts";
 import {
+  resolveModelInputChars,
   resolveSourceControlWriterModelSelection,
   ServerSettingsService,
 } from "../../serverSettings.ts";
@@ -182,7 +187,12 @@ export function buildImportedThreadContinuationInput(input: {
   readonly currentInput: string;
   readonly messages: ReadonlyArray<PortableHistoryMessage>;
   readonly historyTruncated?: boolean;
+  readonly maxInputChars?: number;
 }): string | undefined {
+  const maxInputChars = Math.min(
+    input.maxInputChars ?? PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+    PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS,
+  );
   const currentInput = toNonEmptyProviderInput(input.currentInput);
   const precedingMessages = precedingPortableHistoryMessages(
     input.messages,
@@ -197,7 +207,7 @@ export function buildImportedThreadContinuationInput(input: {
   const separator = `\n${IMPORTED_HISTORY_FOOTER}\n\n${CURRENT_REQUEST_HEADER}\n`;
   const suffix = `\n${CURRENT_REQUEST_FOOTER}`;
   const fixedChars = prefix.length + separator.length + currentRequest.length + suffix.length;
-  const historyBudget = PROVIDER_SEND_TURN_MAX_INPUT_CHARS - fixedChars;
+  const historyBudget = maxInputChars - fixedChars;
   if (historyBudget <= 0) {
     return currentInput;
   }
@@ -1117,6 +1127,24 @@ const make = Effect.gen(function* () {
       );
     }
     const thread = threadSnapshot.thread;
+    const settings = yield* serverSettingsService.getSettings;
+    const limitModelSelection =
+      input.modelSelection ?? threadModelSelections.get(input.threadId) ?? thread.modelSelection;
+    const requestedMaxInputChars = resolveModelInputChars(settings, limitModelSelection);
+    const overLimitIssue = (maxInputChars: number, model: string, length: number) =>
+      `Prompt is ${(length - maxInputChars).toLocaleString("en-US")} characters over the ${maxInputChars.toLocaleString("en-US")}-character input limit for model '${model}'. Shorten or split it before sending.`;
+    const currentInputLength = input.messageText.trim().length;
+    if (currentInputLength > requestedMaxInputChars) {
+      return yield* new ProviderAdapterValidationError({
+        provider: String(limitModelSelection.instanceId),
+        operation: "thread.turn.start",
+        issue: overLimitIssue(
+          requestedMaxInputChars,
+          limitModelSelection.model,
+          currentInputLength,
+        ),
+      });
+    }
     const importedContextPending = yield* hasPendingImportedThreadContext(input.threadId).pipe(
       Effect.tapCause((cause) =>
         Effect.logWarning("Unable to verify imported thread context provenance", {
@@ -1157,7 +1185,7 @@ const make = Effect.gen(function* () {
       const continuationSeed = yield* getThreadContinuationSeedById({
         threadId: input.threadId,
         currentMessageId: input.messageId,
-        maxChars: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+        maxChars: requestedMaxInputChars,
       }).pipe(Effect.map(Option.getOrUndefined));
       if (continuationSeed !== undefined) {
         importedHistoryMessages = [
@@ -1173,6 +1201,7 @@ const make = Effect.gen(function* () {
           currentInput: input.messageText,
           messages: importedHistoryMessages,
           historyTruncated: importedHistoryTruncated,
+          maxInputChars: requestedMaxInputChars,
         })
       : toNonEmptyProviderInput(input.messageText);
     yield* awaitThreadPrewarm(input.threadId);
@@ -1238,6 +1267,15 @@ const make = Effect.gen(function* () {
           ? effectiveRequestedModelSelection
           : undefined;
 
+    const turnModelSelection = modelForTurn ?? limitModelSelection;
+    const turnMaxInputChars = resolveModelInputChars(settings, turnModelSelection);
+    if (normalizedInput !== undefined && normalizedInput.length > turnMaxInputChars) {
+      return yield* new ProviderAdapterValidationError({
+        provider: String(turnModelSelection.instanceId),
+        operation: "thread.turn.start",
+        issue: overLimitIssue(turnMaxInputChars, turnModelSelection.model, normalizedInput.length),
+      });
+    }
     const request: ProviderSendTurnInput = {
       threadId: input.threadId,
       ...(isLiveFollowUp

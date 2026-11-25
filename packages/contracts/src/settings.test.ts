@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
+import { PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS } from "./orchestration.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
@@ -193,6 +194,34 @@ describe("ServerSettings agent persona", () => {
       "capri",
     );
     expect(() => decodeServerSettingsPatch({ agentPersonaPreset: "unknown" })).toThrow();
+  });
+});
+
+describe("ServerSettings.modelInputLimits", () => {
+  it("defaults to an empty list and accepts bounded per-model overrides", () => {
+    const instanceId = ProviderInstanceId.make("codex");
+
+    expect(DEFAULT_SERVER_SETTINGS.modelInputLimits).toEqual([]);
+    expect(
+      decodeServerSettings({
+        modelInputLimits: [{ instanceId, model: "gpt-6-astra", maxInputChars: 300_000 }],
+      }).modelInputLimits,
+    ).toEqual([{ instanceId, model: "gpt-6-astra", maxInputChars: 300_000 }]);
+    expect(decodeServerSettingsPatch({ modelInputLimits: [] }).modelInputLimits).toEqual([]);
+  });
+
+  it("rejects a model input limit above the hard ceiling", () => {
+    expect(() =>
+      decodeServerSettings({
+        modelInputLimits: [
+          {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-6-astra",
+            maxInputChars: PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS + 1,
+          },
+        ],
+      }),
+    ).toThrow();
   });
 });
 

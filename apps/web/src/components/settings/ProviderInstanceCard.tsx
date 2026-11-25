@@ -16,6 +16,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   isProviderDriverKind,
   resolveProviderInstanceEnabled,
+  type ModelInputLimit,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
   type ProviderInstanceId,
@@ -364,9 +365,11 @@ interface ProviderInstanceCardProps {
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
   readonly modelOrder: ReadonlyArray<string>;
+  readonly modelInputLimits: ReadonlyArray<ModelInputLimit>;
   readonly onHiddenModelsChange: (next: ReadonlyArray<string>) => void;
   readonly onFavoriteModelsChange: (next: ReadonlyArray<string>) => void;
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
+  readonly onModelInputLimitChange: (model: string, maxInputChars: number | null) => void;
   readonly onRunUpdate?: (() => void) | undefined;
   readonly isUpdating?: boolean | undefined;
   /** Only one account should expose an update for a driver-level shared binary. */
@@ -411,9 +414,11 @@ export function ProviderInstanceCard({
   hiddenModels,
   favoriteModels,
   modelOrder,
+  modelInputLimits,
   onHiddenModelsChange,
   onFavoriteModelsChange,
   onModelOrderChange,
+  onModelInputLimitChange,
   onRunUpdate,
   isUpdating = false,
   showRuntimeUpdate = true,
@@ -900,10 +905,12 @@ export function ProviderInstanceCard({
               hiddenModels={hiddenModels}
               favoriteModels={favoriteModels}
               modelOrder={modelOrder}
+              modelInputLimits={modelInputLimits}
               onChange={updateCustomModels}
               onHiddenModelsChange={onHiddenModelsChange}
               onFavoriteModelsChange={onFavoriteModelsChange}
               onModelOrderChange={onModelOrderChange}
+              onModelInputLimitChange={onModelInputLimitChange}
             />
           </div>
         ) : null}

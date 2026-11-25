@@ -154,6 +154,12 @@ export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unkn
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
+/**
+ * Absolute ceiling accepted by the provider input schema. Per-model limits
+ * live in server settings; this only bounds a malformed or hostile value so a
+ * single turn cannot grow without limit.
+ */
+export const PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS = 2_000_000;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES = [
