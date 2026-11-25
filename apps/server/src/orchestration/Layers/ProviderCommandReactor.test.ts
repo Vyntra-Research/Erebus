@@ -294,6 +294,37 @@ describe("ProviderCommandReactor", () => {
         }),
       ).toBe(currentInput);
     });
+
+    it("honors a configured per-model input budget", () => {
+      const currentMessageId = asMessageId("current-message-custom-budget");
+      const currentInput = "Continue exactly.";
+      const result = buildImportedThreadContinuationInput({
+        currentMessageId,
+        currentInput,
+        maxInputChars: 5_000,
+        messages: [
+          {
+            id: asMessageId("large-old-message"),
+            role: "assistant",
+            text: "A".repeat(20_000),
+            streaming: false,
+            createdAt: "2025-12-31T23:59:00.000Z",
+          },
+          {
+            id: currentMessageId,
+            role: "user",
+            text: currentInput,
+            streaming: false,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      expect(result).not.toBeNull();
+      expect(result!.length).toBeLessThanOrEqual(5_000);
+      expect(result).toContain(currentInput);
+      expect(result).toContain("[Earlier message content truncated]");
+    });
   });
 
   async function createHarness(input?: {

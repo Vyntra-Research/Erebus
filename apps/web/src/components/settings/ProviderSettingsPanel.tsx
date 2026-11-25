@@ -1021,6 +1021,18 @@ export function EnvironmentProviderSettings({
         hiddenModels={modelPreferences.hiddenModels}
         favoriteModels={favoriteModels}
         modelOrder={modelPreferences.modelOrder}
+        modelInputLimits={settings.modelInputLimits.filter(
+          (entry) => entry.instanceId === row.instanceId,
+        )}
+        onModelInputLimitChange={(model, maxInputChars) => {
+          const next = settings.modelInputLimits.filter(
+            (entry) => !(entry.instanceId === row.instanceId && entry.model === model),
+          );
+          if (maxInputChars !== null) {
+            next.push({ instanceId: row.instanceId, model, maxInputChars });
+          }
+          updateSettings({ modelInputLimits: next });
+        }}
         onHiddenModelsChange={(hiddenModels) =>
           updateProviderModelPreferences(row.instanceId, {
             ...modelPreferences,

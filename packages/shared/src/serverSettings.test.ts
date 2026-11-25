@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -14,10 +15,41 @@ import {
   isModelSelectionProviderEnabled,
   normalizePersistedServerSettingString,
   parsePersistedServerObservabilitySettings,
+  resolveModelInputChars,
   resolveSourceControlWriterModelSelection,
 } from "./serverSettings.ts";
 
 describe("serverSettings helpers", () => {
+  it("resolves a per-model input limit with the default fallback", () => {
+    const instanceId = ProviderInstanceId.make("codex");
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      modelInputLimits: [{ instanceId, model: "gpt-6-astra", maxInputChars: 300_000 }],
+    };
+
+    expect(resolveModelInputChars(settings, { instanceId, model: "gpt-6-astra" })).toBe(300_000);
+    expect(resolveModelInputChars(settings, { instanceId, model: "gpt-6-sol" })).toBe(
+      PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+    );
+    expect(resolveModelInputChars(settings, null)).toBe(PROVIDER_SEND_TURN_MAX_INPUT_CHARS);
+  });
+
+  it("replaces model input limits instead of merging the array", () => {
+    const instanceId = ProviderInstanceId.make("codex");
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      modelInputLimits: [{ instanceId, model: "gpt-6-astra", maxInputChars: 300_000 }],
+    };
+
+    const next = applyServerSettingsPatch(current, {
+      modelInputLimits: [{ instanceId, model: "gpt-6-sol", maxInputChars: 650_000 }],
+    });
+
+    expect(next.modelInputLimits).toEqual([
+      { instanceId, model: "gpt-6-sol", maxInputChars: 650_000 },
+    ]);
+  });
+
   it("normalizes optional persisted strings", () => {
     expect(normalizePersistedServerSettingString(undefined)).toBeUndefined();
     expect(normalizePersistedServerSettingString("   ")).toBeUndefined();

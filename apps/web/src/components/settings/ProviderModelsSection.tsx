@@ -10,9 +10,12 @@ import {
   StarIcon,
   XIcon,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderDriverKind,
+  type ModelInputLimit,
   type ProviderInstanceId,
   type ServerProviderModel,
 } from "@t3tools/contracts";
@@ -62,6 +65,10 @@ interface ProviderModelsSectionProps {
   readonly favoriteModels: ReadonlyArray<string>;
   /** Explicit user-authored model ordering for this provider instance. */
   readonly modelOrder: ReadonlyArray<string>;
+  /** Per-model input overrides for this provider instance. */
+  readonly modelInputLimits: ReadonlyArray<ModelInputLimit>;
+  /** Commit an input limit, or `null` to restore the default. */
+  readonly onModelInputLimitChange: (model: string, maxInputChars: number | null) => void;
   /**
    * Commit the new custom-model list. Caller is responsible for routing the
    * write to the correct storage (legacy `settings.providers[kind]` vs.
@@ -92,16 +99,23 @@ export function ProviderModelsSection({
   hiddenModels,
   favoriteModels,
   modelOrder,
+  modelInputLimits,
   onChange,
   onHiddenModelsChange,
   onFavoriteModelsChange,
   onModelOrderChange,
+  onModelInputLimitChange,
 }: ProviderModelsSectionProps) {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const hiddenModelSet = useMemo(() => new Set(hiddenModels), [hiddenModels]);
   const favoriteModelSet = useMemo(() => new Set(favoriteModels), [favoriteModels]);
+  const inputLimitByModel = useMemo(
+    () => new Map(modelInputLimits.map((entry) => [entry.model, entry.maxInputChars])),
+    [modelInputLimits],
+  );
+  const defaultInputLimitLabel = PROVIDER_SEND_TURN_MAX_INPUT_CHARS.toLocaleString("en-US");
   const orderedModels = useMemo(() => {
     return sortModelsForProviderInstance(models, {
       favoriteModels: favoriteModelSet,
@@ -188,9 +202,10 @@ export function ProviderModelsSection({
     <div>
       <div className="text-xs font-medium text-foreground">Models</div>
       <div className="mt-1 text-xs text-muted-foreground">
-        {models.length} model{models.length === 1 ? "" : "s"} available.
+        {models.length} model{models.length === 1 ? "" : "s"} available. Set a per-model input limit
+        in characters (roughly 3–4 characters per token); blank uses {defaultInputLimitLabel}.
       </div>
-      <div ref={listRef} className="mt-2 max-h-40 overflow-y-auto pb-1">
+      <div ref={listRef} className="mt-2 max-h-56 overflow-y-auto pb-1">
         {orderedModels.map((model, index) => {
           const caps = model.capabilities;
           const capLabels: string[] = [];
@@ -227,7 +242,7 @@ export function ProviderModelsSection({
             <div
               key={`${instanceId}:${model.slug}`}
               className={cn(
-                "grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 py-1",
+                "grid min-h-7 grid-cols-[minmax(0,1fr)_6rem_auto] items-center gap-2 py-1",
                 isHidden && "text-muted-foreground",
               )}
             >
@@ -277,6 +292,11 @@ export function ProviderModelsSection({
                   <span className="text-[10px] text-muted-foreground">custom</span>
                 ) : null}
               </div>
+              <ModelInputLimitField
+                modelName={model.name}
+                value={inputLimitByModel.get(model.slug)}
+                onCommit={(value) => onModelInputLimitChange(model.slug, value)}
+              />
               <div className="flex shrink-0 items-center gap-0.5">
                 <Tooltip>
                   <TooltipTrigger
@@ -399,6 +419,73 @@ export function ProviderModelsSection({
       </div>
 
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+function ModelInputLimitField({
+  modelName,
+  value,
+  onCommit,
+}: {
+  readonly modelName: string;
+  readonly value: number | undefined;
+  readonly onCommit: (maxInputChars: number | null) => void;
+}) {
+  const [draft, setDraft] = useState(value === undefined ? "" : String(value));
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(value === undefined ? "" : String(value));
+    setError(null);
+  }, [value]);
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (trimmed.length === 0) {
+      setError(null);
+      onCommit(null);
+      return;
+    }
+    const parsed = Number(trimmed.replace(/[,_\s]/g, ""));
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      setError("Positive whole number.");
+      return;
+    }
+    if (parsed > PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS) {
+      setError(`Max ${PROVIDER_SEND_TURN_HARD_MAX_INPUT_CHARS.toLocaleString("en-US")}.`);
+      return;
+    }
+    setError(null);
+    if (parsed === value) return;
+    onCommit(parsed === PROVIDER_SEND_TURN_MAX_INPUT_CHARS ? null : parsed);
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col items-end gap-0.5">
+      <Input
+        aria-label={`Maximum input characters for ${modelName}`}
+        className="h-6 w-24 text-right text-[11px] tabular-nums"
+        inputMode="numeric"
+        placeholder={PROVIDER_SEND_TURN_MAX_INPUT_CHARS.toLocaleString("en-US")}
+        value={draft}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          if (error) setError(null);
+        }}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          } else if (event.key === "Escape") {
+            setDraft(value === undefined ? "" : String(value));
+            setError(null);
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      {error ? <span className="text-[10px] text-destructive">{error}</span> : null}
     </div>
   );
 }

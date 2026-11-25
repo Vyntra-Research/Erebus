@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.0-beta.22 - 2026-11-25
+
+### Added
+
+- Add per-model provider input limits under Provider settings → Models. Each model can override the default 120,000-character turn limit, with a 2,000,000-character hard ceiling; values are stored in server settings and shared with every connected client.
+- Imported thread context now uses the target model's configured limit, so larger-context models can receive more history before truncation.
+
+### Changed
+
+- A settings change applies to subsequent turns, including follow-ups sent while a thread is running, without interrupting the turn already in flight. The composer validates against the selected model's effective limit.
+
 ## 2.0.0-beta.21 - 2026-11-25
 
 ### Fixed

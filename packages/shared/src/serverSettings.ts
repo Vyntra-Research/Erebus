@@ -3,6 +3,7 @@ import {
   isProviderAvailable,
   resolveProviderInstanceEnabled,
   type ModelSelection,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type ProviderDriverKind,
   type ServerProvider,
   ServerSettings,
@@ -44,6 +45,21 @@ export function isModelSelectionProviderEnabled(
     isProviderDriverKind(selection.instanceId) &&
     getLegacyProviderSettings(settings, selection.instanceId)?.enabled === true
   );
+}
+
+/**
+ * Resolve the effective per-turn input budget for one model. Missing
+ * overrides use the product default so older settings files keep working.
+ */
+export function resolveModelInputChars(
+  settings: Pick<ServerSettings, "modelInputLimits">,
+  selection: Pick<ModelSelection, "instanceId" | "model"> | null | undefined,
+): number {
+  if (!selection) return PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
+  const override = settings.modelInputLimits.find(
+    (entry) => entry.instanceId === selection.instanceId && entry.model === selection.model,
+  );
+  return override?.maxInputChars ?? PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
 }
 
 export function resolveSourceControlWriterModelSelection(
@@ -132,6 +148,7 @@ export function applyServerSettingsPatch(
     providerHealthRefreshInterval,
     backgroundActivityProfile,
     backgroundActivity,
+    modelInputLimits,
     ...patchForMerge
   } = patch;
   const currentBackgroundActivity = normalizeServerBackgroundActivitySettings(current);
@@ -188,6 +205,7 @@ export function applyServerSettingsPatch(
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
       : {}),
+    ...(modelInputLimits !== undefined ? { modelInputLimits } : {}),
     ...(patch.sourceControlWriterModelSelection !== undefined
       ? { sourceControlWriterModelSelection: patch.sourceControlWriterModelSelection }
       : {}),
