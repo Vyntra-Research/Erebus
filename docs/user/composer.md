@@ -1,6 +1,6 @@
 # Message composer
 
-Messages can contain up to 120,000 characters. Erebus keeps an oversized draft in the composer and shows how many characters must be removed.
+Messages can contain up to 120,000 characters by default. Under **Settings > Providers > Models**, a model can use a different limit up to 4,000,000 characters. Erebus keeps an oversized draft in the composer and shows how many characters must be removed.
 
 Images upload as soon as you add them. The send button becomes available after each upload finishes. Retry or remove a failed upload. HEIC and HEIF images are converted to JPEG on desktop.
 
