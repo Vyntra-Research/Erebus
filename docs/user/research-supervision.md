@@ -20,7 +20,7 @@ Native provider subagents help with parallel work inside one bounded task. Erebu
 
 Linked threads keep co-agents in the same project. Standalone threads can also create co-agents; those children remain isolated from other standalone threads.
 
-A co-agent receives the same research rules and returns evidence and artifact paths to the principal. The principal owns the goal and Judge submission.
+A co-agent receives the same research rules and returns evidence and artifact paths to the principal. Before ending its turn, it sends the complete handback to the principal as a coordination message; the principal can also collect the latest handback with `threads.wait` or `threads.list`. The principal owns the goal and Judge submission.
 
 ## Judge handoff
 
