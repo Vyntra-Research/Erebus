@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.0-beta.23 - 2026-11-25
+
+### Fixed
+
+- Co-agents now send their complete handback to the parent with `threads.send` before ending the turn, so the principal receives the result as a coordination follow-up instead of having to poll every child.
+- `threads.list` now returns the latest canonical handback for each settled direct co-agent. A principal can collect finished results in one call without reading whole child transcripts.
+
+### Changed
+
+- Raise the provider input hard ceiling from 2,000,000 to 4,000,000 characters, which covers a roughly 1M-token context at four characters per token. The 120,000-character default and per-model overrides are unchanged.
+
 ## 2.0.0-beta.22 - 2026-11-25
 
 ### Added

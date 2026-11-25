@@ -230,6 +230,7 @@ layer("CoagentToolController", (it) => {
       assert.strictEqual(child.interactionMode, "default");
       assert.strictEqual(child.worktreePath, context.cwd);
       assert.match(child.messages[0]?.text ?? "", /direct co-agent/i);
+      assert.match(child.messages[0]?.text ?? "", /send the complete canonical handback/i);
       assert.notMatch(child.messages[0]?.text ?? "", /historical_parent_context/);
       assert.strictEqual(childShell.coagent?.parentThreadId, context.parentThreadId);
       assert.strictEqual(childShell.coagent?.creationMode, "blank");
@@ -328,6 +329,64 @@ layer("CoagentToolController", (it) => {
       );
       assert.match(coordination.text, /erebus_coagent_message/);
       assert.match(coordination.text, /not a user-authored request/i);
+    }),
+  );
+
+  it.effect("exposes a settled child's canonical handback from list and wait", () =>
+    Effect.gen(function* () {
+      const context = yield* seedParent("handback");
+      const controller = yield* CoagentToolController;
+      assert(controller);
+      const spawned = yield* call(controller, context, "spawn", {
+        mode: "blank",
+        title: "Handback child",
+        task: "Return one bounded result.",
+      });
+      assert.isTrue(spawned.success);
+      const childId = ThreadId.make(String(parseResponse(spawned).threadId));
+      yield* awaitThread(childId);
+
+      const engine = yield* OrchestrationEngineService;
+      const messageId = MessageId.make("assistant:coagent-handback");
+      yield* engine.dispatch({
+        type: "thread.message.assistant.delta",
+        commandId: CommandId.make("coagent-handback-delta"),
+        threadId: childId,
+        messageId,
+        delta: "Final handback: the parser check held.",
+        createdAt: now,
+      });
+      yield* engine.dispatch({
+        type: "thread.message.assistant.complete",
+        commandId: CommandId.make("coagent-handback-complete"),
+        threadId: childId,
+        messageId,
+        createdAt: now,
+      });
+
+      const listed = yield* call(controller, context, "list", { scope: "children" });
+      assert.isTrue(listed.success);
+      const tasks = parseResponse(listed).tasks as ReadonlyArray<{
+        readonly threadId: string;
+        readonly canonicalHandback: { readonly text: string } | null;
+      }>;
+      const task = tasks.find((candidate) => candidate.threadId === childId);
+      assert.isDefined(task);
+      assert.strictEqual(task?.canonicalHandback?.text, "Final handback: the parser check held.");
+
+      const immediate = yield* call(controller, context, "wait", {
+        threadIds: [childId],
+        timeoutMs: 0,
+      });
+      assert.isTrue(immediate.success);
+      const waited = parseResponse(immediate).tasks as ReadonlyArray<{
+        readonly threadId: string;
+        readonly canonicalHandback: { readonly text: string } | null;
+      }>;
+      assert.strictEqual(
+        waited.find((candidate) => candidate.threadId === childId)?.canonicalHandback?.text,
+        "Final handback: the parser check held.",
+      );
     }),
   );
 
