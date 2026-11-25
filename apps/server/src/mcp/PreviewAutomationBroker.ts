@@ -469,23 +469,32 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       // operation is not silently moved to a newer client: the caller gets a
       // capability failure and can deliberately start a fresh provider
       // session. A dead lease is pruned above and may fail over.
+      const candidates = Array.from(current.clients.values())
+        .filter(
+          (host) =>
+            host.environmentId === input.scope.environmentId &&
+            supportsOperation(host, input.operation),
+        )
+        .sort(
+          (left, right) =>
+            right.supportedOperations.size - left.supportedOperations.size ||
+            Number(right.focused) - Number(left.focused) ||
+            right.focusOrder - left.focusOrder,
+        );
+      const sessionOperation =
+        input.operation === "sessionExport" || input.operation === "sessionImport";
       const connection =
         hasLiveAssignment && supportsOperation(assignedConnection, input.operation)
           ? assignedConnection
           : hasLiveAssignment
-            ? undefined
-            : Array.from(current.clients.values())
-                .filter(
+            ? sessionOperation
+              ? candidates.find(
                   (host) =>
-                    host.environmentId === input.scope.environmentId &&
-                    supportsOperation(host, input.operation),
+                    host.clientId !== assignedConnection?.clientId ||
+                    host.queue !== assignedConnection?.queue,
                 )
-                .sort(
-                  (left, right) =>
-                    right.supportedOperations.size - left.supportedOperations.size ||
-                    Number(right.focused) - Number(left.focused) ||
-                    right.focusOrder - left.focusOrder,
-                )[0];
+              : undefined
+            : candidates[0];
       if (!connection) {
         if (!hasLiveAssignment) assignments.delete(assignmentKey);
         return [undefined, { ...current, assignments }] as const;

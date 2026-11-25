@@ -1,12 +1,14 @@
 // @effect-diagnostics nodeBuiltinImport:off - the desktop probe is a loopback health check.
 import * as NodeHttp from "node:http";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as MicroVmRuntime from "../../../microVm/MicroVmRuntime.ts";
-import { MicroVmError } from "@t3tools/contracts";
+import * as PreviewManager from "../../../preview/Manager.ts";
+import { FILL_PREVIEW_VIEWPORT, MicroVmError } from "@t3tools/contracts";
 import type { PreviewAutomationStatus, PreviewBrowserSession } from "@t3tools/contracts";
 import {
   MicroVmToolkit,
@@ -107,7 +109,7 @@ const handlers = {
   microvm_desktop: Effect.fn("MicroVmToolkit.desktop")(function* (
     input: MicroVmDesktopActionInput,
   ) {
-    yield* McpInvocationContext.McpInvocationContext;
+    const invocation = yield* McpInvocationContext.McpInvocationContext;
     const config = yield* ServerConfig.ServerConfig;
     const runtime = yield* MicroVmRuntime.make(config.stateDir);
     let info = yield* runtime.get(input.name);
@@ -137,7 +139,28 @@ const handlers = {
         ready: probe.ready,
         statusCode: probe.statusCode,
         preview: null,
+        internalPreview: null,
       };
+    }
+    const previewManager = yield* Effect.serviceOption(PreviewManager.PreviewManager);
+    if (Option.isSome(previewManager)) {
+      const opened = yield* Effect.result(
+        previewManager.value.open({
+          threadId: invocation.threadId,
+          url: desktop.viewerUrl,
+          viewport: FILL_PREVIEW_VIEWPORT,
+        }),
+      );
+      if (opened._tag === "Success") {
+        return {
+          name: info.name,
+          desktop,
+          ready: true,
+          statusCode: probe.statusCode,
+          preview: null,
+          internalPreview: opened.success,
+        };
+      }
     }
     const scope = yield* McpInvocationContext.requireMcpCapability("preview").pipe(
       Effect.mapError(
@@ -175,6 +198,7 @@ const handlers = {
       ready: true,
       statusCode: probe.statusCode,
       preview,
+      internalPreview: null,
     };
   }),
   microvm_browser_start: Effect.fn("MicroVmToolkit.browserStart")(function* (input: {
