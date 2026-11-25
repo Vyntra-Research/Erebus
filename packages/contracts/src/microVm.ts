@@ -54,6 +54,7 @@ export const MicroVmDesktop = Schema.Struct({
   guestPort: PortNumber,
   width: Schema.Int,
   height: Schema.Int,
+  agentPort: optional(PortNumber),
 });
 export type MicroVmDesktop = typeof MicroVmDesktop.Type;
 

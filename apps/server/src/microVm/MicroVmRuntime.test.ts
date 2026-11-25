@@ -117,16 +117,20 @@ describe("buildMicroVmModifyOptions", () => {
     });
   });
 
-  it("refuses to remove or remap the desktop viewer port", () => {
+  it("refuses to remove or remap the desktop viewer or agent port", () => {
     const desktopVm = {
       ...crashedVm,
-      ports: [{ hostPort: 6080, guestPort: 6080, hostBind: "127.0.0.1", protocol: "tcp" as const }],
+      ports: [
+        { hostPort: 6080, guestPort: 6080, hostBind: "127.0.0.1", protocol: "tcp" as const },
+        { hostPort: 9223, guestPort: 9223, hostBind: "127.0.0.1", protocol: "tcp" as const },
+      ],
       desktop: {
         viewerUrl: "http://127.0.0.1:6080/vnc.html",
         hostPort: 6080,
         guestPort: 6080,
         width: 1440,
         height: 900,
+        agentPort: 9223,
       },
     };
     expect(() =>
@@ -141,6 +145,12 @@ describe("buildMicroVmModifyOptions", () => {
         ports: [{ hostPort: 6080, guestPort: 80 }],
       }),
     ).toThrow("desktop viewer host port cannot be remapped");
+    expect(() =>
+      buildMicroVmModifyOptions(desktopVm, {
+        name: crashedVm.name,
+        portsRemove: [{ hostPort: 9223 }],
+      }),
+    ).toThrow("desktop agent port cannot be removed");
   });
 });
 
