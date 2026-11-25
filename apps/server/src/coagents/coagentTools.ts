@@ -23,7 +23,7 @@ export const EREBUS_THREADS_DYNAMIC_TOOL = {
       type: "function",
       name: "list",
       description:
-        "List either this task's direct co-agents or its active coordination scope. Linked tasks use their Erebus project; standalone tasks expose only themselves and their direct co-agents.",
+        "List either this task's direct co-agents or its active coordination scope. Linked tasks use their Erebus project; standalone tasks expose only themselves and their direct co-agents. For direct children, each settled task includes its latest canonical handback.",
       inputSchema: objectSchema(
         {
           scope: {
@@ -83,7 +83,7 @@ export const EREBUS_THREADS_DYNAMIC_TOOL = {
       type: "function",
       name: "send",
       description:
-        "Send an explicit follow-up to another active task in the same coordination scope. A co-agent may send only to its parent; a linked principal may send to project peers or its children, while a standalone principal may send only to its children.",
+        "Send an explicit follow-up or completed handback to another active task in the same coordination scope. A co-agent may send only to its parent; a linked principal may send to project peers or its children, while a standalone principal may send only to its children.",
       inputSchema: objectSchema(
         {
           threadId,

@@ -134,7 +134,9 @@ const childAssignmentPrompt = (input: {
   [
     "<erebus_coagent_assignment>",
     `Parent task: ${input.parentThreadId}`,
-    "You are a direct co-agent. Work only on the bounded assignment below and return your result to the parent in your final response.",
+    "You are a direct co-agent. Work only on the bounded assignment below.",
+    "Before you end your turn, send the complete canonical handback to the parent task with the threads.send tool. Then repeat the same complete handback in your final response so pull-based collection gets the same content.",
+    "The handback must include the result, exact evidence, killed paths, unresolved questions, and any files changed. Keep it within the 12,000-character send limit; write longer evidence to task-owned files and cite their paths.",
     "Do not create or coordinate additional Erebus co-agent tasks. You may use the provider's native subagents for vertical parallel work that helps this same bounded assignment.",
     "Do not expand scope, change shared goals, or make overlapping edits unless the assignment explicitly authorizes them. The parent owns synthesis, decisions, and user communication.",
     "You inherit the parent's Erebus scope: the same linked project when one exists, or a standalone task otherwise, plus its workspace, model settings, available Argos tools, MCPs, and safe-execution policy. You do not inherit ownership of the parent's native goal.",
@@ -174,10 +176,11 @@ const principalInstructions = (isChild: boolean) =>
         "- This task is a managed child. It cannot spawn other Erebus co-agent tasks.",
         "- Stay within the parent's separate horizontal sink or surface assignment. Do not overlap another delegated surface or take ownership of synthesis.",
         "- The parent owns the native goal, Judge submission, synthesis, and user communication. Do not call research.submit_finding or research.revise_finding.",
-        "- Your final response is the canonical handback. Include the result, exact evidence, killed paths, unresolved questions, and any files changed.",
+        "- Send the complete canonical handback to the parent with threads.send before you end your turn. Include the result, exact evidence, killed paths, unresolved questions, and any files changed. Keep it within the 12,000-character send limit; cite task-owned files for longer evidence.",
+        "- Repeat the same complete handback in your final response so threads.wait and threads.list return it when the parent collects the child.",
         "- Native provider subagents remain available for vertical parallel work inside this same bounded task.",
         "- Apply the same Erebus evidence, anti-tunnel, Post-AI Blind-Spot, realism, dedupe, and safe-execution rules as the parent. Argos is canonical connected memory when available.",
-        "- Use threads.send only to communicate an important result or blocker to the parent.",
+        "- Use threads.send for the final handback and for an early blocker or material scope change. Do not omit the final send.",
         "- Resumed sessions may expose the same controls as mcp__erebus-research__threads_* tools.",
       ].join("\n")
     : [
@@ -190,7 +193,7 @@ const principalInstructions = (isChild: boolean) =>
         "- The same Erebus evidence, anti-tunnel, Post-AI Blind-Spot, realism, dedupe, and safe-execution rules apply to the parent, every co-agent, and every native subagent.",
         "- Use blank by default. Use fork only when recent completed conversation is required; fork context is bounded and explicitly historical.",
         "- You alone own the native goal, Judge submissions, synthesis, validation, and user communication. Co-agents return evidence; they do not manage those controls.",
-        "- Check progress with threads.list, threads.read, or event-bounded threads.wait. Do not poll. Treat a child's final response as its canonical handback and verify it before synthesis.",
+        "- Co-agent handbacks arrive as <erebus_coagent_message> follow-ups. You can also collect the latest canonical handback with threads.wait or threads.list; list includes it for settled children. Treat it as the child's canonical handback, verify it before synthesis, and do not poll.",
         "- Use threads.send only for a material scope update or dependency. Interrupt only for recovery or a clear scope violation, not to micromanage valid work.",
         "- After collecting a completed child's final result, call threads.release to permanently discard the child task and free its slot. Never release before collection.",
         "- Resumed sessions may expose the same controls as mcp__erebus-research__threads_* tools.",
@@ -217,6 +220,17 @@ const make = Effect.gen(function* () {
     );
     return snapshot?.thread;
   });
+
+  const getThreadHandbackDetail = Effect.fn("CoagentToolController.getThreadHandbackDetail")(
+    function* (threadId: ThreadId) {
+      const snapshot = Option.getOrUndefined(
+        yield* projections.getThreadDetailSnapshot(threadId, {
+          turnLimit: 1,
+        }),
+      );
+      return snapshot?.thread;
+    },
+  );
 
   const callerLink = (context: CoagentToolContext) => registry.getByChild(context.threadId);
 
@@ -305,12 +319,27 @@ const make = Effect.gen(function* () {
               const threads = yield* Effect.forEach(links, (link) =>
                 getThreadShell(link.childThreadId),
               );
+              const handbacks = yield* Effect.forEach(
+                links,
+                (link, index) => {
+                  const thread = threads[index];
+                  if (!thread || threadStatus(thread) === "running") {
+                    return Effect.succeed(null);
+                  }
+                  return getThreadHandbackDetail(link.childThreadId).pipe(
+                    Effect.map((detail) => (detail ? canonicalHandback(detail) : null)),
+                    Effect.orElseSucceed(() => null),
+                  );
+                },
+                { concurrency: 4 },
+              );
               return response({
                 accepted: true,
                 scope: input.scope,
                 tasks: links.map((link, index) => ({
                   ...link,
                   ...(threads[index] ? threadSummary(threads[index]!) : { title: null }),
+                  canonicalHandback: handbacks[index] ?? null,
                 })),
               });
             }
