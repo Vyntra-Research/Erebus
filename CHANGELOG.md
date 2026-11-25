@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.21 - 2026-11-25
+
+### Fixed
+
+- Present a desktop microVM preview through the thread's automation host after the server creates the tab. `microvm_desktop open` now shows the floating mini preview, or the Review pane when it is already open, instead of leaving the noVNC session invisible in server state.
+
 ## 2.0.0-beta.20 - 2026-11-25
 
 ### Fixed

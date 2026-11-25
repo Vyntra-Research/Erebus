@@ -152,6 +152,29 @@ const handlers = {
         }),
       );
       if (opened._tag === "Success") {
+        // A server preview session is not visible on its own: the renderer
+        // owns the Review pane and the floating mini preview. Ask the
+        // automation host to present the tab that already exists, so the
+        // desktop lands in front of the user instead of sitting unseen in
+        // server state. Presentation is best-effort; a missing automation
+        // host must not fail an otherwise successful open.
+        const scope = yield* Effect.option(McpInvocationContext.requireMcpCapability("preview"));
+        if (Option.isSome(scope)) {
+          const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+          yield* broker
+            .invoke<PreviewAutomationStatus>({
+              scope: scope.value,
+              operation: "open",
+              tabId: opened.success.tabId,
+              input: {
+                open: true,
+                show: true,
+                reuseExistingTab: true,
+              },
+              timeoutMs: 10_000,
+            })
+            .pipe(Effect.ignore);
+        }
         return {
           name: info.name,
           desktop,
