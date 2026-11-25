@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.15 - 2026-11-25
+
+### Changed
+
+- Update the agent guidance for microVMs. Agents now prefer a disposable desktop microVM for visual research and testing instead of the host desktop, and may create, reuse, and remove research microVMs without asking. Simple Computer Use observations and lookups need no approval; agents must ask the user before driving the guest desktop to run tests, click through flows, type data, launch apps, or otherwise change state. VM input stays inside the guest and never moves the host pointer or keyboard.
+
 ## 2.0.0-beta.14 - 2026-11-25
 
 ### Added
