@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.19 - 2026-11-25
+
+### Fixed
+
+- Apply internal-browser localStorage and sessionStorage before navigation, and tolerate an aborted `loadURL`. This prevents a preview-driven navigation abort from dropping the imported storage after cookies and the URL were already applied.
+
 ## 2.0.0-beta.18 - 2026-11-25
 
 ### Fixed
