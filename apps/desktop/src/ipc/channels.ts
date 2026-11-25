@@ -87,6 +87,7 @@ export const PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL = "desktop:preview-pip-fra
 export const PREVIEW_AUTOMATION_STATUS_CHANNEL = "desktop:preview-automation-status";
 export const PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL = "desktop:preview-automation-snapshot";
 export const PREVIEW_AUTOMATION_CLICK_CHANNEL = "desktop:preview-automation-click";
+export const PREVIEW_IMPORT_SESSION_CHANNEL = "desktop:preview-import-session";
 export const PREVIEW_AUTOMATION_TYPE_CHANNEL = "desktop:preview-automation-type";
 export const PREVIEW_AUTOMATION_PRESS_CHANNEL = "desktop:preview-automation-press";
 export const PREVIEW_AUTOMATION_SCROLL_CHANNEL = "desktop:preview-automation-scroll";

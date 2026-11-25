@@ -7,6 +7,7 @@ import {
   MicroVmModifyInput,
   MicroVmRemoveInput,
   PreviewAutomationStatus,
+  PreviewBrowserSession,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
@@ -69,6 +70,42 @@ export const MicroVmDesktopTool = Tool.make("microvm_desktop", {
   dependencies: desktopDependencies,
 })
   .annotate(Tool.Title, "Use a microVM desktop")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, true);
+
+export const MicroVmBrowserStartTool = Tool.make("microvm_browser_start", {
+  description:
+    "Start Chromium inside a desktop microVM with an optional proxy and initial URL. To capture the VM browser with the same HTTP/HTTPS/WebSocket pipeline as other browsers, first run web_capture_start with proxy=true and a source such as microvm:<name>, then pass session.proxy.url and caPem here. The tool rewrites a loopback proxy host to host.microsandbox.internal so the guest can reach it. The browser appears on the live desktop and can be observed with microvm_observe.",
+  parameters: Schema.Struct({
+    name: Schema.String,
+    url: optional(Schema.String),
+    proxyUrl: optional(Schema.String),
+    caPem: optional(Schema.String),
+  }),
+  success: Schema.Struct({ ok: Schema.Boolean, started: Schema.Boolean }),
+  failure: MicroVmError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Start a microVM browser")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, true);
+
+export const MicroVmBrowserImportTool = Tool.make("microvm_browser_import", {
+  description:
+    "Import cookies, localStorage, and sessionStorage from a preview_session_export snapshot into Chromium inside a desktop microVM. Starts Chromium if needed, sets the session through the guest browser debugging endpoint, and loads the snapshot URL. Use preview_session_export on an extension tab first.",
+  parameters: Schema.Struct({
+    name: Schema.String,
+    session: PreviewBrowserSession,
+  }),
+  success: Schema.Struct({ ok: Schema.Boolean }),
+  failure: MicroVmError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Import a session into a microVM browser")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
@@ -208,5 +245,7 @@ export const MicroVmToolkit = Toolkit.make(
   MicroVmJobTool,
   MicroVmCopyTool,
   MicroVmDesktopTool,
+  MicroVmBrowserStartTool,
+  MicroVmBrowserImportTool,
   MicroVmRemoveTool,
 );

@@ -20,6 +20,7 @@ import {
   PreviewAutomationTabTargetInput,
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
+  PreviewBrowserSession,
   PreviewTabId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -294,6 +295,47 @@ export const ExtensionBrowserOpenTool = safeBrowserTool(
   }).annotate(Tool.Title, "Open extension browser tab"),
 );
 
+export const PreviewSessionExportInput = Schema.Struct({
+  tabId: PreviewTabId.annotate({
+    description: "Exact extension tab id returned by extension_browser_list.",
+  }),
+});
+export type PreviewSessionExportInput = typeof PreviewSessionExportInput.Type;
+
+export const PreviewSessionExportTool = readonlyBrowserTool(
+  Tool.make("preview_session_export", {
+    description:
+      "Export cookies, localStorage, and sessionStorage from an extension-controlled tab. The result can be imported into the internal browser or a desktop microVM browser with preview_session_import or microvm_browser_import.",
+    parameters: PreviewSessionExportInput,
+    success: PreviewBrowserSession,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Export an extension tab session"),
+);
+
+export const PreviewSessionImportInput = Schema.Struct({
+  tabId: Schema.optional(
+    PreviewTabId.annotate({
+      description: "Exact internal browser tab. Omit to use the current tab.",
+    }),
+  ),
+  session: PreviewBrowserSession.annotate({
+    description: "Session snapshot returned by preview_session_export.",
+  }),
+});
+export type PreviewSessionImportInput = typeof PreviewSessionImportInput.Type;
+
+export const PreviewSessionImportTool = browserTool(
+  Tool.make("preview_session_import", {
+    description:
+      "Import a previously exported browser session into an internal browser tab. Sets cookies and origin storage, then loads the snapshot URL. Open or select the target internal tab first; this does not target extension tabs.",
+    parameters: PreviewSessionImportInput,
+    success: PreviewAutomationStatus,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Import a browser session"),
+);
+
 export const PreviewBrowserTabCloseTool = browserTool(
   Tool.make("preview_tab_close", {
     description:
@@ -498,6 +540,8 @@ export const PreviewToolkit = Toolkit.make(
   PreviewBrowserTabsTool,
   ExtensionBrowserListTool,
   ExtensionBrowserOpenTool,
+  PreviewSessionExportTool,
+  PreviewSessionImportTool,
   PreviewBrowserTabCloseTool,
   PreviewBrowserBackTool,
   PreviewBrowserForwardTool,
@@ -528,6 +572,8 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewBrowserTabsTool,
   ExtensionBrowserListTool,
   ExtensionBrowserOpenTool,
+  PreviewSessionExportTool,
+  PreviewSessionImportTool,
   PreviewBrowserTabCloseTool,
   PreviewBrowserBackTool,
   PreviewBrowserForwardTool,

@@ -42,6 +42,7 @@ export function isExtensionAutomationTargetOperation(
     case "back":
     case "forward":
     case "reload":
+    case "sessionExport":
       return true;
     default:
       return false;
