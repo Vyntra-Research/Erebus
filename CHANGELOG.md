@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.14 - 2026-11-25
+
+### Added
+
+- Add Computer Use for desktop microVMs. A small guest agent exposes full-screen screenshots, window listing and activation, clicks, typed text, key chords, scrolling, dragging, and app launch inside the VM. The host tools are `microvm_observe`, `microvm_click`, `microvm_type_text`, `microvm_press_key`, `microvm_scroll`, `microvm_drag`, `microvm_list_windows`, `microvm_activate_window`, and `microvm_launch_app`. The agent is bound to a loopback host port and authenticated with a per-VM token, so host pointer and keyboard input are never injected.
+
 ## 2.0.0-beta.13 - 2026-11-25
 
 ### Added

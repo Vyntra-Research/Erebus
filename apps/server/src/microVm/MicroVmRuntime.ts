@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -20,6 +21,8 @@ import {
 import * as Effect from "effect/Effect";
 import type * as Microsandbox from "microsandbox";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+
+import { DESKTOP_AGENT_GUEST_PORT, DESKTOP_AGENT_SOURCE } from "./desktopAgentSource.ts";
 
 type MicrosandboxModule = typeof import("microsandbox");
 
@@ -157,27 +160,38 @@ const parsePortsLabel = (value: string | undefined): ReadonlyArray<MicroVmPort> 
   }
 };
 
-const parseDesktopLabel = (value: string | undefined): MicroVmDesktop | null => {
+interface DesktopLabelState {
+  readonly desktop: MicroVmDesktop;
+  readonly agentToken: string | null;
+}
+
+const parseDesktopLabel = (value: string | undefined): DesktopLabelState | null => {
   const record = parseJsonRecord(value);
   if (record === null) return null;
   const hostPort = record.hostPort;
   const guestPort = record.guestPort;
   const width = record.width;
   const height = record.height;
+  const agentPort = record.agentPort;
   if (
     typeof hostPort !== "number" ||
     typeof guestPort !== "number" ||
     typeof width !== "number" ||
-    typeof height !== "number"
+    typeof height !== "number" ||
+    (agentPort !== undefined && typeof agentPort !== "number")
   ) {
     return null;
   }
   return {
-    hostPort,
-    guestPort,
-    width,
-    height,
-    viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
+    desktop: {
+      hostPort,
+      guestPort,
+      width,
+      height,
+      ...(typeof agentPort === "number" ? { agentPort } : {}),
+      viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
+    },
+    agentToken: typeof record.agentToken === "string" ? record.agentToken : null,
   };
 };
 
@@ -195,7 +209,8 @@ if [ ! -f /var/lib/erebus-desktop-ready ]; then
   install_desktop() {
     apt-get install -y --no-install-recommends \\
       breeze-icon-theme ca-certificates dbus-x11 lxqt-core novnc openbox \\
-      qterminal tigervnc-standalone-server websockify chromium xdotool xdg-utils
+      qterminal tigervnc-standalone-server websockify chromium xdotool xdg-utils \\
+      scrot wmctrl python3
   }
   if ! install_desktop; then
     dpkg --configure -a || true
@@ -241,10 +256,11 @@ if ! kill -0 "$desktop_pid"; then
   cat /tmp/lxqt.log >&2
   exit 1
 fi
+DISPLAY=:1 nohup python3 /usr/local/bin/erebus-desktop-agent >/tmp/erebus-agent.log 2>&1 &
 exec websockify --web=/usr/share/novnc 0.0.0.0:${DESKTOP_GUEST_PORT} localhost:5901
 `;
 
-const findAvailableHostPort = (): Promise<number> =>
+const allocateHostPort = (): Promise<number> =>
   new Promise((resolve, reject) => {
     const server = NodeNet.createServer();
     server.unref();
@@ -253,13 +269,23 @@ const findAvailableHostPort = (): Promise<number> =>
       const address = server.address();
       if (typeof address !== "object" || address === null) {
         server.close();
-        reject(new Error("Could not allocate a host port for the desktop viewer."));
+        reject(new Error("Could not allocate a host port for the desktop."));
         return;
       }
       const { port } = address;
       server.close((error) => (error ? reject(error) : resolve(port)));
     });
   });
+
+const findAvailableHostPort = async (
+  excluded: ReadonlySet<number> = new Set<number>(),
+): Promise<number> => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const port = await allocateHostPort();
+    if (!excluded.has(port)) return port;
+  }
+  throw new Error("Could not allocate a distinct host port for the desktop.");
+};
 
 export function buildMicroVmModifyOptions(
   current: MicroVmInfo,
@@ -313,6 +339,23 @@ export function buildMicroVmModifyOptions(
       throw new Error(
         "The desktop viewer host port cannot be remapped to another guest port while the desktop is enabled.",
       );
+    }
+    if (current.desktop.agentPort !== undefined) {
+      const agentEndpoint = `${current.desktop.agentPort}\u0000tcp`;
+      if (removedEndpoints.has(agentEndpoint)) {
+        throw new Error("The desktop agent port cannot be removed while the desktop is enabled.");
+      }
+      const agentReplacement = addPorts.find(
+        (port) => port.hostPort === current.desktop?.agentPort && port.protocol === "tcp",
+      );
+      if (
+        agentReplacement !== undefined &&
+        agentReplacement.guestPort !== DESKTOP_AGENT_GUEST_PORT
+      ) {
+        throw new Error(
+          "The desktop agent host port cannot be remapped to another guest port while the desktop is enabled.",
+        );
+      }
     }
   }
   const nextPorts = current.ports.filter(
@@ -582,7 +625,7 @@ const toInfo = async (handle: Microsandbox.SandboxHandle): Promise<MicroVmInfo> 
     rootDiskMiB: typeof rootDisk.sizeMib === "number" ? rootDisk.sizeMib : null,
     workdir: typeof runtime.workdir === "string" ? runtime.workdir : "/workspace",
     ports: parsePortsLabel(labels[PORTS_LABEL]),
-    desktop: parseDesktopLabel(labels[DESKTOP_LABEL]),
+    desktop: parseDesktopLabel(labels[DESKTOP_LABEL])?.desktop ?? null,
     projectId: labels["erebus.projectId"] ?? null,
     threadId: labels["erebus.threadId"] ?? null,
     createdAt: handle.createdAt?.toISOString() ?? null,
@@ -597,6 +640,75 @@ const truncate = (value: string, maxBytes: number): { value: string; truncated: 
   return { value: bytes.subarray(0, maxBytes).toString("utf8"), truncated: true };
 };
 
+const isConnectionRefused = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { readonly code?: unknown }).code === "ECONNREFUSED";
+
+const isConnectionReset = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { readonly code?: unknown }).code === "ECONNRESET";
+
+const requestDesktopAgent = (
+  agent: { readonly port: number; readonly token: string },
+  path: string,
+  body?: unknown,
+): Promise<unknown> =>
+  new Promise((resolve, reject) => {
+    const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
+    const request = NodeHttp.request(
+      {
+        host: "127.0.0.1",
+        port: agent.port,
+        path,
+        method: body === undefined ? "GET" : "POST",
+        headers: {
+          "X-Erebus-Token": agent.token,
+          ...(payload === null
+            ? {}
+            : {
+                "Content-Type": "application/json",
+                "Content-Length": payload.length,
+              }),
+        },
+        timeout: 30_000,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          const statusCode = response.statusCode ?? 500;
+          if (statusCode < 200 || statusCode >= 300) {
+            reject(
+              new Error(
+                `Desktop agent request failed (${statusCode}): ${text.trim().slice(0, 500)}`,
+              ),
+            );
+            return;
+          }
+          try {
+            resolve(text.length === 0 ? {} : JSON.parse(text));
+          } catch {
+            reject(new Error("Desktop agent returned invalid JSON."));
+          }
+        });
+      },
+    );
+    request.once("timeout", () => request.destroy(new Error("Desktop agent request timed out.")));
+    request.once("error", reject);
+    if (payload !== null) request.write(payload);
+    request.end();
+  });
+
+export interface MicroVmDesktopAgent {
+  readonly port: number;
+  readonly token: string;
+}
+
 export interface MicroVmRuntimeService {
   readonly home: string;
   readonly list: () => Effect.Effect<ReadonlyArray<MicroVmInfo>, MicroVmError>;
@@ -607,6 +719,12 @@ export interface MicroVmRuntimeService {
   readonly remove: (input: MicroVmRemoveInput) => Effect.Effect<void, MicroVmError>;
   readonly exec: (input: MicroVmExecInput) => Effect.Effect<MicroVmExecResult, MicroVmError>;
   readonly ensureDesktop: (name: string) => Effect.Effect<MicroVmInfo, MicroVmError>;
+  readonly desktopAgent: (name: string) => Effect.Effect<MicroVmDesktopAgent, MicroVmError>;
+  readonly desktopAgentRequest: (
+    name: string,
+    path: string,
+    body?: unknown,
+  ) => Effect.Effect<unknown, MicroVmError>;
   readonly jobs: (name: string) => Effect.Effect<Microsandbox.JobPage, MicroVmError>;
   readonly jobLogs: (
     name: string,
@@ -711,23 +829,34 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
       const height = input.desktop?.height ?? DEFAULT_DESKTOP_HEIGHT;
       const ports = input.ports?.map(normalizePort) ?? [];
       let desktop: MicroVmDesktop | null = null;
+      let agentToken: string | null = null;
       if (input.desktop !== undefined) {
-        const hostPort = input.desktop.hostPort ?? (await findAvailableHostPort());
+        const usedHostPorts = new Set(ports.map((port) => port.hostPort));
+        const hostPort = input.desktop.hostPort ?? (await findAvailableHostPort(usedHostPorts));
+        const agentPort = await findAvailableHostPort(new Set([...usedHostPorts, hostPort]));
         const desktopPort: MicroVmPort = {
           hostPort,
           guestPort: DESKTOP_GUEST_PORT,
           hostBind: "127.0.0.1",
           protocol: "tcp",
         };
-        validatePorts([...ports, desktopPort]);
-        ports.push(desktopPort);
+        const agentPortMapping: MicroVmPort = {
+          hostPort: agentPort,
+          guestPort: DESKTOP_AGENT_GUEST_PORT,
+          hostBind: "127.0.0.1",
+          protocol: "tcp",
+        };
+        validatePorts([...ports, desktopPort, agentPortMapping]);
+        ports.push(desktopPort, agentPortMapping);
         desktop = {
           hostPort,
           guestPort: DESKTOP_GUEST_PORT,
           width,
           height,
+          agentPort,
           viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
         };
+        agentToken = NodeCrypto.randomUUID();
       } else {
         validatePorts(ports);
       }
@@ -751,6 +880,8 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
                   guestPort: desktop.guestPort,
                   width: desktop.width,
                   height: desktop.height,
+                  agentPort: desktop.agentPort,
+                  agentToken,
                 }),
               }
             : {}),
@@ -762,7 +893,15 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
             : builder.portBind(port.hostBind, port.hostPort, port.guestPort);
       }
       if (desktop !== null) {
-        builder = builder.script(DESKTOP_SCRIPT, desktopScript(desktop.width, desktop.height));
+        builder = builder
+          .script(DESKTOP_SCRIPT, desktopScript(desktop.width, desktop.height))
+          .patch((patch) =>
+            patch
+              .text("/usr/local/bin/erebus-desktop-agent", DESKTOP_AGENT_SOURCE, {
+                mode: 0o755,
+              })
+              .text("/etc/erebus-agent-token", `${agentToken ?? ""}\n`, { mode: 0o600 }),
+          );
       }
       builder = builder.patch((patch) => patch.mkdir(workdir));
       if (input.rootDiskMiB !== undefined) {
@@ -947,6 +1086,51 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
       ),
     );
 
+  const desktopAgent: MicroVmRuntimeService["desktopAgent"] = (name) =>
+    getHandle(name).pipe(
+      Effect.flatMap((handle) =>
+        attempt("desktop-agent", async () => {
+          const state = parseDesktopLabel(configLabels(handle.config())[DESKTOP_LABEL]);
+          if (state?.desktop.agentPort === undefined || state.agentToken === null) {
+            throw new Error(
+              `${name} has no desktop agent. Desktop VMs created before Computer Use support must be recreated.`,
+            );
+          }
+          return { port: state.desktop.agentPort, token: state.agentToken };
+        }),
+      ),
+    );
+
+  const desktopAgentRequest: MicroVmRuntimeService["desktopAgentRequest"] = (name, path, body) =>
+    desktopAgent(name).pipe(
+      Effect.flatMap((agent) =>
+        Effect.gen(function* () {
+          let lastError: unknown = new Error("Desktop agent is unavailable.");
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            const result = yield* Effect.result(
+              Effect.tryPromise({
+                try: () => requestDesktopAgent(agent, path, body),
+                catch: (cause) => ({
+                  cause,
+                  refused: isConnectionRefused(cause),
+                }),
+              }),
+            );
+            if (result._tag === "Success") return result.success;
+            lastError = result.failure.cause;
+            if (!result.failure.refused && !(body === undefined && isConnectionReset(lastError))) {
+              break;
+            }
+            yield* Effect.sleep("500 millis");
+          }
+          return yield* new MicroVmError({
+            operation: "desktop-agent-request",
+            detail: `The desktop agent for ${name} is not ready. Run microvm_desktop status until the first boot finishes. ${errorDetail(lastError)}`,
+          });
+        }),
+      ),
+    );
+
   const jobLogs: MicroVmRuntimeService["jobLogs"] = (name, jobId, tail) =>
     getHandle(name).pipe(
       Effect.flatMap((handle) =>
@@ -991,6 +1175,8 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
     remove,
     exec,
     ensureDesktop,
+    desktopAgent,
+    desktopAgentRequest,
     jobs,
     jobLogs,
     stopJob,

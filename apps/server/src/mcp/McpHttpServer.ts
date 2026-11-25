@@ -38,6 +38,8 @@ import { WebModuleToolkitHandlersLive } from "./toolkits/web/moduleHandlers.ts";
 import { WebModuleToolkit } from "./toolkits/web/moduleTools.ts";
 import { MicroVmToolkitHandlersLive } from "./toolkits/microVm/handlers.ts";
 import { MicroVmToolkit } from "./toolkits/microVm/tools.ts";
+import { MicroVmComputerToolkitHandlersLive } from "./toolkits/microVm/computerHandlers.ts";
+import { MicroVmComputerToolkit } from "./toolkits/microVm/computerTools.ts";
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -348,6 +350,10 @@ export const MicroVmToolkitRegistrationLive = McpServer.toolkit(MicroVmToolkit).
   Layer.provide(MicroVmToolkitHandlersLive),
 );
 
+export const MicroVmComputerToolkitRegistrationLive = McpServer.toolkit(
+  MicroVmComputerToolkit,
+).pipe(Layer.provide(MicroVmComputerToolkitHandlersLive));
+
 const McpTransportLive = McpServer.layerHttp({
   name: "Erebus",
   version: packageJson.version,
@@ -362,4 +368,5 @@ export const layer = Layer.mergeAll(
   WebToolkitRegistrationLive,
   WebModuleToolkitRegistrationLive,
   MicroVmToolkitRegistrationLive,
+  MicroVmComputerToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive), Layer.fresh);
