@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
@@ -9,8 +10,11 @@ import {
   MicroVmError,
   type MicroVmControlInput,
   type MicroVmCreateInput,
+  type MicroVmDesktop,
   type MicroVmInfo,
   type MicroVmModifyInput,
+  type MicroVmPort,
+  type MicroVmPortInput,
   type MicroVmRemoveInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -18,6 +22,14 @@ import type * as Microsandbox from "microsandbox";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 type MicrosandboxModule = typeof import("microsandbox");
+
+const PORTS_LABEL = "erebus.ports";
+const DESKTOP_LABEL = "erebus.desktop";
+const DESKTOP_SCRIPT = "erebus-desktop";
+const DESKTOP_GUEST_PORT = 6080;
+const DEFAULT_DESKTOP_WIDTH = 1440;
+const DEFAULT_DESKTOP_HEIGHT = 900;
+const DEFAULT_DESKTOP_IMAGE = "debian:bookworm-slim";
 
 /**
  * Sandbox handles that keep a local VM resident. Microsandbox's explicit
@@ -64,6 +76,191 @@ export function resolveMicrosandboxBinaryPaths(input: {
   return null;
 }
 
+const portNumber = (value: number, name: string): number => {
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
+    throw new Error(`${name} must be an integer between 1 and 65535.`);
+  }
+  return value;
+};
+
+const normalizePort = (input: MicroVmPortInput): MicroVmPort => {
+  const hostBind = input.hostBind?.trim() || "127.0.0.1";
+  if (hostBind !== "127.0.0.1" && hostBind !== "::1" && hostBind !== "localhost") {
+    throw new Error("hostBind must be a loopback address.");
+  }
+  return {
+    hostPort: portNumber(input.hostPort, "hostPort"),
+    guestPort: portNumber(input.guestPort, "guestPort"),
+    hostBind,
+    protocol: input.protocol ?? "tcp",
+  };
+};
+
+const portKey = (port: {
+  readonly hostBind: string;
+  readonly hostPort: number;
+  readonly protocol: "tcp" | "udp";
+}): string => `${port.hostBind}\u0000${port.hostPort}\u0000${port.protocol}`;
+
+const validatePorts = (ports: ReadonlyArray<MicroVmPort>): ReadonlyArray<MicroVmPort> => {
+  const seen = new Set<string>();
+  for (const port of ports) {
+    const key = portKey(port);
+    if (seen.has(key)) {
+      throw new Error(
+        `Host endpoint ${port.hostBind}:${port.hostPort}/${port.protocol} is published more than once.`,
+      );
+    }
+    seen.add(key);
+  }
+  return ports;
+};
+
+const parseJsonRecord = (value: string | undefined): Record<string, unknown> | null => {
+  if (value === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const parsePortsLabel = (value: string | undefined): ReadonlyArray<MicroVmPort> => {
+  if (value === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry) => {
+      if (typeof entry !== "object" || entry === null) return [];
+      const record = entry as Record<string, unknown>;
+      if (
+        typeof record.hostPort !== "number" ||
+        typeof record.guestPort !== "number" ||
+        (record.protocol !== "tcp" && record.protocol !== "udp")
+      ) {
+        return [];
+      }
+      return [
+        {
+          hostPort: record.hostPort,
+          guestPort: record.guestPort,
+          hostBind: typeof record.hostBind === "string" ? record.hostBind : "127.0.0.1",
+          protocol: record.protocol,
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
+};
+
+const parseDesktopLabel = (value: string | undefined): MicroVmDesktop | null => {
+  const record = parseJsonRecord(value);
+  if (record === null) return null;
+  const hostPort = record.hostPort;
+  const guestPort = record.guestPort;
+  const width = record.width;
+  const height = record.height;
+  if (
+    typeof hostPort !== "number" ||
+    typeof guestPort !== "number" ||
+    typeof width !== "number" ||
+    typeof height !== "number"
+  ) {
+    return null;
+  }
+  return {
+    hostPort,
+    guestPort,
+    width,
+    height,
+    viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
+  };
+};
+
+const desktopScript = (width: number, height: number): string => `#!/bin/sh
+set -eu
+if [ -f /run/erebus-desktop.pid ] && kill -0 "$(cat /run/erebus-desktop.pid)" 2>/dev/null; then
+  exit 0
+fi
+rm -f /run/erebus-desktop.pid
+mkdir -p /run
+echo $$ > /run/erebus-desktop.pid
+if [ ! -f /var/lib/erebus-desktop-ready ]; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  install_desktop() {
+    apt-get install -y --no-install-recommends \\
+      breeze-icon-theme ca-certificates dbus-x11 lxqt-core novnc openbox \\
+      qterminal tigervnc-standalone-server websockify chromium xdotool xdg-utils
+  }
+  if ! install_desktop; then
+    dpkg --configure -a || true
+    install_desktop
+  fi
+  if [ ! -s /usr/bin/Xtigervnc ] || [ ! -s /usr/bin/websockify ] || [ ! -s /usr/bin/chromium ]; then
+    apt-get install --reinstall -y tigervnc-standalone-server websockify chromium
+  fi
+  rm -rf /var/lib/apt/lists/*
+  mkdir -p /etc/chromium.d
+  cat > /etc/chromium.d/erebus <<'CHROMIUM'
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"
+CHROMIUM
+  touch /var/lib/erebus-desktop-ready
+fi
+mkdir -p /root/.config/lxqt /root/.config/openbox /tmp/runtime-root
+chmod 700 /tmp/runtime-root
+sed -e "s/,quicklaunch//" -e "/^\\[quicklaunch\\]/,/^$/d" \\
+  /usr/share/lxqt/panel.conf > /root/.config/lxqt/panel.conf
+sed "s#<name>Clearlooks</name>#<name>Breeze-ob</name>#" \\
+  /etc/xdg/openbox/rc.xml > /root/.config/openbox/rc.xml
+mkdir -p /tmp/.X11-unix
+rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
+Xtigervnc :1 -SecurityTypes None -geometry ${width}x${height} -depth 24 >/tmp/xvnc.log 2>&1 &
+vnc_pid=$!
+sleep 2
+if ! kill -0 "$vnc_pid"; then
+  cat /tmp/xvnc.log >&2
+  exit 1
+fi
+DISPLAY=:1 XDG_RUNTIME_DIR=/tmp/runtime-root \\
+  dbus-launch --exit-with-session sh -c "
+    startlxqt &
+    session_pid=\\$!
+    sleep 4
+    kill -0 \\"\\$session_pid\\"
+    qterminal &
+    wait \\"\\$session_pid\\"
+  " >/tmp/lxqt.log 2>&1 &
+desktop_pid=$!
+sleep 5
+if ! kill -0 "$desktop_pid"; then
+  cat /tmp/lxqt.log >&2
+  exit 1
+fi
+exec websockify --web=/usr/share/novnc 0.0.0.0:${DESKTOP_GUEST_PORT} localhost:5901
+`;
+
+const findAvailableHostPort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const server = NodeNet.createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0 }, () => {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        server.close();
+        reject(new Error("Could not allocate a host port for the desktop viewer."));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => (error ? reject(error) : resolve(port)));
+    });
+  });
+
 export function buildMicroVmModifyOptions(
   current: MicroVmInfo,
   input: MicroVmModifyInput,
@@ -96,6 +293,39 @@ export function buildMicroVmModifyOptions(
     );
   }
 
+  const addPorts = input.ports?.map(normalizePort) ?? [];
+  const removePorts = input.portsRemove ?? [];
+  const removedEndpoints = new Set(
+    removePorts.map((port) => `${port.hostPort}\u0000${port.protocol ?? "tcp"}`),
+  );
+  if (current.desktop !== null) {
+    const desktopEndpoint = `${current.desktop.hostPort}\u0000tcp`;
+    if (removedEndpoints.has(desktopEndpoint)) {
+      throw new Error("The desktop viewer port cannot be removed while the desktop is enabled.");
+    }
+    const desktopReplacement = addPorts.find(
+      (port) => port.hostPort === current.desktop?.hostPort && port.protocol === "tcp",
+    );
+    if (
+      desktopReplacement !== undefined &&
+      desktopReplacement.guestPort !== current.desktop.guestPort
+    ) {
+      throw new Error(
+        "The desktop viewer host port cannot be remapped to another guest port while the desktop is enabled.",
+      );
+    }
+  }
+  const nextPorts = current.ports.filter(
+    (port) => !removedEndpoints.has(`${port.hostPort}\u0000${port.protocol}`),
+  );
+  for (const port of addPorts) {
+    const existingIndex = nextPorts.findIndex((candidate) => portKey(candidate) === portKey(port));
+    if (existingIndex >= 0) nextPorts[existingIndex] = port;
+    else nextPorts.push(port);
+  }
+  validatePorts(nextPorts);
+  const portsChanged = addPorts.length > 0 || removePorts.length > 0;
+
   const options: Microsandbox.ModifyOptions = {
     ...(input.cpus !== undefined && cpus !== current.cpus ? { cpus } : {}),
     ...(input.memoryMiB !== undefined && memory !== current.memoryMiB ? { memory } : {}),
@@ -110,6 +340,26 @@ export function buildMicroVmModifyOptions(
       ? { workdir: input.workdir }
       : {}),
     ...(input.env !== undefined ? { env: { ...input.env } } : {}),
+    ...(addPorts.length > 0
+      ? {
+          ports: addPorts.map((port) => ({
+            hostPort: port.hostPort,
+            guestPort: port.guestPort,
+            hostBind: port.hostBind,
+            protocol: port.protocol,
+          })),
+        }
+      : {}),
+    ...(removePorts.length > 0
+      ? {
+          portsRemove: removePorts.map((port) => ({
+            hostPort: port.hostPort,
+            ...(port.hostBind === undefined ? {} : { hostBind: port.hostBind }),
+            protocol: port.protocol ?? "tcp",
+          })),
+        }
+      : {}),
+    ...(portsChanged ? { labels: { [PORTS_LABEL]: JSON.stringify(nextPorts) } } : {}),
   };
   if (Object.keys(options).length === 0) return null;
   options.policy =
@@ -331,6 +581,8 @@ const toInfo = async (handle: Microsandbox.SandboxHandle): Promise<MicroVmInfo> 
     maxMemoryMiB: Number(resources.maxMemoryMib ?? resources.memoryMib ?? 0),
     rootDiskMiB: typeof rootDisk.sizeMib === "number" ? rootDisk.sizeMib : null,
     workdir: typeof runtime.workdir === "string" ? runtime.workdir : "/workspace",
+    ports: parsePortsLabel(labels[PORTS_LABEL]),
+    desktop: parseDesktopLabel(labels[DESKTOP_LABEL]),
     projectId: labels["erebus.projectId"] ?? null,
     threadId: labels["erebus.threadId"] ?? null,
     createdAt: handle.createdAt?.toISOString() ?? null,
@@ -354,6 +606,7 @@ export interface MicroVmRuntimeService {
   readonly modify: (input: MicroVmModifyInput) => Effect.Effect<MicroVmInfo, MicroVmError>;
   readonly remove: (input: MicroVmRemoveInput) => Effect.Effect<void, MicroVmError>;
   readonly exec: (input: MicroVmExecInput) => Effect.Effect<MicroVmExecResult, MicroVmError>;
+  readonly ensureDesktop: (name: string) => Effect.Effect<MicroVmInfo, MicroVmError>;
   readonly jobs: (name: string) => Effect.Effect<Microsandbox.JobPage, MicroVmError>;
   readonly jobLogs: (
     name: string,
@@ -403,6 +656,21 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
       ),
     );
 
+  // Detaching an attached handle crashes the guest on the Windows preview, so
+  // operations never call detach(); the registry keeps the handle resident for
+  // the server's lifetime.
+  const kickDesktop = async (sandbox: Microsandbox.Sandbox): Promise<void> => {
+    await sandbox.execDetached("sh", ["-lc", "exec erebus-desktop"]);
+  };
+
+  const kickDesktopSafely = async (sandbox: Microsandbox.Sandbox): Promise<void> => {
+    try {
+      await kickDesktop(sandbox);
+    } catch {
+      // microvm_desktop retries the launch after the guest is fully ready.
+    }
+  };
+
   const list: MicroVmRuntimeService["list"] = () =>
     attempt("list", async () => {
       const handles: Microsandbox.SandboxHandle[] = [];
@@ -430,15 +698,41 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
         if (!hasErrorCode(cause, "sandboxNotFound")) throw cause;
       }
       const cpus = positiveInt(input.cpus, 2, "cpus");
-      const memory = positiveInt(input.memoryMiB, 2048, "memoryMiB");
+      const memory = positiveInt(input.memoryMiB, input.desktop ? 3072 : 2048, "memoryMiB");
       const maxCpus = positiveInt(input.maxCpus, cpus, "maxCpus");
       const maxMemory = positiveInt(input.maxMemoryMiB, memory, "maxMemoryMiB");
       if (maxCpus < cpus || maxMemory < memory) {
         throw new Error("Maximum resources cannot be lower than active resources.");
       }
       const workdir = input.workdir?.trim() || input.guestSourcePath?.trim() || "/workspace";
+      const image =
+        input.image?.trim() || (input.desktop !== undefined ? DEFAULT_DESKTOP_IMAGE : "debian");
+      const width = input.desktop?.width ?? DEFAULT_DESKTOP_WIDTH;
+      const height = input.desktop?.height ?? DEFAULT_DESKTOP_HEIGHT;
+      const ports = input.ports?.map(normalizePort) ?? [];
+      let desktop: MicroVmDesktop | null = null;
+      if (input.desktop !== undefined) {
+        const hostPort = input.desktop.hostPort ?? (await findAvailableHostPort());
+        const desktopPort: MicroVmPort = {
+          hostPort,
+          guestPort: DESKTOP_GUEST_PORT,
+          hostBind: "127.0.0.1",
+          protocol: "tcp",
+        };
+        validatePorts([...ports, desktopPort]);
+        ports.push(desktopPort);
+        desktop = {
+          hostPort,
+          guestPort: DESKTOP_GUEST_PORT,
+          width,
+          height,
+          viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
+        };
+      } else {
+        validatePorts(ports);
+      }
       let builder = sdk.Sandbox.builder(name)
-        .image(input.image?.trim() || "debian")
+        .image(image)
         .cpus(cpus)
         .maxCpus(maxCpus)
         .memory(memory)
@@ -449,10 +743,32 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
           "erebus.managed": "true",
           ...(input.projectId ? { "erebus.projectId": input.projectId } : {}),
           ...(input.threadId ? { "erebus.threadId": input.threadId } : {}),
+          ...(ports.length > 0 ? { [PORTS_LABEL]: JSON.stringify(ports) } : {}),
+          ...(desktop
+            ? {
+                [DESKTOP_LABEL]: JSON.stringify({
+                  hostPort: desktop.hostPort,
+                  guestPort: desktop.guestPort,
+                  width: desktop.width,
+                  height: desktop.height,
+                }),
+              }
+            : {}),
         });
+      for (const port of ports) {
+        builder =
+          port.protocol === "udp"
+            ? builder.portUdpBind(port.hostBind, port.hostPort, port.guestPort)
+            : builder.portBind(port.hostBind, port.hostPort, port.guestPort);
+      }
+      if (desktop !== null) {
+        builder = builder.script(DESKTOP_SCRIPT, desktopScript(desktop.width, desktop.height));
+      }
       builder = builder.patch((patch) => patch.mkdir(workdir));
       if (input.rootDiskMiB !== undefined) {
         builder = builder.rootDisk(positiveInt(input.rootDiskMiB, 0, "rootDiskMiB"));
+      } else if (desktop !== null) {
+        builder = builder.rootDisk(8192);
       }
       if (input.env !== undefined) builder = builder.envs({ ...input.env });
       if (input.sourcePath !== undefined) {
@@ -465,6 +781,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
       try {
         const sandbox = await builder.create();
         liveSandboxes.set(liveSandboxKey(home, name), sandbox);
+        if (desktop !== null) await kickDesktopSafely(sandbox);
         return toInfo(await sdk.Sandbox.get(name));
       } catch (createCause) {
         if (hasErrorCode(createCause, "sandboxAlreadyExists")) throw createCause;
@@ -483,6 +800,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
         try {
           const recovered = await partial.connectOrStart({ detached: false });
           liveSandboxes.set(liveSandboxKey(home, name), recovered);
+          if (desktop !== null) await kickDesktopSafely(recovered);
           return toInfo(await partial.refresh());
         } catch (recoveryCause) {
           try {
@@ -510,6 +828,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
             case "start": {
               const sandbox = await handle.start();
               liveSandboxes.set(key, sandbox);
+              if ((await toInfo(handle)).desktop !== null) await kickDesktopSafely(sandbox);
               break;
             }
             case "stop":
@@ -519,6 +838,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
             case "restart": {
               const sandbox = await handle.restart({ detached: false });
               liveSandboxes.set(key, sandbox);
+              if ((await toInfo(handle)).desktop !== null) await kickDesktopSafely(sandbox);
               break;
             }
             case "kill":
@@ -575,7 +895,6 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
               else builder.stdinNull();
               return builder;
             });
-            await sandbox.detach();
             return {
               detached: true,
               jobId: job.id,
@@ -595,7 +914,6 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
             else builder.stdinNull();
             return builder;
           });
-          await sandbox.detach();
           const max = input.maxOutputBytes ?? 4 * 1024 * 1024;
           const stdout = truncate(output.stdout(), max);
           const stderr = truncate(output.stderr(), max);
@@ -614,6 +932,20 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
 
   const jobs: MicroVmRuntimeService["jobs"] = (name) =>
     getHandle(name).pipe(Effect.flatMap((handle) => attempt("jobs", () => handle.listJobs())));
+
+  const ensureDesktop: MicroVmRuntimeService["ensureDesktop"] = (name) =>
+    getRunning(name).pipe(
+      Effect.flatMap((sandbox) =>
+        attempt("desktop", async () => {
+          const info = await toInfo(await sdk.Sandbox.get(name));
+          if (info.desktop === null) {
+            throw new Error(`${name} was not created with a desktop profile.`);
+          }
+          await kickDesktop(sandbox);
+          return info;
+        }),
+      ),
+    );
 
   const jobLogs: MicroVmRuntimeService["jobLogs"] = (name, jobId, tail) =>
     getHandle(name).pipe(
@@ -636,7 +968,6 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
       Effect.flatMap((sandbox) =>
         attempt("copyIn", async () => {
           await sandbox.fs().copyFromHost(input.source, input.destination);
-          await sandbox.detach();
         }),
       ),
     );
@@ -646,7 +977,6 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
       Effect.flatMap((sandbox) =>
         attempt("copyOut", async () => {
           await sandbox.fs().copyToHost(input.source, input.destination);
-          await sandbox.detach();
         }),
       ),
     );
@@ -660,6 +990,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
     modify,
     remove,
     exec,
+    ensureDesktop,
     jobs,
     jobLogs,
     stopJob,

@@ -1,19 +1,23 @@
 import {
   MicroVmControlInput,
   MicroVmCreateInput,
+  MicroVmDesktop,
   MicroVmError,
   MicroVmInfo,
   MicroVmModifyInput,
   MicroVmRemoveInput,
+  PreviewAutomationStatus,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
 
 const optional = <S extends Schema.Top>(schema: S) => Schema.optionalKey(schema);
 const dependencies = [McpInvocationContext.McpInvocationContext, ServerConfig.ServerConfig];
+const desktopDependencies = [...dependencies, PreviewAutomationBroker.PreviewAutomationBroker];
 
 export const MicroVmListTool = Tool.make("microvm_list", {
   description:
@@ -31,13 +35,40 @@ export const MicroVmListTool = Tool.make("microvm_list", {
 
 export const MicroVmCreateTool = Tool.make("microvm_create", {
   description:
-    "Create and start a persistent local microVM. Defaults are a minimal Debian image, 2 CPUs, 2048 MiB RAM, and /workspace; install the toolchain the task needs. Set CPU, memory, image, disk, workdir, and environment directly. sourcePath copies a private snapshot of a host directory into the guest; the guest never writes through to the original checkout. Outbound network access is available, but this tool does not publish inbound ports. A partial first start is recovered once or removed.",
+    "Create and start a persistent local microVM. Defaults are a minimal Debian image, 2 CPUs, 2048 MiB RAM, and /workspace; install the toolchain the task needs. Set CPU, memory, image, disk, workdir, environment, and published loopback ports directly. A desktop profile boots a lightweight Linux desktop with Chromium and exposes noVNC on a loopback host port for the preview pane; first boot installs packages and can take a few minutes. sourcePath copies a private snapshot of a host directory into the guest; the guest never writes through to the original checkout. A partial first start is recovered once or removed.",
   parameters: MicroVmCreateInput,
   success: MicroVmInfo,
   failure: MicroVmError,
   dependencies,
 })
   .annotate(Tool.Title, "Create a microVM")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, true);
+
+const MicroVmDesktopActionInput = Schema.Union([
+  Schema.Struct({ name: Schema.String, action: Schema.Literal("status") }),
+  Schema.Struct({ name: Schema.String, action: Schema.Literal("open") }),
+  Schema.Struct({ name: Schema.String, action: Schema.Literal("restart") }),
+]);
+export type MicroVmDesktopActionInput = typeof MicroVmDesktopActionInput.Type;
+
+export const MicroVmDesktopTool = Tool.make("microvm_desktop", {
+  description:
+    "Inspect, open, or restart the graphical desktop of a microVM created with a desktop profile. status starts the VM when needed, launches the desktop services, and probes the noVNC endpoint; the first boot installs packages and can take a few minutes, so retry status until ready. open does the same and then opens the desktop in the existing preview pane. restart restarts the guest so the desktop services come back. The viewer is loopback-only and reuses the internal browser preview.",
+  parameters: MicroVmDesktopActionInput,
+  success: Schema.Struct({
+    name: Schema.String,
+    desktop: MicroVmDesktop,
+    ready: Schema.Boolean,
+    statusCode: Schema.NullOr(Schema.Int),
+    preview: Schema.NullOr(PreviewAutomationStatus),
+  }),
+  failure: MicroVmError,
+  dependencies: desktopDependencies,
+})
+  .annotate(Tool.Title, "Use a microVM desktop")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
@@ -176,5 +207,6 @@ export const MicroVmToolkit = Toolkit.make(
   MicroVmExecTool,
   MicroVmJobTool,
   MicroVmCopyTool,
+  MicroVmDesktopTool,
   MicroVmRemoveTool,
 );

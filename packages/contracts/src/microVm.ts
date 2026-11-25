@@ -2,6 +2,61 @@ import * as Schema from "effect/Schema";
 
 const optional = <S extends Schema.Top>(schema: S) => Schema.optionalKey(schema);
 
+const PortNumber = Schema.Int.check(Schema.isGreaterThan(0)).check(
+  Schema.isLessThanOrEqualTo(65_535),
+);
+
+export const MicroVmPortProtocol = Schema.Literals(["tcp", "udp"]);
+export type MicroVmPortProtocol = typeof MicroVmPortProtocol.Type;
+
+export const MicroVmPortInput = Schema.Struct({
+  hostPort: PortNumber,
+  guestPort: PortNumber,
+  hostBind: optional(Schema.String),
+  protocol: optional(MicroVmPortProtocol),
+});
+export type MicroVmPortInput = typeof MicroVmPortInput.Type;
+
+export const MicroVmPortEndpointInput = Schema.Struct({
+  hostPort: PortNumber,
+  hostBind: optional(Schema.String),
+  protocol: optional(MicroVmPortProtocol),
+});
+export type MicroVmPortEndpointInput = typeof MicroVmPortEndpointInput.Type;
+
+export const MicroVmPort = Schema.Struct({
+  hostPort: PortNumber,
+  guestPort: PortNumber,
+  hostBind: Schema.String,
+  protocol: MicroVmPortProtocol,
+});
+export type MicroVmPort = typeof MicroVmPort.Type;
+
+/**
+ * Optional desktop profile. The VM boots a lightweight Linux desktop and
+ * exposes noVNC on a loopback-only host port so the existing preview pane can
+ * stream it. `hostPort` is allocated automatically when omitted.
+ */
+export const MicroVmDesktopInput = Schema.Struct({
+  width: optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(640)).check(Schema.isLessThanOrEqualTo(3840)),
+  ),
+  height: optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(480)).check(Schema.isLessThanOrEqualTo(2160)),
+  ),
+  hostPort: optional(PortNumber),
+});
+export type MicroVmDesktopInput = typeof MicroVmDesktopInput.Type;
+
+export const MicroVmDesktop = Schema.Struct({
+  viewerUrl: Schema.String,
+  hostPort: PortNumber,
+  guestPort: PortNumber,
+  width: Schema.Int,
+  height: Schema.Int,
+});
+export type MicroVmDesktop = typeof MicroVmDesktop.Type;
+
 export const MicroVmStatus = Schema.Literals([
   "created",
   "starting",
@@ -24,6 +79,8 @@ export const MicroVmInfo = Schema.Struct({
   maxMemoryMiB: Schema.Int,
   rootDiskMiB: Schema.NullOr(Schema.Int),
   workdir: Schema.String,
+  ports: Schema.Array(MicroVmPort),
+  desktop: Schema.NullOr(MicroVmDesktop),
   projectId: Schema.NullOr(Schema.String),
   threadId: Schema.NullOr(Schema.String),
   createdAt: Schema.NullOr(Schema.String),
@@ -50,6 +107,8 @@ export const MicroVmCreateInput = Schema.Struct({
   workdir: optional(Schema.String),
   sourcePath: optional(Schema.String),
   guestSourcePath: optional(Schema.String),
+  ports: optional(Schema.Array(MicroVmPortInput)),
+  desktop: optional(MicroVmDesktopInput),
   projectId: optional(Schema.String),
   threadId: optional(Schema.String),
   env: optional(Schema.Record(Schema.String, Schema.String)),
@@ -71,6 +130,8 @@ export const MicroVmModifyInput = Schema.Struct({
   rootDiskMiB: optional(Schema.Int),
   workdir: optional(Schema.String),
   env: optional(Schema.Record(Schema.String, Schema.String)),
+  ports: optional(Schema.Array(MicroVmPortInput)),
+  portsRemove: optional(Schema.Array(MicroVmPortEndpointInput)),
   apply: optional(Schema.Literals(["now", "next-start", "restart"])),
 });
 export type MicroVmModifyInput = typeof MicroVmModifyInput.Type;

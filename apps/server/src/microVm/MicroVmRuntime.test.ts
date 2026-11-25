@@ -22,6 +22,8 @@ const crashedVm = {
   maxMemoryMiB: 1024,
   rootDiskMiB: 4096,
   workdir: "/workspace",
+  ports: [],
+  desktop: null,
   projectId: null,
   threadId: null,
   createdAt: null,
@@ -64,6 +66,81 @@ describe("buildMicroVmModifyOptions", () => {
     expect(() =>
       buildMicroVmModifyOptions(crashedVm, { name: crashedVm.name, rootDiskMiB: 2048 }),
     ).toThrow("rootDiskMiB cannot shrink from 4096 to 2048");
+  });
+
+  it("publishes a port and records the resolved mapping", () => {
+    expect(
+      buildMicroVmModifyOptions(crashedVm, {
+        name: crashedVm.name,
+        ports: [{ hostPort: 8080, guestPort: 80 }],
+      }),
+    ).toEqual({
+      ports: [{ hostPort: 8080, guestPort: 80, hostBind: "127.0.0.1", protocol: "tcp" }],
+      labels: {
+        "erebus.ports": JSON.stringify([
+          { hostPort: 8080, guestPort: 80, hostBind: "127.0.0.1", protocol: "tcp" },
+        ]),
+      },
+      policy: "no_restart",
+    });
+  });
+
+  it("rejects a published port that leaves loopback", () => {
+    expect(() =>
+      buildMicroVmModifyOptions(crashedVm, {
+        name: crashedVm.name,
+        ports: [{ hostPort: 8080, guestPort: 80, hostBind: "0.0.0.0" }],
+      }),
+    ).toThrow("hostBind must be a loopback address");
+  });
+
+  it("removes a published port and keeps the remaining mappings", () => {
+    expect(
+      buildMicroVmModifyOptions(
+        {
+          ...crashedVm,
+          ports: [
+            { hostPort: 8080, guestPort: 80, hostBind: "127.0.0.1", protocol: "tcp" },
+            { hostPort: 8443, guestPort: 443, hostBind: "127.0.0.1", protocol: "tcp" },
+          ],
+        },
+        { name: crashedVm.name, portsRemove: [{ hostPort: 8080 }] },
+      ),
+    ).toEqual({
+      portsRemove: [{ hostPort: 8080, protocol: "tcp" }],
+      labels: {
+        "erebus.ports": JSON.stringify([
+          { hostPort: 8443, guestPort: 443, hostBind: "127.0.0.1", protocol: "tcp" },
+        ]),
+      },
+      policy: "no_restart",
+    });
+  });
+
+  it("refuses to remove or remap the desktop viewer port", () => {
+    const desktopVm = {
+      ...crashedVm,
+      ports: [{ hostPort: 6080, guestPort: 6080, hostBind: "127.0.0.1", protocol: "tcp" as const }],
+      desktop: {
+        viewerUrl: "http://127.0.0.1:6080/vnc.html",
+        hostPort: 6080,
+        guestPort: 6080,
+        width: 1440,
+        height: 900,
+      },
+    };
+    expect(() =>
+      buildMicroVmModifyOptions(desktopVm, {
+        name: crashedVm.name,
+        portsRemove: [{ hostPort: 6080 }],
+      }),
+    ).toThrow("desktop viewer port cannot be removed");
+    expect(() =>
+      buildMicroVmModifyOptions(desktopVm, {
+        name: crashedVm.name,
+        ports: [{ hostPort: 6080, guestPort: 80 }],
+      }),
+    ).toThrow("desktop viewer host port cannot be remapped");
   });
 });
 
