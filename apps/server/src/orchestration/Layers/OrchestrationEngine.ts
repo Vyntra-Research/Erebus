@@ -212,6 +212,31 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       };
     });
 
+  const hydrateThreadForkSource = (
+    baseReadModel: OrchestrationReadModel,
+    command: OrchestrationCommand,
+  ): Effect.Effect<OrchestrationReadModel, OrchestrationDispatchError> => {
+    if (command.type !== "thread.fork") {
+      return Effect.succeed(baseReadModel);
+    }
+    // The command read model intentionally carries only streaming messages.
+    // A fork needs the complete visible history, so hydrate its source thread
+    // from the projection before the decider copies it.
+    return projectionSnapshotQuery.getThreadDetailSnapshot(command.sourceThreadId).pipe(
+      Effect.map(
+        Option.match({
+          onNone: () => baseReadModel,
+          onSome: (snapshot) => ({
+            ...baseReadModel,
+            threads: baseReadModel.threads.map((thread) =>
+              thread.id === command.sourceThreadId ? snapshot.thread : thread,
+            ),
+          }),
+        }),
+      ),
+    );
+  };
+
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = commandReadModel.snapshotSequence;
     let processingStartedAtMs = 0;
@@ -303,8 +328,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
         }
 
-        const decisionReadModel = yield* hydrateExactCommandProposedPlans(
-          commandReadModel,
+        const decisionReadModel = yield* hydrateThreadForkSource(
+          yield* hydrateExactCommandProposedPlans(commandReadModel, envelope.command),
           envelope.command,
         );
         const eventBase = yield* decideOrchestrationCommand({

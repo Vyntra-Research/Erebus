@@ -33,6 +33,12 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 // window is a failed/stale start, not pending work. Mirrors the client's
 // QUEUED_TURN_START_GRACE_MS in client-runtime threadSettled.ts.
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
+// A fork is a conversation copy, not a new provider session. Keep the same
+// bounded visible window the thread detail uses so the import event and its
+// projection work stay predictable for very long threads.
+const FORK_MESSAGE_LIMIT = 2_000;
+const FORK_ACTIVITY_LIMIT = 500;
+const FORK_PLAN_LIMIT = 200;
 
 /**
  * Blocked-on-you work derived from the thread's retained activities: an
@@ -550,19 +556,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
       const cutoffCreatedAt =
         cutoffIndex < source.messages.length ? source.messages[cutoffIndex]?.createdAt : undefined;
-      const copiedMessages = source.messages.slice(0, cutoffIndex).map((message) => ({
-        ...message,
-        id: MessageId.make(`fork:${command.threadId}:${message.id}`),
-        streaming: false,
-      }));
+      const copiedMessages = source.messages
+        .slice(0, cutoffIndex)
+        .slice(-FORK_MESSAGE_LIMIT)
+        .map((message) => ({
+          ...message,
+          id: MessageId.make(`fork:${command.threadId}:${message.id}`),
+          streaming: false,
+        }));
       const copiedActivities = source.activities
         .filter((activity) => cutoffCreatedAt === undefined || activity.createdAt < cutoffCreatedAt)
+        .slice(-FORK_ACTIVITY_LIMIT)
         .map((activity) => ({
           ...activity,
           id: EventId.make(`fork:${command.threadId}:${activity.id}`),
         }));
       const copiedProposedPlans = source.proposedPlans
         .filter((plan) => cutoffCreatedAt === undefined || plan.createdAt < cutoffCreatedAt)
+        .slice(-FORK_PLAN_LIMIT)
         .map((plan) => ({
           ...plan,
           id: OrchestrationProposedPlanId.make(`fork:${command.threadId}:${plan.id}`),

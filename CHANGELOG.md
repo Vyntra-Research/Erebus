@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.26 - 2026-11-26
+
+### Fixed
+
+- Fork a thread from its full projected history instead of the command read model's streaming-only message cache. Forks now include the visible conversation and work history instead of opening nearly empty. Very long threads keep the latest 2,000 messages, 500 work entries, and 200 proposed plans so the fork stays bounded.
+
 ## 2.0.0-beta.25 - 2026-11-26
 
 ### Added
