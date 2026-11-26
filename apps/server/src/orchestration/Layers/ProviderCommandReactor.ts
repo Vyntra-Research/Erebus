@@ -105,6 +105,46 @@ function toNonEmptyProviderInput(value: string | undefined): string | undefined 
   return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
+/**
+ * The provider must be able to anchor "now" without asking the user. The UI
+ * already renders a local timestamp, but that display state never reaches the
+ * model. Prefix the provider-only input with a self-contained local date,
+ * weekday, time, and UTC offset; the stored user message stays untouched.
+ */
+function providerMessageTimestampPrefix(createdAt: string): string | undefined {
+  const parsed = DateTime.make(createdAt);
+  if (Option.isNone(parsed)) {
+    return undefined;
+  }
+  const date = DateTime.toDate(parsed.value);
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
+  const datePart = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+  const timePart = [
+    String(date.getHours()).padStart(2, "0"),
+    String(date.getMinutes()).padStart(2, "0"),
+  ].join(":");
+  const offsetMinutes = date.getTimezoneOffset();
+  const offsetSign = offsetMinutes <= 0 ? "+" : "-";
+  const absoluteOffsetMinutes = Math.abs(offsetMinutes);
+  const offsetPart = `${offsetSign}${String(Math.floor(absoluteOffsetMinutes / 60)).padStart(2, "0")}:${String(absoluteOffsetMinutes % 60).padStart(2, "0")}`;
+  return `[Message sent: ${weekday}, ${datePart}, ${timePart} ${offsetPart}]`;
+}
+
+function withProviderMessageTimestamp(
+  input: string | undefined,
+  createdAt: string,
+): string | undefined {
+  const prefix = providerMessageTimestampPrefix(createdAt);
+  if (input === undefined || prefix === undefined) {
+    return input;
+  }
+  return `${prefix}\n\n${input}`;
+}
+
 type PortableHistoryMessage = Pick<
   OrchestrationMessage,
   "id" | "role" | "text" | "attachments" | "streaming" | "createdAt"
@@ -1269,11 +1309,12 @@ const make = Effect.gen(function* () {
 
     const turnModelSelection = modelForTurn ?? limitModelSelection;
     const turnMaxInputChars = resolveModelInputChars(settings, turnModelSelection);
-    if (normalizedInput !== undefined && normalizedInput.length > turnMaxInputChars) {
+    const providerInput = withProviderMessageTimestamp(normalizedInput, input.createdAt);
+    if (providerInput !== undefined && providerInput.length > turnMaxInputChars) {
       return yield* new ProviderAdapterValidationError({
         provider: String(turnModelSelection.instanceId),
         operation: "thread.turn.start",
-        issue: overLimitIssue(turnMaxInputChars, turnModelSelection.model, normalizedInput.length),
+        issue: overLimitIssue(turnMaxInputChars, turnModelSelection.model, providerInput.length),
       });
     }
     const request: ProviderSendTurnInput = {
@@ -1284,7 +1325,7 @@ const make = Effect.gen(function* () {
             delivery: "live-user-steer" as const,
           }
         : {}),
-      ...(normalizedInput ? { input: normalizedInput } : {}),
+      ...(providerInput ? { input: providerInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),

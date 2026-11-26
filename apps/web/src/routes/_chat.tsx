@@ -1,4 +1,4 @@
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useMemo } from "react";
 
@@ -175,6 +175,16 @@ function ChatRouteGlobalShortcuts() {
 }
 
 function ChatRouteLayout() {
+  const location = useLocation();
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem("erebus:last-chat-location", location.pathname);
+    } catch {
+      // Storage can be unavailable in hardened browsers; the back button
+      // falls back to history navigation.
+    }
+  }, [location.pathname]);
+
   return (
     <>
       <ChatRouteGlobalShortcuts />

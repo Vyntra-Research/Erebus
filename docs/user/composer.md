@@ -6,6 +6,12 @@ Images upload as soon as you add them. The send button becomes available after e
 
 Draft text stays local to the composer while an active turn updates the timeline. Only an explicit send action submits it.
 
+Each prompt reaches the provider with a local send timestamp: weekday, date, time, and UTC offset. The agent can anchor "now" without asking for the clock. The stored message keeps its original text; the timestamp is provider-only.
+
+## Editing a message
+
+Hover a user message and choose **Edit message**. Saving creates a fork of the conversation at that point and sends the edited message in the new thread; the original thread stays unchanged. The fork copies the visible conversation and work history, not the provider session or checkpoints.
+
 ## Commands and skills
 
 Type `/` to open commands. Type `$` to search skills. Skill results show their source and add the matching `$name` token to the message.

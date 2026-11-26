@@ -99,7 +99,6 @@ import {
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
-  deriveReasoningEntries,
   deriveTurnPlans,
   findLatestProposedPlan,
   deriveWorkLogEntries,
@@ -1296,6 +1295,7 @@ function ChatViewContent(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const forkThread = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -2388,10 +2388,6 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const turnPlans = useMemo(() => deriveTurnPlans(threadActivities), [threadActivities]);
-  const reasoningEntries = useMemo(
-    () => deriveReasoningEntries(threadActivities),
-    [threadActivities],
-  );
   // Native subagent fold: memoized by activity-list identity, shared by the
   // Agents surface, live strip, and workflow cards. v2Projection is null
   // until orchestration-v2 lands (source precedence lives in the derive).
@@ -2762,9 +2758,8 @@ function ChatViewContent(props: ChatViewProps) {
         activeThread?.proposedPlans ?? [],
         workLogEntries,
         turnPlans,
-        reasoningEntries,
       ),
-    [activeThread?.proposedPlans, timelineMessages, turnPlans, workLogEntries, reasoningEntries],
+    [activeThread?.proposedPlans, timelineMessages, turnPlans, workLogEntries],
   );
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
@@ -6749,6 +6744,81 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+  const onEditUserMessage = useCallback(
+    async (messageId: MessageId, text: string): Promise<boolean> => {
+      if (!activeThread) {
+        return false;
+      }
+      const message = activeThread.messages.find((entry) => entry.id === messageId);
+      const trimmed = text.trim();
+      if (!message || message.role !== "user" || trimmed.length === 0) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Message is not ready to edit",
+            description: "Wait for the message to finish sending, then try again.",
+          }),
+        );
+        return false;
+      }
+
+      const forkThreadId = newThreadId();
+      const forkResult = await forkThread({
+        environmentId: activeThread.environmentId,
+        input: {
+          sourceThreadId: activeThread.id,
+          threadId: forkThreadId,
+          upToMessageId: messageId,
+          title: `${activeThread.title} (edit)`,
+        },
+      });
+      if (forkResult._tag === "Failure") {
+        if (isAtomCommandInterrupted(forkResult)) return false;
+        const error = squashAtomCommandFailure(forkResult);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to fork thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+        return false;
+      }
+
+      const turnResult = await startThreadTurn({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: forkThreadId,
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: trimmed,
+            attachments: message.attachments ?? [],
+          },
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      if (turnResult._tag === "Failure" && !isAtomCommandInterrupted(turnResult)) {
+        const error = squashAtomCommandFailure(turnResult);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Fork created, but the edited message did not send",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId: activeThread.environmentId, threadId: forkThreadId },
+      });
+      return true;
+    },
+    [activeThread, forkThread, navigate, startThreadTurn],
+  );
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -7021,6 +7091,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
+                onEditUserMessage={onEditUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}

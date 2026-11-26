@@ -14,6 +14,10 @@ Archive a thread when it should leave the normal sidebar. Deleting a thread remo
 
 Pin a thread to keep it above other work. Drag pinned threads to change their order.
 
+## Fork a thread
+
+Use **Fork thread** in a thread's context menu to copy its conversation and work history into a new thread. The fork keeps the project, model, runtime mode, and workspace, but starts with no provider session or checkpoints. The original thread is unchanged. Fork a settled thread when you want to branch the conversation without editing the original.
+
 ## Co-agent threads
 
 Co-agents appear beneath their parent while they work. Releasing or deleting a co-agent removes its stored provider conversation and the history of native subagents it started. Collect the handback first. The parent and other threads remain intact.

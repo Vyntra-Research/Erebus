@@ -961,6 +961,21 @@ const ThreadCreateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadForkCommand = Schema.Struct({
+  type: Schema.Literal("thread.fork"),
+  commandId: CommandId,
+  sourceThreadId: ThreadId,
+  threadId: ThreadId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * Fork from the message immediately before this one. Used by message
+   * editing: the fork keeps the prior history and the client sends the
+   * edited message as its first turn.
+   */
+  upToMessageId: Schema.optional(MessageId),
+  createdAt: IsoDateTime,
+});
+
 const ThreadDeleteCommand = Schema.Struct({
   type: Schema.Literal("thread.delete"),
   commandId: CommandId,
@@ -1218,6 +1233,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadForkCommand,
   ThreadDeleteCommand,
   ArchivedThreadsDeleteCommand,
   ThreadArchiveCommand,
@@ -1249,6 +1265,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadForkCommand,
   ThreadDeleteCommand,
   ArchivedThreadsDeleteCommand,
   ThreadArchiveCommand,
