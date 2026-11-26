@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0-beta.27 - 2026-11-26
+
+### Added
+
+- Forked threads and cross-provider imports rebuild provider context from the last recorded context compaction: the summary plus the messages after it. OpenCode imports a native compaction message; providers without transcript import receive the same summary and tail in the bounded seed.
+- Forks copy the complete conversation instead of the latest 2,000 messages. Work-log and proposed-plan rows remain bounded, and compaction checkpoints are always retained.
+
+### Fixed
+
+- Preserve activity payloads when a thread is forked or imported, so compaction summaries and tool details survive the copy.
+
+### Changed
+
+- Compactions recorded before this build have no stored summary. Until the thread compacts again, a fork or provider switch falls back to the full transcript on OpenCode or the bounded tail on Codex.
+
 ## 2.0.0-beta.26 - 2026-11-26
 
 ### Fixed
