@@ -293,6 +293,13 @@ export type MessagesTimelineRow =
       turnPlan: TurnPlanEntry;
     }
   | {
+      kind: "reasoning";
+      id: string;
+      createdAt: string;
+      turnId: TurnId | null;
+      text: string;
+    }
+  | {
       kind: "working";
       id: string;
       createdAt: string | null;
@@ -589,6 +596,9 @@ function timelineEntryTurnId(
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.turnId;
   }
+  if (entry.kind === "reasoning") {
+    return entry.turnId;
+  }
   return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
 }
 
@@ -598,6 +608,9 @@ function explicitFoldTurnId(entry: TimelineEntry): TurnId | null {
     (entry.message.role === "assistant" || messageIsCoagentCoordination(entry.message))
   ) {
     return entry.message.turnId ?? null;
+  }
+  if (entry.kind === "reasoning") {
+    return entry.turnId;
   }
   return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
 }
@@ -782,6 +795,11 @@ function deriveTurnFolds(input: {
       ) {
         continue;
       }
+      // Completed reasoning is a user-facing artifact, not background work.
+      // Keep the minimized thinking card visible when the turn folds.
+      if (entry.kind === "reasoning") {
+        continue;
+      }
       hiddenEntryIds.add(entry.id);
     }
     if (hiddenEntryIds.size === 0) {
@@ -919,6 +937,7 @@ export function deriveMessagesTimelineRows(input: {
       );
     }
     if (entry.kind === "proposed-plan" || entry.kind === "turn-plan") return true;
+    if (entry.kind === "reasoning") return true;
     return false;
   });
 
@@ -1169,6 +1188,17 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "reasoning") {
+      nextRows.push({
+        kind: "reasoning",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        turnId: timelineEntry.turnId,
+        text: timelineEntry.text,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "proposed-plan") {
       nextRows.push({
         kind: "proposed-plan",
@@ -1269,6 +1299,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
+
+    case "reasoning": {
+      const br = b as typeof a;
+      return a.text === br.text && a.turnId === br.turnId;
+    }
 
     case "turn-plan": {
       const bp = b as typeof a;

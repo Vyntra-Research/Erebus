@@ -9,7 +9,7 @@ import {
 } from "./researchPrincipalInstructions.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const RESEARCH_SUPERVISOR_POLICY_VERSION = 25;
+export const RESEARCH_SUPERVISOR_POLICY_VERSION = 26;
 export const RESEARCH_EVALUATOR_MODEL = DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorModel;
 export const RESEARCH_EVALUATOR_REASONING_EFFORT =
   DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorReasoningEffort;

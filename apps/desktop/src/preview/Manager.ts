@@ -3384,6 +3384,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         const host = cookie.domain.replace(/^\./, "");
         const path = cookie.path.startsWith("/") ? cookie.path : `/${cookie.path}`;
         const url = `${cookie.secure === false ? "http" : "https"}://${host}${path}`;
+        // The extension export marks a host-only cookie by omitting the
+        // leading dot. Passing a domain back for those turns them into domain
+        // cookies, and Chromium then rejects `__Host-` cookies because that
+        // prefix forbids a Domain attribute.
+        const hostOnly = !cookie.domain.startsWith(".");
         const sameSite =
           cookie.sameSite === "Strict"
             ? ("strict" as const)
@@ -3399,7 +3404,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               url,
               name: cookie.name,
               value: cookie.value,
-              domain: cookie.domain,
+              ...(hostOnly ? {} : { domain: cookie.domain }),
               path,
               secure: cookie.secure ?? false,
               httpOnly: cookie.httpOnly ?? false,

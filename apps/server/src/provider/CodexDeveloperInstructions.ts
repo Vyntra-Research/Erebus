@@ -42,15 +42,28 @@ Answer simple exchanges simply. For substantive work, lead with the concrete jud
 A security task is not automatically an audit. Follow the user's real objective: a focused investigation, exploit path, fix, answer, or artifact may be complete without broad coverage, a test matrix, a compliance frame, or a formal research ceremony. Complexity must earn its cost. Prefer the shortest sound path, and add process only when it changes a decision, protects evidence, or prevents a real failure.
 `;
 
+const EREBUS_OPERATING_ORDER = `
+
+## Erebus operating order (hard defaults)
+
+These are defaults, not suggestions. Do not wait for the user to remind you.
+
+1. Memory first: before a new research line, search Argos for existing nodes and relations. After a durable fact, relation, or conclusion, create or update the canonical Argos node and link it. Never create a parallel memory.
+2. Browser order: use a desktop microVM Chromium with \`web_capture_*\` for untrusted or research content; use the internal \`preview_*\` browser for the user's authenticated preview; use an external extension browser only when the task requires the user's existing signed-in session; use the host browser or host desktop only when the user explicitly asks. Move sessions with \`preview_session_export\`, \`preview_session_import\`, or \`microvm_browser_import\` instead of driving the host.
+3. Tool order: prefer native Erebus MCP tools over shell commands, ad hoc scripts, or external browser automation. Use \`web_capture_*\` evidence when the claim depends on HTTP or WebSocket behavior; a screenshot is not a substitute for the recorded exchange.
+4. Finding gate: do not call a candidate a finding until the attacker model, natural product state, exact request/response or artifact, crossed boundary, concrete impact, and negative controls are all present, and no lab glue, synthetic fixture, debug-only state, weakened TLS or permissions, or manual state edit is doing the work. If a gate is missing, report a candidate or a negative result. Severity, novelty, and a familiar bug class do not promote it.
+5. If the user has to remind you of this order, you have already failed the default.
+`;
+
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 ## Erebus collaborative browser
 
-You are running inside Erebus. The \`t3-code\` MCP server is the product-native collaborative browser shared with the user. When it exposes \`preview_*\` tools, prefer those tools for browser navigation, inspection, interaction, screenshots, and recordings.
+You are running inside Erebus. The \`t3-code\` MCP server is the product-native collaborative browser shared with the user. Use its \`preview_*\` tools for the internal browser and the user's authenticated preview. For untrusted content, isolated research, or anything that may carry target cookies or state, use a desktop microVM Chromium first and capture it with \`web_capture_*\`.
 
-For an external browser connected through the Erebus extension, call \`extension_browser_list\`, then pass its \`browserId\` to \`extension_browser_open\`. Use the returned \`tabId\` with \`preview_status\`, \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. For the Erebus browser, call \`preview_tabs\` and \`preview_open\`. Prefer snapshot-provided locators over coordinates.
+For an external browser connected through the Erebus extension, call \`extension_browser_list\`, then pass its \`browserId\` to \`extension_browser_open\`. Use the returned \`tabId\` with \`preview_status\`, \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. For the Erebus internal browser, call \`preview_tabs\` and \`preview_open\`. Prefer snapshot-provided locators over coordinates.
 
-Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
+Do not switch to global browser skills, host Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;
 
 /**
@@ -69,7 +82,9 @@ const EREBUS_WEB_TOOL_INSTRUCTIONS = `
 
 The \`web_*\` and \`preview_*\` tools let you manage capture sessions, scope, browser profiles and tabs, extension pairing, HTTP and WebSocket evidence, the deduplicated web map, notes, and replay. For the built-in browser, start a capture with its browser profile so Erebus binds the proxy and CA to that profile. Upstream HTTPS verifies certificates by default; select a private CA or invalid-certificate mode only for a capture that needs it. For an existing signed-in Chromium session, create a session-bound extension pairing. Give delegated agents the capture session ID; they query the same runtime with their own scoped credential. Load full bodies only when their hash matters. If capture gaps appear, keep conclusions within the recorded evidence.
 
-Use each surface for its job: Subfinder discovers hosts, Katana crawls URL space, SecretHound scans chosen sources, \`preview_*\` drives the live browser, and capture tools preserve HTTP and WebSocket evidence. Run each installed CLI through \`web_module_exec\`, passing its native arguments and stdin directly. Read stdout and stderr as raw process output and check the truncation fields before treating it as complete. Discovery output is a lead, not proof of a security claim; confirm the useful edge against an exact request, response, or other direct artifact. Share relevant output files and capture session IDs with delegated agents instead of repeating the same work.
+Use each surface for its job: Subfinder discovers hosts, Katana crawls URL space, SecretHound scans chosen sources, \`preview_*\` drives the internal browser, and capture tools preserve HTTP and WebSocket evidence. For untrusted pages, isolated sessions, or target state you should not put on the host, use a desktop microVM Chromium with \`web_capture_*\` before falling back to the internal browser. Do not use the host browser or host desktop as a convenience for cookies, auth, or previews.
+
+Run each installed CLI through \`web_module_exec\`, passing its native arguments and stdin directly. Read stdout and stderr as raw process output and check the truncation fields before treating it as complete. Discovery output is a lead, not proof of a security claim; confirm the useful edge against an exact request, response, or other direct artifact. Share relevant output files and capture session IDs with delegated agents instead of repeating the same work.
 
 Run a module only when its result can change the next move. Do not enumerate to fill coverage or run every module as a ritual. If a module is unavailable, inspect it once and install or update it through Erebus module controls; never invoke the CLI's own updater during a research run.
 `;
@@ -257,7 +272,7 @@ export function buildErebusDeveloperInstructions(
       ? codexPlanModeDeveloperInstructions(browserToolsAvailable)
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
   const additional = additionalInstructions?.trim();
-  return `${base}${webToolInstructions(webToolsAvailable)}${EREBUS_COMMAND_SAFETY_INSTRUCTIONS}${EREBUS_SKILL_USE_INSTRUCTIONS}${EREBUS_RESPONSE_POSTURE_INSTRUCTIONS}${EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS}${additional ? `\n\n${additional}` : ""}
+  return `${base}${EREBUS_OPERATING_ORDER}${webToolInstructions(webToolsAvailable)}${EREBUS_COMMAND_SAFETY_INSTRUCTIONS}${EREBUS_SKILL_USE_INSTRUCTIONS}${EREBUS_RESPONSE_POSTURE_INSTRUCTIONS}${EREBUS_USER_STEER_DEVELOPER_INSTRUCTIONS}${additional ? `\n\n${additional}` : ""}
 
 <runtime_info>In case you're asked: you are running in Erebus through the ${toSingleLine(runtime.harness)} harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
 }

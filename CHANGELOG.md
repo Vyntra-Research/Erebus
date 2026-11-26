@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.0-beta.24 - 2026-11-26
+
+### Added
+
+- Show completed model reasoning as a minimized **Thinking** card in the timeline. Expand the card to read the reasoning text. OpenCode/Gemini reasoning is now preserved instead of discarded, and providers that report reasoning items use the same card.
+
+### Fixed
+
+- Interrupting a turn now settles the thread session back to ready. Previously the work stopped but the thread could keep showing a running spinner, so the stop control appeared to do nothing.
+- Import a browser session whose cookies use `__Host-` or host-only scope. The internal preview and desktop microVM browser now keep those cookies host-only instead of turning them into domain cookies that Chromium rejects.
+
+### Changed
+
+- Codex and OpenCode now receive a shared top-of-prompt operating order: search Argos before a new research line, prefer microVM and internal browser surfaces over the host browser, prefer native Erebus tools and recorded HTTP/WebSocket evidence, and keep a candidate a candidate until the attacker model, natural state, evidence, boundary, impact, and negative control are present.
+- The shared microVM guidance now prohibits using the host browser for cookie, auth, or convenience reasons and requires moving sessions with the existing export/import tools.
+
 ## 2.0.0-beta.23 - 2026-11-25
 
 ### Fixed

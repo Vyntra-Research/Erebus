@@ -23,7 +23,10 @@ it("keeps the durable heuristics in principal and Judge roles", () => {
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /A limit on one producer/);
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Reopen a conclusion/);
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Connect complementary evidence/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Promotion gate/);
   assert.include(EREBUS_PRINCIPAL_INSTRUCTIONS, EREBUS_RESEARCH_BASE_CONTRACT);
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /Argos is the default durable memory/);
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /Finding promotion gate/);
   assert.include(JUDGE_POLICY, EREBUS_RESEARCH_BASE_CONTRACT);
 });
 
@@ -40,7 +43,7 @@ it("keeps Judge independent, artifact-bounded, and campaign-free", () => {
 });
 
 it("records the campaign-free policy revision and pinned evaluator", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 24);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 25);
   assert.include(
     RESEARCH_INTERNAL_POLICY.principalInstructions,
     EREBUS_PRINCIPAL_INSTRUCTIONS.trim(),
@@ -49,8 +52,8 @@ it("records the campaign-free policy revision and pinned evaluator", () => {
     RESEARCH_INTERNAL_POLICY.principalInstructions,
     /`mcp_fallback`[\s\S]*instead of native `research\.\*`/,
   );
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 25);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 25);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 26);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 26);
   assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 600);
   assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 60);
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

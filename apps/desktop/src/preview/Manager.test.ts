@@ -210,6 +210,7 @@ const makeFaviconWebContents = (options?: {
   readonly fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   readonly id?: number;
   readonly rasterize?: (code: string) => Promise<unknown>;
+  readonly setCookie?: (details: unknown) => Promise<boolean>;
   readonly url?: string;
 }) => {
   const sourcePng = makeSourcePng();
@@ -232,6 +233,7 @@ const makeFaviconWebContents = (options?: {
   const loadURL = vi.fn(async (url: string) => {
     currentUrl = url;
   });
+  const setCookie = vi.fn(options?.setCookie ?? (async () => true));
   const off = vi.fn();
   const debuggerOff = vi.fn();
   const webContents = {
@@ -255,7 +257,7 @@ const makeFaviconWebContents = (options?: {
     off,
     ipc: { on: vi.fn(), off: vi.fn() },
     send: webviewSend,
-    session: { fetch },
+    session: { fetch, cookies: { set: setCookie } },
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
     setWindowOpenHandler: vi.fn(),
     executeJavaScriptInIsolatedWorld,
@@ -278,6 +280,7 @@ const makeFaviconWebContents = (options?: {
     setDestroyed: (value: boolean) => {
       destroyed = value;
     },
+    setCookie,
     setLoading: (value: boolean) => {
       loading = value;
     },
@@ -579,6 +582,55 @@ describe("PreviewManager", () => {
         });
       }),
     ),
+  );
+
+  effectIt.effect(
+    "imports host-only cookies without a domain and keeps domain cookies scoped",
+    () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const preview = makeFaviconWebContents();
+          fromId.mockReturnValue(preview.webContents);
+          yield* manager.createTab("tab_import_session");
+          yield* manager.registerWebview("tab_import_session", 42);
+
+          yield* manager.importSession("tab_import_session", {
+            url: "https://www.figma.com/files",
+            cookies: [
+              {
+                name: "__Host-figma.authn",
+                value: "host-only",
+                domain: "www.figma.com",
+                path: "/",
+                secure: true,
+                httpOnly: true,
+                sameSite: "Lax",
+              },
+              {
+                name: "figma.session",
+                value: "domain",
+                domain: ".www.figma.com",
+                path: "/",
+                secure: true,
+                httpOnly: true,
+                sameSite: "Lax",
+              },
+            ],
+            origins: [],
+          });
+
+          expect(preview.setCookie).toHaveBeenCalledTimes(2);
+          expect(preview.setCookie.mock.calls[0]?.[0]).toMatchObject({
+            name: "__Host-figma.authn",
+            url: "https://www.figma.com/",
+          });
+          expect(preview.setCookie.mock.calls[0]?.[0]).not.toHaveProperty("domain");
+          expect(preview.setCookie.mock.calls[1]?.[0]).toMatchObject({
+            name: "figma.session",
+            domain: ".www.figma.com",
+          });
+        }),
+      ),
   );
 
   effectIt.effect("does not let destroyed-webview cleanup detach a same-id replacement", () =>

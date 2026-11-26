@@ -239,6 +239,13 @@ export type TimelineEntry =
     }
   | {
       id: string;
+      kind: "reasoning";
+      createdAt: string;
+      turnId: TurnId | null;
+      text: string;
+    }
+  | {
+      id: string;
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
@@ -770,6 +777,49 @@ export interface TurnPlanEntry {
   createdAt: string;
   turnId: TurnId | null;
   plan: ActivePlanState;
+}
+
+export interface ReasoningEntry {
+  /** Stable per reasoning part; duplicate provider completions replace in place. */
+  id: string;
+  createdAt: string;
+  turnId: TurnId | null;
+  text: string;
+}
+
+/**
+ * Collapse completed reasoning parts into one minimized card each. The
+ * provider streams deltas during the turn; only the completed part carries the
+ * full text worth showing in the timeline.
+ */
+export function deriveReasoningEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReasoningEntry[] {
+  const byKey = new Map<string, ReasoningEntry>();
+  for (const activity of [...activities].toSorted(compareActivitiesByOrder)) {
+    if (activity.kind !== "assistant.reasoning") {
+      continue;
+    }
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const text = typeof payload?.detail === "string" ? payload.detail.trim() : "";
+    if (text.length === 0) {
+      continue;
+    }
+    const key =
+      typeof payload?.itemId === "string" && payload.itemId.length > 0
+        ? payload.itemId
+        : activity.id;
+    byKey.set(key, {
+      id: `reasoning:${key}`,
+      createdAt: activity.createdAt,
+      turnId: activity.turnId,
+      text,
+    });
+  }
+  return [...byKey.values()];
 }
 
 /**
@@ -2002,6 +2052,7 @@ export function deriveTimelineEntries(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
   turnPlans: ReadonlyArray<TurnPlanEntry> = [],
+  reasoningEntries: ReadonlyArray<ReasoningEntry> = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -2020,6 +2071,13 @@ export function deriveTimelineEntries(
     kind: "turn-plan",
     createdAt: turnPlan.createdAt,
     turnPlan,
+  }));
+  const reasoningRows: TimelineEntry[] = reasoningEntries.map((reasoning) => ({
+    id: reasoning.id,
+    kind: "reasoning",
+    createdAt: reasoning.createdAt,
+    turnId: reasoning.turnId,
+    text: reasoning.text,
   }));
   const conversationRows = [...messageRows, ...proposedPlanRows, ...turnPlanRows];
   const workRows: TimelineEntry[] = workEntries.map((entry) => {
@@ -2042,9 +2100,13 @@ export function deriveTimelineEntries(
       entry: repairedEntry,
     };
   });
-  return [...messageRows, ...proposedPlanRows, ...turnPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
+  return [
+    ...reasoningRows,
+    ...messageRows,
+    ...proposedPlanRows,
+    ...turnPlanRows,
+    ...workRows,
+  ].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function inferCheckpointTurnCountByTurnId(
