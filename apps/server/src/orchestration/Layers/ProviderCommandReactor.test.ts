@@ -72,6 +72,10 @@ const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalReques
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
 
+/** The provider-only turn input carries a local timestamp prefix. */
+const withoutProviderTimestamp = (input: string | undefined): string | undefined =>
+  input?.replace(/^\[Message sent: [^\]]+\]\n\n/, "");
+
 const deriveServerPathsSync = (baseDir: string, devUrl: URL | undefined) =>
   Effect.runSync(deriveServerPaths(baseDir, devUrl).pipe(Effect.provide(NodeServices.layer)));
 
@@ -268,6 +272,64 @@ describe("ProviderCommandReactor", () => {
       );
     });
 
+    it("includes the last compaction summary before the post-checkpoint history", () => {
+      const currentMessageId = asMessageId("current-after-compaction");
+      const result = buildImportedThreadContinuationInput({
+        currentMessageId,
+        currentInput: "Continue after compaction.",
+        compaction: {
+          summary: "The earlier plan was to implement native history import.",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        messages: [
+          {
+            id: asMessageId("post-compaction-message"),
+            role: "assistant",
+            text: "Post-compaction context.",
+            streaming: false,
+            createdAt: "2026-01-01T00:00:01.000Z",
+          },
+          {
+            id: currentMessageId,
+            role: "user",
+            text: "Continue after compaction.",
+            streaming: false,
+            createdAt: "2026-01-01T00:00:02.000Z",
+          },
+        ],
+      });
+
+      expect(result).toContain("[SUMMARY OF EARLIER CONVERSATION - CONTEXT ONLY]");
+      expect(result).toContain("The earlier plan was to implement native history import.");
+      expect(result).toContain("Post-compaction context.");
+      expect(result).toContain("Continue after compaction.");
+    });
+
+    it("keeps the compaction summary when no post-checkpoint message fits", () => {
+      const currentMessageId = asMessageId("current-summary-only");
+      const result = buildImportedThreadContinuationInput({
+        currentMessageId,
+        currentInput: "Only the summary is available.",
+        compaction: {
+          summary: "Earlier work stayed on the fork design.",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        messages: [
+          {
+            id: currentMessageId,
+            role: "user",
+            text: "Only the summary is available.",
+            streaming: false,
+            createdAt: "2026-01-01T00:00:01.000Z",
+          },
+        ],
+      });
+
+      expect(result).toContain("[SUMMARY OF EARLIER CONVERSATION - CONTEXT ONLY]");
+      expect(result).toContain("Earlier work stayed on the fork design.");
+      expect(result).toContain("Only the summary is available.");
+    });
+
     it("does not trim or overflow a maximum-size current request to make room for history", () => {
       const currentMessageId = asMessageId("maximum-current-message");
       const currentInput = "x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS);
@@ -331,10 +393,12 @@ describe("ProviderCommandReactor", () => {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
+    readonly nativeHistoryImport?: boolean;
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
     readonly importedHistoryBeforeStart?: boolean;
+    readonly importedCompaction?: { readonly summary: string; readonly createdAt: string };
     readonly localHistoryBeforeStart?: boolean;
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
     readonly stopSessionEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>;
@@ -562,6 +626,7 @@ describe("ProviderCommandReactor", () => {
       getCapabilities: (_provider) =>
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
+          ...(input?.nativeHistoryImport === true ? { nativeHistoryImport: true } : {}),
         }),
       getInstanceInfo: (instanceId) => {
         if (input?.unknownProviderInstanceIds?.includes(instanceId)) {
@@ -790,7 +855,20 @@ describe("ProviderCommandReactor", () => {
                   },
                 ],
                 proposedPlans: [],
-                activities: [],
+                activities:
+                  input?.importedCompaction !== undefined
+                    ? [
+                        {
+                          id: EventId.make("imported-compaction"),
+                          tone: "info" as const,
+                          kind: "context-compaction",
+                          summary: "Context compacted",
+                          compactionSummary: input.importedCompaction.summary,
+                          turnId: null,
+                          createdAt: input.importedCompaction.createdAt,
+                        },
+                      ]
+                    : [],
                 turns: [],
               },
               sourceRevision: "test-revision",
@@ -1014,9 +1092,145 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
-    expect(harness.sendTurn.mock.calls[1]?.[0]?.input).toBe("Second current request.");
+    expect(withoutProviderTimestamp(harness.sendTurn.mock.calls[1]?.[0]?.input)).toBe(
+      "Second current request.",
+    );
     expect(harness.startSession).toHaveBeenCalledTimes(1);
     expect(harness.globalEventReplayCalls).toBe(0);
+  });
+
+  it("imports imported history natively when the provider supports it", async () => {
+    const harness = await createHarness({
+      importedHistoryBeforeStart: true,
+      nativeHistoryImport: true,
+    });
+    const threadId = ThreadId.make("thread-1");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-native-history"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-native-history-message"),
+          role: "user",
+          text: "Native history request.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const startInput = harness.startSession.mock.calls[0]?.[1] as
+      | {
+          history?: ReadonlyArray<{ id: string; role: string; text: string }>;
+        }
+      | undefined;
+    expect(startInput?.history).toHaveLength(2);
+    expect(startInput?.history?.[0]).toMatchObject({
+      id: "imported-history-user",
+      role: "user",
+      text: "Historical user steer that must remain context only.",
+    });
+    expect(startInput?.history?.[1]).toMatchObject({
+      id: "imported-history-assistant",
+      role: "assistant",
+      text: "Historical assistant response.",
+    });
+    const input = harness.sendTurn.mock.calls[0]?.[0]?.input;
+    expect(input).toContain("Native history request.");
+    expect(input).not.toContain("Historical assistant response.");
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a native import from the last compaction checkpoint", async () => {
+    const harness = await createHarness({
+      importedHistoryBeforeStart: true,
+      nativeHistoryImport: true,
+      importedCompaction: {
+        summary: "The earlier conversation covered the seed path.",
+        createdAt: "2025-12-31T23:58:30.000Z",
+      },
+    });
+    const threadId = ThreadId.make("thread-1");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-compaction-native"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-compaction-native-message"),
+          role: "user",
+          text: "Native history after compaction.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const startInput = harness.startSession.mock.calls[0]?.[1] as
+      | {
+          history?: ReadonlyArray<{ id: string; role: string; text: string }>;
+          compaction?: { summary: string; createdAt: string };
+        }
+      | undefined;
+    expect(startInput?.compaction).toMatchObject({
+      summary: "The earlier conversation covered the seed path.",
+      createdAt: "2025-12-31T23:58:30.000Z",
+    });
+    expect(startInput?.history).toHaveLength(1);
+    expect(startInput?.history?.[0]).toMatchObject({
+      id: "imported-history-assistant",
+      role: "assistant",
+      text: "Historical assistant response.",
+    });
+    const input = harness.sendTurn.mock.calls[0]?.[0]?.input;
+    expect(input).toContain("Native history after compaction.");
+    expect(input).not.toContain("The earlier conversation covered the seed path.");
+    expect(input).not.toContain("Historical user steer");
+  });
+
+  it("seeds a non-native provider with the compaction summary and post-checkpoint history", async () => {
+    const harness = await createHarness({
+      importedHistoryBeforeStart: true,
+      importedCompaction: {
+        summary: "The earlier conversation covered the seed path.",
+        createdAt: "2025-12-31T23:58:30.000Z",
+      },
+    });
+    const threadId = ThreadId.make("thread-1");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-thread-compaction-seed"),
+        threadId,
+        message: {
+          messageId: asMessageId("imported-thread-compaction-seed-message"),
+          role: "user",
+          text: "Seed history after compaction.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const input = harness.sendTurn.mock.calls[0]?.[0]?.input;
+    expect(input).toContain("[SUMMARY OF EARLIER CONVERSATION - CONTEXT ONLY]");
+    expect(input).toContain("The earlier conversation covered the seed path.");
+    expect(input).toContain("Historical assistant response.");
+    expect(input).not.toContain("Historical user steer");
+    expect(harness.startSession.mock.calls[0]?.[1]).not.toHaveProperty("compaction");
   });
 
   it("drops an existing provider session before continuing a replaced imported thread", async () => {
@@ -1170,7 +1384,9 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.sendTurn.mock.calls.length === 3);
-    expect(harness.sendTurn.mock.calls[2]?.[0]?.input).toBe("Request after accepted retry.");
+    expect(withoutProviderTimestamp(harness.sendTurn.mock.calls[2]?.[0]?.input)).toBe(
+      "Request after accepted retry.",
+    );
   });
 
   it("does not reset the fresh imported session when a steer arrives before the first send settles", async () => {
@@ -1295,7 +1511,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    expect(harness.sendTurn.mock.calls[0]?.[0]?.input).toBe(
+    expect(withoutProviderTimestamp(harness.sendTurn.mock.calls[0]?.[0]?.input)).toBe(
       "Current request after local recovery.",
     );
   });
@@ -1356,10 +1572,12 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       threadId,
-      input: "Keep the current branch and continue.",
       clientUserMessageId: "user-message-live-steer",
       delivery: "live-user-steer",
     });
+    expect(withoutProviderTimestamp(harness.sendTurn.mock.calls[0]?.[0]?.input)).toBe(
+      "Keep the current branch and continue.",
+    );
     expect(harness.startSession).not.toHaveBeenCalled();
   });
 
@@ -3535,7 +3753,9 @@ describe("ProviderCommandReactor", () => {
       },
     });
     expect(harness.startSession.mock.calls[0]?.[1]).not.toHaveProperty("resumeCursor");
-    expect(harness.sendTurn.mock.calls[0]?.[0].input).toBe("continue with claude");
+    expect(withoutProviderTimestamp(harness.sendTurn.mock.calls[0]?.[0].input)).toBe(
+      "continue with claude",
+    );
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.providerName).toBe("claudeAgent");

@@ -52,6 +52,21 @@ export const ProviderSession = Schema.Struct({
 });
 export type ProviderSession = typeof ProviderSession.Type;
 
+export const ProviderHistoryMessage = Schema.Struct({
+  id: MessageId,
+  role: Schema.Literals(["user", "assistant", "system"]),
+  text: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type ProviderHistoryMessage = typeof ProviderHistoryMessage.Type;
+
+export const ProviderContextCompaction = Schema.Struct({
+  summary: Schema.String,
+  createdAt: IsoDateTime,
+  reason: Schema.optional(Schema.Literals(["auto", "manual"])),
+});
+export type ProviderContextCompaction = typeof ProviderContextCompaction.Type;
+
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
   projectId: Schema.optional(ProjectId),
@@ -62,6 +77,17 @@ export const ProviderSessionStartInput = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
+  /**
+   * Canonical Erebus history to materialize in a fresh provider session.
+   * Adapters that can import a native transcript consume this instead of a
+   * single-turn context prompt.
+   */
+  history: Schema.optional(Schema.Array(ProviderHistoryMessage)),
+  /**
+   * Last provider compaction checkpoint. A fresh session starts from this
+   * summary plus the history that follows it.
+   */
+  compaction: Schema.optional(ProviderContextCompaction),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
   runtimeMode: RuntimeMode,

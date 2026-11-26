@@ -216,6 +216,20 @@ const ThreadContinuationSeedLookupInput = Schema.Struct({
   currentMessageId: MessageId,
   maxChars: Schema.Int,
 });
+const ThreadHistoryImportLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  currentMessageId: MessageId,
+  afterCreatedAt: Schema.optional(Schema.String),
+});
+const ContextCompactionLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  beforeCreatedAt: Schema.String,
+});
+const ProjectionContextCompactionRowSchema = Schema.Struct({
+  createdAt: IsoDateTime,
+  summary: Schema.String,
+  reason: Schema.NullOr(Schema.String),
+});
 const ProjectionThreadContinuationMessageDbRowSchema = ProjectionThreadMessageDbRowSchema.mapFields(
   Struct.assign({
     textTruncated: Schema.Number,
@@ -1549,6 +1563,63 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE "spentBefore" < ${maxChars}
         ORDER BY budgeted."createdAt" DESC, budgeted."messageId" DESC
         LIMIT 2000
+      `,
+  });
+
+  const listThreadHistoryImportMessages = SqlSchema.findAll({
+    Request: ThreadHistoryImportLookupInput,
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: ({ threadId, currentMessageId, afterCreatedAt }) =>
+      sql`
+        WITH current_message AS (
+          SELECT created_at, message_id
+          FROM projection_thread_messages
+          WHERE thread_id = ${threadId}
+            AND message_id = ${currentMessageId}
+          LIMIT 1
+        )
+        SELECT
+          messages.message_id AS "messageId",
+          messages.thread_id AS "threadId",
+          messages.turn_id AS "turnId",
+          messages.role,
+          messages.text,
+          messages.attachments_json AS "attachments",
+          messages.is_streaming AS "isStreaming",
+          messages.created_at AS "createdAt",
+          messages.updated_at AS "updatedAt"
+        FROM projection_thread_messages AS messages
+        CROSS JOIN current_message AS current
+        WHERE messages.thread_id = ${threadId}
+          AND messages.is_streaming = 0
+          AND (
+            ${afterCreatedAt ?? null} IS NULL OR
+            messages.created_at > ${afterCreatedAt ?? null}
+          )
+          AND (
+            messages.created_at < current.created_at OR
+            (messages.created_at = current.created_at AND messages.message_id < current.message_id)
+          )
+        ORDER BY messages.created_at ASC, messages.message_id ASC
+      `,
+  });
+
+  const getLatestContextCompactionRow = SqlSchema.findOneOption({
+    Request: ContextCompactionLookupInput,
+    Result: ProjectionContextCompactionRowSchema,
+    execute: ({ threadId, beforeCreatedAt }) =>
+      sql`
+        SELECT
+          created_at AS "createdAt",
+          json_extract(payload_json, '$.summary') AS "summary",
+          json_extract(payload_json, '$.reason') AS "reason"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND kind = 'context-compaction'
+          AND created_at < ${beforeCreatedAt}
+          AND json_extract(payload_json, '$.summary') IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT 1
       `,
   });
 
@@ -3893,6 +3964,49 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         } satisfies ProjectionThreadContinuationSeed);
       });
 
+  const listThreadHistoryMessagesForImport: NonNullable<
+    ProjectionSnapshotQueryShape["listThreadHistoryMessagesForImport"]
+  > = (input) =>
+    listThreadHistoryImportMessages(input).pipe(
+      Effect.map((rows) =>
+        rows.map((row) => ({
+          id: row.messageId,
+          role: row.role,
+          text: row.text,
+          createdAt: row.createdAt,
+        })),
+      ),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listThreadHistoryMessagesForImport:query",
+          "ProjectionSnapshotQuery.listThreadHistoryMessagesForImport:decodeRows",
+        ),
+      ),
+    );
+
+  const getLatestContextCompaction: NonNullable<
+    ProjectionSnapshotQueryShape["getLatestContextCompaction"]
+  > = (input) =>
+    getLatestContextCompactionRow(input).pipe(
+      Effect.map(
+        Option.map((row) => {
+          const reason: "auto" | "manual" | undefined =
+            row.reason === "auto" || row.reason === "manual" ? row.reason : undefined;
+          return {
+            createdAt: row.createdAt,
+            summary: row.summary,
+            ...(reason !== undefined ? { reason } : {}),
+          };
+        }),
+      ),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getLatestContextCompaction:query",
+          "ProjectionSnapshotQuery.getLatestContextCompaction:decodeRow",
+        ),
+      ),
+    );
+
   const getThreadMessageById: ProjectionSnapshotQueryShape["getThreadMessageById"] = (
     threadId,
     messageId,
@@ -5386,6 +5500,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getFullThreadDiffContext,
     getThreadShellById,
     getThreadContinuationSeedById,
+    listThreadHistoryMessagesForImport,
+    getLatestContextCompaction,
     getThreadMessageById,
     getThreadProposedPlanById,
     getFirstUserMessageByThreadId,

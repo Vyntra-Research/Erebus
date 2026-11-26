@@ -3,6 +3,7 @@ import {
   type AgentInfo,
   type FormField,
   type FormInfo,
+  type JsonValue,
   type ModelInfo,
   type OpenCodeClient as OfficialOpenCodeClient,
   type OpenCodeEvent,
@@ -191,6 +192,87 @@ interface OpenCodeMessageEntry {
   readonly parts: ReadonlyArray<OpenCodePart>;
 }
 
+export interface OpenCodeHistoryMessage {
+  readonly id: string;
+  readonly role: "user" | "assistant" | "system";
+  readonly text: string;
+  readonly createdAt: string;
+}
+
+export interface OpenCodeSessionImportInput {
+  readonly sessionID: string;
+  readonly directory: string;
+  readonly title?: string;
+  readonly model: {
+    readonly providerID: string;
+    readonly modelID: string;
+    readonly variant?: string;
+  };
+  readonly agent?: string;
+  readonly messages: ReadonlyArray<OpenCodeHistoryMessage>;
+  readonly compaction?: {
+    readonly summary: string;
+    readonly createdAt: string;
+    readonly reason?: "auto" | "manual";
+  };
+}
+
+/**
+ * Maps Erebus history to the provider's native message shape. The provider
+ * stores message ids in a global primary key, so every imported message id is
+ * scoped to the new session. Timestamp order is preserved even when an
+ * imported format does not parse cleanly.
+ */
+export function toOpenCodeImportMessages(input: {
+  readonly sessionID: string;
+  readonly messages: ReadonlyArray<OpenCodeHistoryMessage>;
+  readonly agent: string;
+  readonly model: OpenCodeSessionImportInput["model"];
+  readonly compaction?: OpenCodeSessionImportInput["compaction"];
+}): ReadonlyArray<JsonValue> {
+  let lastCreated = 0;
+  const result: Array<JsonValue> = [];
+  if (input.compaction !== undefined) {
+    const parsed = Date.parse(input.compaction.createdAt);
+    const created = Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+    lastCreated = created;
+    result.push({
+      id: `msg_${input.sessionID}_compaction`,
+      type: "compaction",
+      time: { created },
+      status: "completed",
+      reason: input.compaction.reason ?? "auto",
+      summary: input.compaction.summary,
+    });
+  }
+  for (const [index, message] of input.messages.entries()) {
+    const parsed = Date.parse(message.createdAt);
+    const created = Number.isFinite(parsed) ? Math.max(parsed, lastCreated + 1) : lastCreated + 1;
+    lastCreated = created;
+    const id = `msg_${input.sessionID}_${index}`;
+    if (message.role === "assistant") {
+      result.push({
+        id,
+        type: "assistant",
+        time: { created, completed: created },
+        agent: input.agent,
+        model: {
+          providerID: input.model.providerID,
+          id: input.model.modelID,
+          ...(input.model.variant ? { variant: input.model.variant } : {}),
+        },
+        content: [{ type: "text", text: message.text }],
+        finish: "stop",
+      });
+    } else if (message.role === "system") {
+      result.push({ id, type: "synthetic", time: { created }, text: message.text });
+    } else {
+      result.push({ id, type: "user", time: { created }, text: message.text });
+    }
+  }
+  return result;
+}
+
 export interface OpenCodeCompatClient {
   readonly provider: {
     readonly list: () => Promise<{ readonly data: OpenCodeProviderListResponse }>;
@@ -233,6 +315,9 @@ export interface OpenCodeCompatClient {
       readonly sessionID: string;
       readonly directory?: string;
     }) => Promise<{ readonly data: OpenCodeSessionRecord }>;
+    readonly importSession: (
+      input: OpenCodeSessionImportInput,
+    ) => Promise<{ readonly data: OpenCodeSessionRecord }>;
     readonly abort: (input: { readonly sessionID: string }) => Promise<void>;
     readonly wait: (
       input: { readonly sessionID: string },
@@ -952,7 +1037,7 @@ export function makeOpenCodeClient(input: {
     ...(headers ? { headers } : {}),
   });
   const forms = new Map<string, FormInfo>();
-  let locationReady: Promise<unknown> | undefined;
+  let locationReady: ReturnType<typeof client.location.get> | undefined;
   const ensureLocation = () =>
     (locationReady ??= waitForOpenCodePluginStartup({
       baseUrl: input.baseUrl,
@@ -1043,6 +1128,44 @@ export function makeOpenCodeClient(input: {
           return { data: { ...toCompatSession(forked), directory } };
         }
         return { data: toCompatSession(forked) };
+      },
+      importSession: async (input) => {
+        const locationInfo = await ensureLocation();
+        const location = { directory: input.directory };
+        const agent = input.agent ?? "build";
+        const messages = toOpenCodeImportMessages({
+          sessionID: input.sessionID,
+          messages: input.messages,
+          agent,
+          model: input.model,
+          ...(input.compaction ? { compaction: input.compaction } : {}),
+        });
+        const first = messages[0] as { readonly time?: { readonly created?: number } } | undefined;
+        const last = messages.at(-1) as
+          | { readonly time?: { readonly created?: number } }
+          | undefined;
+        const createdAt = first?.time?.created ?? 0;
+        const updatedAt = last?.time?.created ?? createdAt;
+        const imported = await client.experimental.session.import({
+          info: {
+            id: input.sessionID,
+            projectID: locationInfo.project.id,
+            agent,
+            model: {
+              providerID: input.model.providerID,
+              id: input.model.modelID,
+              ...(input.model.variant ? { variant: input.model.variant } : {}),
+            },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: createdAt, updated: updatedAt },
+            ...(input.title ? { title: input.title } : {}),
+            location,
+          },
+          messages,
+          location,
+        });
+        return { data: { ...toCompatSession(imported), directory: input.directory } };
       },
       abort: async ({ sessionID }) => {
         await client.session.interrupt({ sessionID });

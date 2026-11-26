@@ -496,6 +496,8 @@ export const ThreadSyncImportedActivity = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   sequence: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
+  /** Context compaction summary, when the source activity was a checkpoint. */
+  compactionSummary: Schema.optional(TrimmedNonEmptyString),
 });
 export type ThreadSyncImportedActivity = typeof ThreadSyncImportedActivity.Type;
 
@@ -626,6 +628,7 @@ export const ThreadSyncImportV2ActivityMetadata = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   sequence: Schema.NullOr(NonNegativeInt),
   createdAt: IsoDateTime,
+  compactionSummary: Schema.optional(TrimmedNonEmptyString),
 });
 export type ThreadSyncImportV2ActivityMetadata = typeof ThreadSyncImportV2ActivityMetadata.Type;
 

@@ -115,6 +115,7 @@ export const ThreadSyncV2ActivityMetadata = Schema.Struct({
   turnId: ThreadSyncActivity.fields.turnId,
   sequence: ThreadSyncActivity.fields.sequence,
   createdAt: ThreadSyncActivity.fields.createdAt,
+  compactionSummary: ThreadSyncActivity.fields.compactionSummary,
 });
 export type ThreadSyncV2ActivityMetadata = typeof ThreadSyncV2ActivityMetadata.Type;
 

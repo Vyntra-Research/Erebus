@@ -3418,6 +3418,7 @@ describe("ProviderRuntimeIngestion", () => {
       payload: {
         itemType: "context_compaction",
         status: "completed",
+        data: { text: "Compacted summary." },
       },
     });
 
@@ -3430,7 +3431,11 @@ describe("ProviderRuntimeIngestion", () => {
       (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
     );
     expect(activity?.summary).toBe("Context compacted");
-    expect(activity?.payload).toMatchObject({ status: "completed", itemId: "compaction-1" });
+    expect(activity?.payload).toMatchObject({
+      status: "completed",
+      itemId: "compaction-1",
+      summary: "Compacted summary.",
+    });
   });
 
   it("projects Codex task lifecycle chunks into thread activities", async () => {

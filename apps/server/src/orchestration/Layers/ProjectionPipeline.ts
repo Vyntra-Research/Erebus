@@ -1288,7 +1288,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 tone: activity.tone,
                 kind: activity.kind,
                 summary: activity.summary,
-                payload: null,
+                payload: activity.payload,
                 ...(activity.sequence !== undefined ? { sequence: activity.sequence } : {}),
                 createdAt: activity.createdAt,
               }),

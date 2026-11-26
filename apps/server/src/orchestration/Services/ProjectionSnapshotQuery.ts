@@ -109,6 +109,24 @@ export interface ProjectionThreadContinuationSeed {
   readonly hasEarlier: boolean;
 }
 
+export type ProjectionThreadHistoryMessage = Pick<
+  OrchestrationMessage,
+  "id" | "role" | "text" | "createdAt"
+>;
+
+export interface ProjectionThreadHistoryImportInput {
+  readonly threadId: ThreadId;
+  readonly currentMessageId: MessageId;
+  /** Only include messages created after this checkpoint boundary. */
+  readonly afterCreatedAt?: string;
+}
+
+export interface ProjectionContextCompaction {
+  readonly createdAt: string;
+  readonly summary: string;
+  readonly reason?: "auto" | "manual";
+}
+
 export interface ProjectionThreadSyncExportThread {
   readonly id: ThreadId;
   readonly projectId: ProjectId | null;
@@ -378,6 +396,25 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadContinuationSeedById?: (
     input: ProjectionThreadContinuationSeedInput,
   ) => Effect.Effect<Option.Option<ProjectionThreadContinuationSeed>, ProjectionRepositoryError>;
+
+  /**
+   * Read every durable message older than the current message, in
+   * chronological order, without the prompt-size budget used by the
+   * single-turn continuation seed. Used when an adapter can import a native
+   * transcript.
+   */
+  readonly listThreadHistoryMessagesForImport?: (
+    input: ProjectionThreadHistoryImportInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadHistoryMessage>, ProjectionRepositoryError>;
+
+  /**
+   * Read the latest completed context compaction before a message boundary.
+   * The summary is stored on the projected activity when the provider emits it.
+   */
+  readonly getLatestContextCompaction?: (input: {
+    readonly threadId: ThreadId;
+    readonly beforeCreatedAt: string;
+  }) => Effect.Effect<Option.Option<ProjectionContextCompaction>, ProjectionRepositoryError>;
 
   /** Read one exact message row without scanning the thread history. */
   readonly getThreadMessageById?: (

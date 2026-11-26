@@ -1700,6 +1700,64 @@ export function makeOpenCodeAdapter(
                   );
                 }
               }
+              // A fork, import, or provider switch carries Erebus' canonical
+              // transcript into a fresh session as native provider messages.
+              // The turn prompt then only carries the new user input.
+              const history = (input.history ?? []).filter(
+                (message) => message.text.trim().length > 0,
+              );
+              const parsedHistoryModel =
+                input.modelSelection !== undefined
+                  ? (parseOpenCodeModelSlug(input.modelSelection.model) ?? undefined)
+                  : undefined;
+              const historyAgent =
+                input.modelSelection !== undefined
+                  ? normalizeOpenCodeAgentId(
+                      getModelSelectionStringOptionValue(input.modelSelection, "agent"),
+                    )
+                  : undefined;
+              const historyVariant = input.modelSelection
+                ? getModelSelectionStringOptionValue(input.modelSelection, "variant")
+                : undefined;
+              const importHistorySession = (model: {
+                readonly providerID: string;
+                readonly modelID: string;
+              }) =>
+                Effect.gen(function* () {
+                  const sessionID = `ses_${(yield* randomUUIDv4).replace(/-/g, "")}`;
+                  const imported = yield* runOpenCodeSdk("session.import", () =>
+                    client.session.importSession({
+                      sessionID,
+                      directory,
+                      ...(input.title ? { title: input.title } : {}),
+                      model: {
+                        providerID: model.providerID,
+                        modelID: model.modelID,
+                        ...(historyVariant ? { variant: historyVariant } : {}),
+                      },
+                      ...(historyAgent ? { agent: historyAgent } : {}),
+                      messages: history,
+                      ...(input.compaction
+                        ? {
+                            compaction: {
+                              summary: input.compaction.summary,
+                              createdAt: input.compaction.createdAt,
+                              ...(input.compaction.reason !== undefined
+                                ? { reason: input.compaction.reason }
+                                : {}),
+                            },
+                          }
+                        : {}),
+                    }),
+                  );
+                  yield* runOpenCodeSdk("session.update", () =>
+                    client.session.update({
+                      sessionID: imported.data.id,
+                      permission: buildOpenCodePermissionRules(input.runtimeMode),
+                    }),
+                  );
+                  return { openCodeSession: imported.data, created: true };
+                });
               // Resume: re-adopt the session named by the durable cursor —
               // OpenCode scopes history by session id. The probe recovers only
               // a confirmed not-found (start fresh); transport/auth/server
@@ -1763,6 +1821,18 @@ export function makeOpenCodeAdapter(
                     }),
                   );
                   return { openCodeSession: forked, created: true };
+                }
+
+                if (
+                  (history.length > 0 || input.compaction !== undefined) &&
+                  parsedHistoryModel !== undefined
+                ) {
+                  if (resumeSessionId) {
+                    yield* Effect.logWarning(
+                      `OpenCode session '${resumeSessionId}' is unavailable; importing the Erebus transcript instead.`,
+                    );
+                  }
+                  return yield* importHistorySession(parsedHistoryModel);
                 }
 
                 if (resumeSessionId) {
@@ -2252,6 +2322,7 @@ export function makeOpenCodeAdapter(
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        nativeHistoryImport: true,
       },
       startSession,
       sendTurn,

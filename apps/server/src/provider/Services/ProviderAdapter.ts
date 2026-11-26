@@ -35,6 +35,11 @@ export interface ProviderAdapterCapabilities {
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+  /**
+   * Declares whether a fresh session can ingest a native transcript from
+   * Erebus history instead of receiving it as one synthetic prompt.
+   */
+  readonly nativeHistoryImport?: boolean;
 }
 
 export interface ProviderThreadTurnSnapshot {
