@@ -2,6 +2,7 @@ import {
   CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   MessageId,
   OrchestrationProposedPlanId,
   ProjectId,
@@ -54,13 +55,13 @@ async function createOrchestrationSystem() {
   const orchestrationLayer = Layer.mergeAll(
     OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
-      Layer.provide(OrchestrationProjectionPipelineLive),
+      Layer.provideMerge(OrchestrationProjectionPipelineLive),
     ),
     OrchestrationProjectionSnapshotQueryLive,
   ).pipe(
     Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
-    Layer.provide(OrchestrationEventStoreLive),
+    Layer.provideMerge(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provide(SqlitePersistenceMemory),
@@ -1491,6 +1492,105 @@ describe("OrchestrationEngine", () => {
 
     expect(withOrigin?.metadata.origin).toEqual({ surface: "mobile", appVersion: "1.2.3" });
     expect(withoutOrigin?.metadata.origin).toBeUndefined();
+
+    await system.dispose();
+  });
+
+  it("forks the full projected history when the command read model has no messages", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+    const createdAt = now();
+    const projectId = asProjectId("project-fork-history");
+    const sourceThreadId = ThreadId.make("thread-fork-history-source");
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-fork-history-project-create"),
+        projectId,
+        title: "Fork History Project",
+        workspaceRoot: "/tmp/project-fork-history",
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-fork-history-thread-create"),
+        threadId: sourceThreadId,
+        projectId,
+        title: "Source thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    const eventStore = await system.run(Effect.service(OrchestrationEventStore));
+    const projectionPipeline = await system.run(Effect.service(OrchestrationProjectionPipeline));
+    const messages = [
+      { role: "user" as const, text: "first prompt" },
+      { role: "assistant" as const, text: "first answer" },
+      { role: "user" as const, text: "second prompt" },
+    ];
+    for (const [index, message] of messages.entries()) {
+      const commandId = CommandId.make(`cmd-fork-history-message-${index}`);
+      const saved = await system.run(
+        eventStore.append({
+          eventId: EventId.make(`event-fork-history-message-${index}`),
+          aggregateKind: "thread",
+          aggregateId: sourceThreadId,
+          occurredAt: `2026-01-01T00:00:0${index}.000Z`,
+          commandId,
+          causationEventId: null,
+          correlationId: commandId,
+          metadata: {},
+          type: "thread.message-sent",
+          payload: {
+            threadId: sourceThreadId,
+            messageId: asMessageId(`message-fork-history-${index}`),
+            role: message.role,
+            text: message.text,
+            attachments: [],
+            turnId: asTurnId(`turn-fork-history-${index}`),
+            streaming: false,
+            createdAt: `2026-01-01T00:00:0${index}.000Z`,
+            updatedAt: `2026-01-01T00:00:0${index}.000Z`,
+          },
+        }),
+      );
+      await system.run(projectionPipeline.projectEvent(saved));
+    }
+
+    const forkThreadId = ThreadId.make("thread-fork-history-copy");
+    await system.run(
+      engine.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("cmd-fork-history-copy"),
+        sourceThreadId,
+        threadId: forkThreadId,
+        title: "Forked source thread",
+        createdAt: "2026-01-01T00:00:10.000Z",
+      }),
+    );
+
+    const readModel = await system.readModel();
+    const forked = readModel.threads.find((thread) => thread.id === forkThreadId);
+    expect(forked?.messages.map((message) => message.text)).toEqual([
+      "first prompt",
+      "first answer",
+      "second prompt",
+    ]);
 
     await system.dispose();
   });
