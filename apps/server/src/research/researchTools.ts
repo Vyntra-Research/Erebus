@@ -127,7 +127,7 @@ export const EREBUS_RESEARCH_DYNAMIC_TOOL = {
       type: "function",
       name: "submit_finding",
       description:
-        "Submit revision 1 to the independent Judge using the existing findings/ document and pocs/ artifact in the task workspace. Standalone tasks use their own workspace and do not need a linked Erebus project. If accepted=true, this must be the final tool call of the turn; Erebus delivers the durable verdict in a separate follow-up turn. If accepted=false, no Judge job exists: fix the stated input problem and retry the same revision.",
+        "Submit revision 1 to the independent Judge using the existing findings/ document and pocs/ artifact in the task workspace. Submit only a realistic, externally reachable finding with exact evidence and negative controls; the Judge rejects lab-assisted, synthetic, debug-only, or hypothetical scenarios. Standalone tasks use their own workspace and do not need a linked Erebus project. If accepted=true, this must be the final tool call of the turn; Erebus delivers the durable verdict in a separate follow-up turn. If accepted=false, no Judge job exists: fix the stated input problem and retry the same revision.",
       inputSchema: findingInputSchema,
     },
     {
