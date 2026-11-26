@@ -75,6 +75,7 @@ async function createOrchestrationSystem() {
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
+    runtime,
     dispose: () => runtime.dispose(),
   };
 }
@@ -1536,8 +1537,10 @@ describe("OrchestrationEngine", () => {
       }),
     );
 
-    const eventStore = await system.run(Effect.service(OrchestrationEventStore));
-    const projectionPipeline = await system.run(Effect.service(OrchestrationProjectionPipeline));
+    const eventStore = await system.runtime.runPromise(Effect.service(OrchestrationEventStore));
+    const projectionPipeline = await system.runtime.runPromise(
+      Effect.service(OrchestrationProjectionPipeline),
+    );
     const messages = [
       { role: "user" as const, text: "first prompt" },
       { role: "assistant" as const, text: "first answer" },
