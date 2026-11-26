@@ -267,6 +267,7 @@ interface OpenCodeSessionContext {
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
+  readonly completedReasoningPartIds: Set<string>;
   readonly completedAssistantTextByMessageId: Map<string, string>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   /** Serialize delivery changes for one upstream session. */
@@ -900,6 +901,31 @@ export function makeOpenCodeAdapter(
             status: "completed",
             title: "Assistant message",
             ...(latestText.length > 0 ? { detail: latestText } : {}),
+          },
+        });
+      }
+
+      if (
+        part.type === "reasoning" &&
+        part.time?.end !== undefined &&
+        latestText.trim().length > 0 &&
+        !context.completedReasoningPartIds.has(part.id)
+      ) {
+        context.completedReasoningPartIds.add(part.id);
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+            itemId: part.id,
+            createdAt: isoFromEpochMs(part.time.end),
+            raw,
+          })),
+          type: "item.completed",
+          payload: {
+            itemType: "reasoning",
+            status: "completed",
+            title: "Thinking",
+            detail: latestText,
           },
         });
       }
@@ -1835,6 +1861,7 @@ export function makeOpenCodeAdapter(
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
           completedAssistantPartIds: new Set(),
+          completedReasoningPartIds: new Set(),
           completedAssistantTextByMessageId: new Map(),
           turns: [],
           sendSemaphore: yield* Semaphore.make(1),

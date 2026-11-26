@@ -956,7 +956,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "work" ||
                   row.kind === "work-live" ||
                   row.kind === "work-toggle" ||
-                  row.kind === "turn-plan"
+                  row.kind === "turn-plan" ||
+                  row.kind === "reasoning"
                 ? "pb-2"
                 : "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
@@ -981,6 +982,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "turn-plan" ? <TurnPlanTimelineRow row={row} /> : null}
+      {row.kind === "reasoning" ? <ReasoningTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
     </div>
   );
@@ -1253,6 +1255,44 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
 
   return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
 }
+
+const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "reasoning" }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const ctx = use(TimelineRowCtx);
+  const Chevron = expanded ? ChevronDownIcon : ChevronRightIcon;
+
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <div className="overflow-hidden rounded-md border border-border/55 bg-muted/15">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="flex w-full min-w-0 cursor-pointer items-center gap-2 px-2 py-1.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <Chevron className="size-3.5 shrink-0 text-muted-foreground/65" />
+          <span className="font-medium text-foreground/75">Thinking</span>
+        </button>
+        {expanded ? (
+          <div className="border-t border-border/50 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground/85">
+            <ChatMarkdown
+              text={row.text}
+              cwd={ctx.markdownCwd}
+              threadRef={ctx.threadRef ?? undefined}
+              isStreaming={false}
+              lineBreaks
+              skills={ctx.skills}
+            />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+});
 
 function ProposedPlanTimelineRow({
   row,

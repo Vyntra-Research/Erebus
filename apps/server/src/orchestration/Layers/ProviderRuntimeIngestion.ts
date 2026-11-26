@@ -187,6 +187,9 @@ function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
+/** Keep model reasoning readable without letting a runaway part bloat the event store. */
+const REASONING_DETAIL_LIMIT = 16_000;
+
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
   const trimmed = planMarkdown?.trim();
   if (!trimmed) {
@@ -845,6 +848,27 @@ export function runtimeEventToActivities(
             summary: "Context compacted",
             payload: {
               status: "completed",
+              ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
+      if (event.payload.itemType === "reasoning") {
+        const detail = event.payload.detail?.trim();
+        if (!detail) {
+          return [];
+        }
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "assistant.reasoning",
+            summary: "Thinking",
+            payload: {
+              detail: truncateDetail(detail, REASONING_DETAIL_LIMIT),
               ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
             },
             turnId: toTurnId(event.turnId) ?? null,
