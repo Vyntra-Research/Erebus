@@ -20,6 +20,12 @@ authorization boundary remain authoritative.
   product does not provide.
 - Build chains from natural product states and supported or common correct
   configurations. A lab must not supply missing glue.
+- Promotion gate: a candidate becomes a finding only with a real attacker
+  model, a supported product state, exact evidence, a demonstrated boundary
+  crossing, concrete impact, and a negative control. Lab glue, synthetic
+  fixtures, debug-only state, weakened TLS or permissions, manual state edits,
+  and hypothetical chains keep it a candidate. Severity, novelty, and a
+  familiar bug class do not promote it.
 - CVSS classifies an established finding. Severity never proves validity and
   does not decide whether to pursue a candidate.
 
