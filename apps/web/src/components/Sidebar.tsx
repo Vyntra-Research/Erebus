@@ -91,7 +91,7 @@ import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { isMacPlatform } from "~/lib/utils";
+import { isMacPlatform, newThreadId } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import {
   releaseComposerDraftUploads,
@@ -1739,6 +1739,7 @@ export default function Sidebar() {
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
+  const forkThreadMutation = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
   const {
     settleThread,
     unsettleThread,
@@ -3478,6 +3479,8 @@ export default function Sidebar() {
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
+        const isRunning =
+          thread.session?.status === "running" && thread.session.activeTurnId != null;
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
         const threadProjectTargets = projects.filter(
@@ -3501,6 +3504,11 @@ export default function Sidebar() {
             },
             snoozePresets,
           }),
+          {
+            id: "fork-thread",
+            label: "Fork thread",
+            disabled: isRunning,
+          },
           ...(threadProjectTargets.length > 0
             ? [
                 {
@@ -3555,6 +3563,32 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
+          case "fork-thread": {
+            const nextThreadId = newThreadId();
+            const result = await forkThreadMutation({
+              environmentId: thread.environmentId,
+              input: {
+                sourceThreadId: thread.id,
+                threadId: nextThreadId,
+                title: `${thread.title} (fork)`,
+              },
+            });
+            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to fork thread",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+              return;
+            }
+            if (result._tag === "Success") {
+              navigateToThread(scopeThreadRef(thread.environmentId, nextThreadId));
+            }
+            return;
+          }
           case "new-thread-on-branch": {
             const projectId = thread.projectId;
             if (projectId === null) {
@@ -3720,9 +3754,11 @@ export default function Sidebar() {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      forkThreadMutation,
       handleMultiSelectContextMenu,
       markThreadUnread,
       moveThreadToProject,
+      navigateToThread,
       openAddProjectCommandPalette,
       projectCwdByKey,
       projects,

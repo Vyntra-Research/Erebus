@@ -46,6 +46,7 @@ import {
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
+  BrainIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -56,15 +57,16 @@ import {
   MessageCircleIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
+  PencilIcon,
   SearchIcon,
   SquarePenIcon,
   TerminalIcon,
-  Undo2Icon,
   WrenchIcon,
   XIcon,
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
@@ -142,6 +144,7 @@ interface TimelineRowSharedState {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onEditUserMessage: (messageId: MessageId, text: string) => Promise<boolean>;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
@@ -191,6 +194,7 @@ function TimelineLoadEarlierHeader({
 }
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const NOOP_EDIT_USER_MESSAGE = async (_messageId: MessageId, _text: string) => false;
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
   animated: false,
   on: {
@@ -219,6 +223,7 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onEditUserMessage?: (messageId: MessageId, text: string) => Promise<boolean>;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -264,6 +269,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  onEditUserMessage = NOOP_EDIT_USER_MESSAGE,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -523,6 +529,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onEditUserMessage,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -539,6 +546,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onEditUserMessage,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -956,8 +964,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "work" ||
                   row.kind === "work-live" ||
                   row.kind === "work-toggle" ||
-                  row.kind === "turn-plan" ||
-                  row.kind === "reasoning"
+                  row.kind === "turn-plan"
                 ? "pb-2"
                 : "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
@@ -982,7 +989,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "turn-plan" ? <TurnPlanTimelineRow row={row} /> : null}
-      {row.kind === "reasoning" ? <ReasoningTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
     </div>
   );
@@ -1044,6 +1050,9 @@ function CoagentCoordinationTimelineRow({ message }: { message: TimelineMessage 
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.message.text);
+  const [savingEdit, setSavingEdit] = useState(false);
   if (parseCoagentCoordinationMessage(row.message.text)) {
     return <CoagentCoordinationTimelineRow message={row.message} />;
   }
@@ -1065,7 +1074,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   ];
   const previewImages = userImages.filter((image) => image.name.startsWith("preview-annotation-"));
   const regularImages = userImages.filter((image) => !image.name.startsWith("preview-annotation-"));
-  const canRevertAgentWork = typeof row.revertTurnCount === "number";
 
   return (
     <div className="group flex flex-col items-end gap-1">
@@ -1123,12 +1131,55 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             ))}
           </div>
         ) : null}
-        <CollapsibleUserMessageBody
-          text={elementContextState.promptText}
-          terminalContexts={terminalContexts}
-          skills={ctx.skills}
-          markdownCwd={ctx.markdownCwd}
-        />
+        {editing ? (
+          <div className="w-full min-w-0">
+            <Textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              rows={Math.min(12, Math.max(3, draft.split("\n").length))}
+              className="min-h-20 resize-y border-border/70 bg-background/60 text-sm"
+              aria-label="Edit message"
+              autoFocus
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={savingEdit}
+                onClick={() => {
+                  setDraft(row.message.text);
+                  setEditing(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                disabled={savingEdit || draft.trim().length === 0}
+                onClick={async () => {
+                  setSavingEdit(true);
+                  try {
+                    const saved = await ctx.onEditUserMessage(row.message.id, draft);
+                    if (saved) setEditing(false);
+                  } finally {
+                    setSavingEdit(false);
+                  }
+                }}
+              >
+                {savingEdit ? "Forking..." : "Save and fork"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <CollapsibleUserMessageBody
+            text={elementContextState.promptText}
+            terminalContexts={terminalContexts}
+            skills={ctx.skills}
+            markdownCwd={ctx.markdownCwd}
+          />
+        )}
       </div>
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">
@@ -1141,7 +1192,27 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
+            {!editing ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        setDraft(row.message.text);
+                        setEditing(true);
+                      }}
+                      aria-label="Edit message"
+                    />
+                  }
+                >
+                  <PencilIcon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">Edit message</TooltipPopup>
+              </Tooltip>
+            ) : null}
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
             )}
@@ -1149,31 +1220,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         </div>
       </div>
     </div>
-  );
-}
-
-function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
-  const ctx = use(TimelineRowCtx);
-  const activity = use(TimelineRowActivityCtx);
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
-            onClick={() => ctx.onRevertUserMessage(messageId)}
-            aria-label="Revert to this message"
-          />
-        }
-      >
-        <Undo2Icon className="size-3" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Revert to this message</TooltipPopup>
-    </Tooltip>
   );
 }
 
@@ -1255,44 +1301,6 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
 
   return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
 }
-
-const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
-  row,
-}: {
-  row: Extract<TimelineRow, { kind: "reasoning" }>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const ctx = use(TimelineRowCtx);
-  const Chevron = expanded ? ChevronDownIcon : ChevronRightIcon;
-
-  return (
-    <div className="min-w-0 px-1 py-0.5">
-      <div className="overflow-hidden rounded-md border border-border/55 bg-muted/15">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          className="flex w-full min-w-0 cursor-pointer items-center gap-2 px-2 py-1.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <Chevron className="size-3.5 shrink-0 text-muted-foreground/65" />
-          <span className="font-medium text-foreground/75">Thinking</span>
-        </button>
-        {expanded ? (
-          <div className="border-t border-border/50 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground/85">
-            <ChatMarkdown
-              text={row.text}
-              cwd={ctx.markdownCwd}
-              threadRef={ctx.threadRef ?? undefined}
-              isStreaming={false}
-              lineBreaks
-              skills={ctx.skills}
-            />
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-});
 
 function ProposedPlanTimelineRow({
   row,
@@ -1608,8 +1616,9 @@ function LiveActivityContent({
 
 function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
   const ctx = use(TimelineRowCtx);
-  const label = liveWorkEntryLabel(row.entry, ctx.workspaceRoot);
-  const failed = workEntryDisplayIndicatesToolFailure(row.entry);
+  const isReasoning = row.entry.sourceActivityKind === "assistant.reasoning";
+  const label = isReasoning ? "Thinking" : liveWorkEntryLabel(row.entry, ctx.workspaceRoot);
+  const failed = isReasoning ? false : workEntryDisplayIndicatesToolFailure(row.entry);
 
   return (
     <button
@@ -1619,7 +1628,11 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
       aria-expanded={row.expanded}
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
-      <LiveActivityRow label={label} iconName={workEntryIconName(row.entry)} failed={failed} />
+      <LiveActivityRow
+        label={label}
+        iconName={isReasoning ? "brain" : workEntryIconName(row.entry)}
+        failed={failed}
+      />
     </button>
   );
 }
@@ -2254,6 +2267,7 @@ function formatWorkingTimerNow(startIso: string): string {
 
 type WorkEntryIconName =
   | "bot"
+  | "brain"
   | "check"
   | "circle-alert"
   | "eye"
@@ -2271,6 +2285,8 @@ function WorkEntryIconSvg({ name, className }: { name: WorkEntryIconName; classN
   switch (name) {
     case "bot":
       return <BotIcon className={className} aria-hidden />;
+    case "brain":
+      return <BrainIcon className={className} aria-hidden />;
     case "check":
       return <CheckIcon className={className} aria-hidden />;
     case "circle-alert":
@@ -2569,6 +2585,9 @@ const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
 
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
+  if (workEntry.sourceActivityKind === "assistant.reasoning") {
+    return "brain";
+  }
   if (workEntry.sourceActivityKind === "research.observer.intervention") {
     return "eye";
   }
@@ -2712,6 +2731,61 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: Time
   );
 });
 
+const ReasoningWorkEntryRow = memo(function ReasoningWorkEntryRow({
+  workEntry,
+}: {
+  workEntry: TimelineWorkEntry;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const ctx = use(TimelineRowCtx);
+  const text = workEntry.detail?.trim() ?? "";
+  const canExpand = text.length > 0;
+  const Chevron = expanded ? ChevronDownIcon : ChevronRightIcon;
+
+  return (
+    <div className="flex flex-col rounded-md px-0.5 py-0.5 transition-colors">
+      <button
+        type="button"
+        className={cn(
+          "flex min-h-6 w-full min-w-0 select-none items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left transition-colors",
+          canExpand &&
+            "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+        )}
+        aria-expanded={canExpand ? expanded : undefined}
+        onClick={() => {
+          if (canExpand) setExpanded((value) => !value);
+        }}
+      >
+        <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
+          <BrainIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-secondary-label">Thinking</span>
+        <span
+          className={cn(
+            "flex size-4 shrink-0 items-center justify-center",
+            !canExpand && "invisible",
+          )}
+          aria-hidden
+        >
+          <Chevron className="size-3 shrink-0 text-icon-muted opacity-70" />
+        </span>
+      </button>
+      {expanded && canExpand ? (
+        <div className="ml-7 mr-1 border-l border-border/50 pl-2 pt-1 pb-1 text-[12px] leading-relaxed text-muted-foreground/85">
+          <ChatMarkdown
+            text={text}
+            cwd={ctx.markdownCwd}
+            threadRef={ctx.threadRef ?? undefined}
+            isStreaming={false}
+            lineBreaks
+            skills={ctx.skills}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
@@ -2721,6 +2795,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   // Before any hooks: spawn CTA rows render their own component.
   if (workEntry.agentSpawn) {
     return <AgentSpawnCtaRow workEntry={workEntry} />;
+  }
+  if (workEntry.sourceActivityKind === "assistant.reasoning") {
+    return <ReasoningWorkEntryRow workEntry={workEntry} />;
   }
   return (
     <PlainWorkEntryRow

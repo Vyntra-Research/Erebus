@@ -4,6 +4,8 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
+  OrchestrationProposedPlanId,
+  MessageId,
   type ProjectId,
   type ThreadSyncImportV2Descriptor,
 } from "@t3tools/contracts";
@@ -512,6 +514,103 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.fork": {
+      const source = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+
+      let cutoffIndex = source.messages.length;
+      if (command.upToMessageId !== undefined) {
+        const index = source.messages.findIndex((message) => message.id === command.upToMessageId);
+        if (index < 0) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Message '${command.upToMessageId}' was not found in thread '${source.id}'.`,
+          });
+        }
+        if (source.messages[index]?.role !== "user") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Message '${command.upToMessageId}' is not a user message and cannot be edited.`,
+          });
+        }
+        cutoffIndex = index;
+      }
+
+      const cutoffCreatedAt =
+        cutoffIndex < source.messages.length ? source.messages[cutoffIndex]?.createdAt : undefined;
+      const copiedMessages = source.messages.slice(0, cutoffIndex).map((message) => ({
+        ...message,
+        id: MessageId.make(`fork:${command.threadId}:${message.id}`),
+        streaming: false,
+      }));
+      const copiedActivities = source.activities
+        .filter((activity) => cutoffCreatedAt === undefined || activity.createdAt < cutoffCreatedAt)
+        .map((activity) => ({
+          ...activity,
+          id: EventId.make(`fork:${command.threadId}:${activity.id}`),
+        }));
+      const copiedProposedPlans = source.proposedPlans
+        .filter((plan) => cutoffCreatedAt === undefined || plan.createdAt < cutoffCreatedAt)
+        .map((plan) => ({
+          ...plan,
+          id: OrchestrationProposedPlanId.make(`fork:${command.threadId}:${plan.id}`),
+          implementedAt: null,
+          implementationThreadId: null,
+        }));
+      const forkThread: OrchestrationThread = {
+        ...source,
+        id: command.threadId,
+        title: command.title ?? `${source.title} (fork)`,
+        coagent: null,
+        linkedPullRequest: null,
+        latestTurn: null,
+        createdAt: command.createdAt,
+        updatedAt: command.createdAt,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        unsettledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        pinnedAt: null,
+        pinOrderKey: null,
+        titleRegeneration: null,
+        deletedAt: null,
+        messages: copiedMessages,
+        proposedPlans: copiedProposedPlans,
+        activities: copiedActivities,
+        checkpoints: [],
+        session: null,
+      };
+
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.sync-imported",
+        payload: {
+          threadId: command.threadId,
+          sourceRevision: `fork:${source.id}:${command.upToMessageId ?? "all"}`,
+          sourceHash: `fork:${command.threadId}`,
+          importedAt: command.createdAt,
+          thread: forkThread,
+          turns: [],
+          bindingUpdates: [],
         },
       };
     }

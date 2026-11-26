@@ -943,4 +943,51 @@ it.layer(NodeServices.layer)("thread sync import decider", (it) => {
       expect(error.message).toContain("is active and cannot be replaced");
     }),
   );
+
+  it.effect("forks a thread into a new local copy", () =>
+    Effect.gen(function* () {
+      let readModel = yield* seedProject;
+      const imported = yield* decideOrchestrationCommand({
+        command: importCommand("create", null),
+        readModel,
+      });
+      const importedEvents = Array.isArray(imported) ? imported : [imported];
+      for (const [index, importedEvent] of importedEvents.entries()) {
+        readModel = yield* projectEvent(readModel, {
+          ...importedEvent,
+          sequence: index + 2,
+        });
+      }
+
+      const forkThreadId = ThreadId.make("thread-fork");
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.fork",
+          commandId: CommandId.make("command-fork"),
+          sourceThreadId: threadId,
+          threadId: forkThreadId,
+          title: "Forked sync",
+          createdAt: importedAt,
+        },
+        readModel,
+      });
+      const forkEvent = (Array.isArray(decided) ? decided : [decided])[0]!;
+      expect(forkEvent.type).toBe("thread.sync-imported");
+      if (forkEvent.type !== "thread.sync-imported") return;
+
+      expect(forkEvent.payload.threadId).toBe(forkThreadId);
+      expect(forkEvent.payload.thread.title).toBe("Forked sync");
+      expect(forkEvent.payload.thread.messages).toHaveLength(2);
+      expect(forkEvent.payload.thread.messages[0]?.id).not.toBe(userMessageId);
+      expect(forkEvent.payload.thread.session).toBeNull();
+
+      const projected = yield* projectEvent(readModel, {
+        ...forkEvent,
+        sequence: 3,
+      });
+      const forked = projected.threads.find((thread) => thread.id === forkThreadId);
+      expect(forked?.messages).toHaveLength(2);
+      expect(forked?.session).toBeNull();
+    }),
+  );
 });

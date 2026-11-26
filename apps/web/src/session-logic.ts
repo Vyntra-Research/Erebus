@@ -239,13 +239,6 @@ export type TimelineEntry =
     }
   | {
       id: string;
-      kind: "reasoning";
-      createdAt: string;
-      turnId: TurnId | null;
-      text: string;
-    }
-  | {
-      id: string;
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
@@ -779,49 +772,6 @@ export interface TurnPlanEntry {
   plan: ActivePlanState;
 }
 
-export interface ReasoningEntry {
-  /** Stable per reasoning part; duplicate provider completions replace in place. */
-  id: string;
-  createdAt: string;
-  turnId: TurnId | null;
-  text: string;
-}
-
-/**
- * Collapse completed reasoning parts into one minimized card each. The
- * provider streams deltas during the turn; only the completed part carries the
- * full text worth showing in the timeline.
- */
-export function deriveReasoningEntries(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-): ReasoningEntry[] {
-  const byKey = new Map<string, ReasoningEntry>();
-  for (const activity of [...activities].toSorted(compareActivitiesByOrder)) {
-    if (activity.kind !== "assistant.reasoning") {
-      continue;
-    }
-    const payload =
-      activity.payload && typeof activity.payload === "object"
-        ? (activity.payload as Record<string, unknown>)
-        : null;
-    const text = typeof payload?.detail === "string" ? payload.detail.trim() : "";
-    if (text.length === 0) {
-      continue;
-    }
-    const key =
-      typeof payload?.itemId === "string" && payload.itemId.length > 0
-        ? payload.itemId
-        : activity.id;
-    byKey.set(key, {
-      id: `reasoning:${key}`,
-      createdAt: activity.createdAt,
-      turnId: activity.turnId,
-      text,
-    });
-  }
-  return [...byKey.values()];
-}
-
 /**
  * One inline plan chip per turn that produced plan/todo steps: the latest
  * snapshot for the turn, anchored at the first snapshot's timestamp. Turn-less
@@ -1058,6 +1008,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const commandPreview = extractToolCommand(payload);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
+  const isReasoningActivity = activity.kind === "assistant.reasoning";
+  const reasoningDetail =
+    isReasoningActivity && typeof payload?.detail === "string" && payload.detail.length > 0
+      ? payload.detail
+      : null;
   const isTaskActivity =
     activity.kind === "task.started" ||
     activity.kind === "task.progress" ||
@@ -1087,9 +1042,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     id: activity.id,
     createdAt: activity.createdAt,
     turnId: activity.turnId,
-    label: taskLabel || activity.summary,
-    tone:
-      activity.kind === "task.progress"
+    label: isReasoningActivity ? "Thinking" : taskLabel || activity.summary,
+    tone: isReasoningActivity
+      ? "info"
+      : activity.kind === "task.progress"
         ? "thinking"
         : activity.tone === "approval"
           ? "info"
@@ -1105,7 +1061,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     payload.evaluationId.length > 0
       ? payload.evaluationId
       : null;
-  if (detail) {
+  if (reasoningDetail) {
+    entry.detail = reasoningDetail;
+  } else if (detail) {
     entry.detail = detail;
   }
   if (commandPreview.command) {
@@ -2052,7 +2010,6 @@ export function deriveTimelineEntries(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
   turnPlans: ReadonlyArray<TurnPlanEntry> = [],
-  reasoningEntries: ReadonlyArray<ReasoningEntry> = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -2071,13 +2028,6 @@ export function deriveTimelineEntries(
     kind: "turn-plan",
     createdAt: turnPlan.createdAt,
     turnPlan,
-  }));
-  const reasoningRows: TimelineEntry[] = reasoningEntries.map((reasoning) => ({
-    id: reasoning.id,
-    kind: "reasoning",
-    createdAt: reasoning.createdAt,
-    turnId: reasoning.turnId,
-    text: reasoning.text,
   }));
   const conversationRows = [...messageRows, ...proposedPlanRows, ...turnPlanRows];
   const workRows: TimelineEntry[] = workEntries.map((entry) => {
@@ -2100,13 +2050,9 @@ export function deriveTimelineEntries(
       entry: repairedEntry,
     };
   });
-  return [
-    ...reasoningRows,
-    ...messageRows,
-    ...proposedPlanRows,
-    ...turnPlanRows,
-    ...workRows,
-  ].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return [...messageRows, ...proposedPlanRows, ...turnPlanRows, ...workRows].toSorted((a, b) =>
+    a.createdAt.localeCompare(b.createdAt),
+  );
 }
 
 export function inferCheckpointTurnCountByTurnId(

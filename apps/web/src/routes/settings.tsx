@@ -1,4 +1,4 @@
-import { RotateCcwIcon } from "lucide-react";
+import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react";
 import {
   Outlet,
   createFileRoute,
@@ -46,6 +46,19 @@ function SettingsContentLayout() {
     }
     void navigate({ to: "/" });
   }, [canGoBack, navigate]);
+  const navigateBackToChat = useCallback(() => {
+    let lastChatLocation: string | null = null;
+    try {
+      lastChatLocation = window.sessionStorage.getItem("erebus:last-chat-location");
+    } catch {
+      lastChatLocation = null;
+    }
+    if (lastChatLocation && !lastChatLocation.startsWith("/settings")) {
+      void navigate({ to: lastChatLocation });
+      return;
+    }
+    navigateBackWithinApp();
+  }, [navigate, navigateBackWithinApp]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -73,6 +86,15 @@ function SettingsContentLayout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Back to chat"
+              onClick={navigateBackToChat}
+            >
+              <ArrowLeftIcon className="size-4" />
+            </Button>
             <SettingsBreadcrumb pathname={location.pathname} />
             {showRestoreDefaults ? (
               <div className="ms-auto flex items-center gap-2">

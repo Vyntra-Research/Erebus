@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.0-beta.25 - 2026-11-26
+
+### Added
+
+- Each provider-bound prompt now carries a local send timestamp with weekday, date, time, and UTC offset. The stored message and the visible UI timestamp are unchanged.
+- Edit a user message from its hover actions. Saving forks the thread at that point and sends the edited message in the fork; the original thread, its workspace, and its checkpoints stay untouched.
+- Add **Fork thread** to the sidebar thread menu. A fork copies the conversation and work history without a provider session or checkpoints.
+- Add a back arrow to Settings that returns to the last chat route instead of stepping through settings history.
+
+### Fixed
+
+- Keep completed model reasoning inside the work log and fold it with the turn's **Worked for** section. The compact **Thinking** row replaces the standalone reasoning cards, removes the duplicate work-log entry, and keeps long turns readable.
+
 ## 2.0.0-beta.24 - 2026-11-26
 
 ### Added
