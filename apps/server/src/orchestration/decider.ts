@@ -33,10 +33,9 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 // window is a failed/stale start, not pending work. Mirrors the client's
 // QUEUED_TURN_START_GRACE_MS in client-runtime threadSettled.ts.
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
-// A fork is a conversation copy, not a new provider session. Keep the same
-// bounded visible window the thread detail uses so the import event and its
-// projection work stay predictable for very long threads.
-const FORK_MESSAGE_LIMIT = 2_000;
+// A fork copies the complete visible conversation. Work-log and proposed-plan
+// rows stay bounded so a fork of a very long research thread does not turn the
+// import event into an unbounded payload.
 const FORK_ACTIVITY_LIMIT = 500;
 const FORK_PLAN_LIMIT = 200;
 
@@ -556,17 +555,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
       const cutoffCreatedAt =
         cutoffIndex < source.messages.length ? source.messages[cutoffIndex]?.createdAt : undefined;
-      const copiedMessages = source.messages
-        .slice(0, cutoffIndex)
-        .slice(-FORK_MESSAGE_LIMIT)
-        .map((message) => ({
-          ...message,
-          id: MessageId.make(`fork:${command.threadId}:${message.id}`),
-          streaming: false,
-        }));
-      const copiedActivities = source.activities
-        .filter((activity) => cutoffCreatedAt === undefined || activity.createdAt < cutoffCreatedAt)
-        .slice(-FORK_ACTIVITY_LIMIT)
+      const copiedMessages = source.messages.slice(0, cutoffIndex).map((message) => ({
+        ...message,
+        id: MessageId.make(`fork:${command.threadId}:${message.id}`),
+        streaming: false,
+      }));
+      const cutoffActivities = source.activities.filter(
+        (activity) => cutoffCreatedAt === undefined || activity.createdAt < cutoffCreatedAt,
+      );
+      // Compaction checkpoints are context boundaries, not disposable work-log
+      // rows. Keep every checkpoint inside the fork so a later provider session
+      // can start from the same summary even when the log window moved on.
+      const compactionActivities = cutoffActivities.filter((activity) =>
+        activity.kind.startsWith("context-compaction"),
+      );
+      const recentActivities = cutoffActivities
+        .filter((activity) => !activity.kind.startsWith("context-compaction"))
+        .slice(-FORK_ACTIVITY_LIMIT);
+      const copiedActivities = [...compactionActivities, ...recentActivities]
+        .sort(
+          (left, right) =>
+            left.createdAt.localeCompare(right.createdAt) ||
+            (left.sequence ?? 0) - (right.sequence ?? 0),
+        )
         .map((activity) => ({
           ...activity,
           id: EventId.make(`fork:${command.threadId}:${activity.id}`),
@@ -818,10 +829,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         deletedAt: descriptor.header.lifecycle.deletedAt,
         messages: visibleHistory.messages.map((message) => ({ ...message })),
         proposedPlans: visibleHistory.proposedPlans.map((plan) => ({ ...plan })),
-        activities: visibleHistory.activities.map((activity) => ({
-          ...activity,
-          payload: null,
-        })),
+        activities: visibleHistory.activities.map((activity) => {
+          const { compactionSummary, ...rest } = activity;
+          return {
+            ...rest,
+            payload: compactionSummary ? { status: "completed", summary: compactionSummary } : null,
+          };
+        }),
         checkpoints: [],
         session: null,
       };
@@ -1202,10 +1216,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           deletedAt: imported.history.deletedAt,
           messages: imported.history.messages.map((message) => ({ ...message })),
           proposedPlans: imported.history.proposedPlans.map((plan) => ({ ...plan })),
-          activities: imported.history.activities.map((activity) => ({
-            ...activity,
-            payload: null,
-          })),
+          activities: imported.history.activities.map((activity) => {
+            const { compactionSummary, ...rest } = activity;
+            return {
+              ...rest,
+              payload: compactionSummary
+                ? { status: "completed", summary: compactionSummary }
+                : null,
+            };
+          }),
           checkpoints: [],
           session: null,
         };

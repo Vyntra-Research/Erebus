@@ -1790,6 +1790,13 @@ export const make = Effect.gen(function* () {
             turnId: activity.turnId,
             sequence: activity.sequence ?? null,
             createdAt: activity.createdAt,
+            ...(activity.kind === "context-compaction" &&
+            activity.payload !== null &&
+            typeof activity.payload === "object" &&
+            "summary" in activity.payload &&
+            typeof activity.payload.summary === "string"
+              ? { compactionSummary: activity.payload.summary }
+              : {}),
           })),
         }),
       );

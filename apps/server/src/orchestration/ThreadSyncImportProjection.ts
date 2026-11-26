@@ -541,6 +541,9 @@ export const prepareThreadSyncImportStage = Effect.fn("prepareThreadSyncImportSt
             turnId: row.hasValidTurn === 1 ? record.value.turnId : null,
             ...(record.value.sequence === null ? {} : { sequence: record.value.sequence }),
             createdAt: record.value.createdAt,
+            ...(record.value.compactionSummary !== undefined
+              ? { compactionSummary: record.value.compactionSummary }
+              : {}),
           });
           activityBytes += record.value.summary.sizeBytes;
         }

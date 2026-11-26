@@ -109,6 +109,8 @@ export const ThreadSyncActivity = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   sequence: Schema.NullOr(NonNegativeInt),
   createdAt: IsoDateTime,
+  /** Context compaction summary, when the source activity was a checkpoint. */
+  compactionSummary: Schema.optional(TrimmedNonEmptyString),
 });
 export type ThreadSyncActivity = typeof ThreadSyncActivity.Type;
 

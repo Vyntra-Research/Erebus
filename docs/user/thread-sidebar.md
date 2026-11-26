@@ -16,7 +16,7 @@ Pin a thread to keep it above other work. Drag pinned threads to change their or
 
 ## Fork a thread
 
-Use **Fork thread** in a thread's context menu to copy its conversation and work history into a new thread. The fork keeps the project, model, runtime mode, and workspace, but starts with no provider session or checkpoints. The original thread is unchanged. Fork a settled thread when you want to branch the conversation without editing the original.
+Use **Fork thread** in a thread's context menu to copy its complete conversation and recent work history into a new thread. The fork keeps the project, model, runtime mode, and workspace, but starts with no provider session or checkpoints. On the first request in the fork, Erebus rebuilds the provider context from the last recorded context compaction: the compaction summary plus the conversation after it. If no compaction was recorded, it uses the full copied transcript. The original thread is unchanged. Fork a settled thread when you want to branch the conversation without editing the original.
 
 ## Co-agent threads
 

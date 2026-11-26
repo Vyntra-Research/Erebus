@@ -17,6 +17,7 @@ import { beforeEach } from "vite-plus/test";
 
 import {
   EnvironmentId,
+  MessageId,
   OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -83,6 +84,12 @@ const runtimeMock = {
     sessionDirectoryById: new Map<string, string>(),
     sessionUpdateCalls: [] as Array<{ sessionID: string; permission: unknown }>,
     forkCalls: [] as Array<{ sessionID: string; directory?: string }>,
+    importCalls: [] as Array<{
+      sessionID: string;
+      directory: string;
+      messages: ReadonlyArray<unknown>;
+      compaction?: { summary: string; createdAt: string };
+    }>,
     permissionReplyCalls: [] as Array<Record<string, unknown>>,
     questionReplyCalls: [] as Array<Record<string, unknown>>,
   },
@@ -112,6 +119,7 @@ const runtimeMock = {
     this.state.sessionDirectoryById.clear();
     this.state.sessionUpdateCalls.length = 0;
     this.state.forkCalls.length = 0;
+    this.state.importCalls.length = 0;
     this.state.permissionReplyCalls.length = 0;
     this.state.questionReplyCalls.length = 0;
   },
@@ -197,6 +205,20 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             runtimeMock.state.sessionDirectoryById.set(forkedId, directory);
           }
           return { data: { id: forkedId, ...(directory ? { directory } : {}) } };
+        },
+        importSession: async (input: {
+          sessionID: string;
+          directory: string;
+          messages: ReadonlyArray<unknown>;
+          compaction?: { summary: string; createdAt: string };
+        }) => {
+          runtimeMock.state.importCalls.push({
+            sessionID: input.sessionID,
+            directory: input.directory,
+            messages: input.messages,
+            ...(input.compaction ? { compaction: input.compaction } : {}),
+          });
+          return { data: { id: input.sessionID, directory: input.directory } };
         },
         abort: async ({ sessionID }: { sessionID: string }) => {
           runtimeMock.state.abortCalls.push(sessionID);
@@ -388,6 +410,57 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.deepEqual(session.resumeCursor, {
         schemaVersion: 1,
         sessionId: "http://127.0.0.1:9999/session",
+      });
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("imports Erebus history natively instead of creating an empty session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-import");
+      const history = [
+        {
+          id: MessageId.make("user-1"),
+          role: "user" as const,
+          text: "hello",
+          createdAt: "2026-11-24T22:27:13.682Z",
+        },
+        {
+          id: MessageId.make("assistant:msg_1:text:0"),
+          role: "assistant" as const,
+          text: "hi",
+          createdAt: "2026-11-24T22:27:14.000Z",
+        },
+      ];
+
+      const session = yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        cwd: "C:\\workspace",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode-go/deepseek-v4.1-flash",
+        ),
+        history,
+        compaction: {
+          summary: "earlier summary",
+          createdAt: "2026-11-24T22:27:00.000Z",
+        },
+      });
+
+      NodeAssert.equal(runtimeMock.state.importCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.importCalls[0]?.messages.length, 2);
+      NodeAssert.deepEqual(runtimeMock.state.importCalls[0]?.compaction, {
+        summary: "earlier summary",
+        createdAt: "2026-11-24T22:27:00.000Z",
+      });
+      NodeAssert.deepEqual(runtimeMock.state.sessionCreateInputs, []);
+      NodeAssert.deepEqual(session.resumeCursor, {
+        schemaVersion: 1,
+        sessionId: runtimeMock.state.importCalls[0]?.sessionID,
       });
 
       yield* adapter.stopSession(threadId);

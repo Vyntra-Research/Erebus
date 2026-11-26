@@ -98,6 +98,7 @@ const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY = 10_000;
 const TASK_DESCRIPTION_BY_TASK_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+const COMPACTION_SUMMARY_DETAIL_LIMIT = 64_000;
 const RUNTIME_THREAD_WINDOW_USER_TURNS = 4;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
@@ -122,6 +123,23 @@ function toTurnId(value: TurnId | string | undefined): TurnId | undefined {
 
 function toApprovalRequestId(value: string | undefined): ApprovalRequestId | undefined {
   return value === undefined ? undefined : ApprovalRequestId.make(value);
+}
+
+function readCompactionSummary(data: unknown): string | undefined {
+  if (!data || typeof data !== "object") {
+    return undefined;
+  }
+  const text = "text" in data ? data.text : undefined;
+  if (typeof text !== "string") {
+    return undefined;
+  }
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  return trimmed.length > COMPACTION_SUMMARY_DETAIL_LIMIT
+    ? `${trimmed.slice(0, COMPACTION_SUMMARY_DETAIL_LIMIT)}…`
+    : trimmed;
 }
 
 function sameId(left: string | null | undefined, right: string | null | undefined): boolean {
@@ -839,6 +857,7 @@ export function runtimeEventToActivities(
 
     case "item.completed": {
       if (event.payload.itemType === "context_compaction") {
+        const summary = readCompactionSummary(event.payload.data);
         return [
           {
             id: event.eventId,
@@ -849,6 +868,7 @@ export function runtimeEventToActivities(
             payload: {
               status: "completed",
               ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+              ...(summary !== undefined ? { summary } : {}),
             },
             turnId: toTurnId(event.turnId) ?? null,
             ...maybeSequence,

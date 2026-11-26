@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   normalizeOpenCodeApiUrl,
   resolveOpenCodeFormOptionValue,
+  toOpenCodeImportMessages,
   translateEvents,
   waitForOpenCodePluginStartup,
 } from "./opencodeClient.ts";
@@ -98,5 +99,54 @@ describe("OpenCode V2 client", () => {
         },
       },
     ]);
+  });
+
+  it("maps Erebus history to native OpenCode import messages", () => {
+    const messages = toOpenCodeImportMessages({
+      sessionID: "ses_test",
+      agent: "build",
+      model: { providerID: "opencode-go", modelID: "deepseek-v4.1-flash" },
+      compaction: {
+        summary: "earlier summary",
+        createdAt: "2026-11-24T22:27:00.000Z",
+        reason: "auto",
+      },
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          text: "hello",
+          createdAt: "2026-11-24T22:27:13.682Z",
+        },
+        {
+          id: "assistant:msg_abc:text:0",
+          role: "assistant",
+          text: "hi",
+          createdAt: "10/18/2026 01:20:49",
+        },
+        { id: "sys-1", role: "system", text: "note", createdAt: "not-a-date" },
+      ],
+    });
+    expect(messages).toHaveLength(4);
+    expect(messages[0]).toMatchObject({
+      type: "compaction",
+      status: "completed",
+      reason: "auto",
+      summary: "earlier summary",
+    });
+    expect(messages[1]).toMatchObject({ type: "user", text: "hello" });
+    expect(messages[2]).toMatchObject({
+      type: "assistant",
+      agent: "build",
+      content: [{ type: "text", text: "hi" }],
+    });
+    expect(messages[3]).toMatchObject({ type: "synthetic", text: "note" });
+    const created = messages.map(
+      (message) => (message as { time: { created: number } }).time.created,
+    );
+    expect(created[0]).toBeLessThan(created[1]!);
+    expect(created[1]).toBeLessThan(created[2]!);
+    expect(created[2]).toBeLessThan(created[3]!);
+    expect(new Set(messages.map((message) => (message as { id: string }).id)).size).toBe(4);
   });
 });

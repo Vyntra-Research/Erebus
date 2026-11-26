@@ -8,7 +8,7 @@ Current Erebus releases support Codex and OpenCode. Both implement the same prov
 
 [`ProviderInstanceRegistry`][instances] owns configured provider instances. [`ProviderAdapterRegistry`][registry] resolves an instance to its live adapter. [`ProviderService`][service] routes task and turn operations by thread, so orchestration code does not need to know which driver serves a request.
 
-Codex starts an app-server with an isolated Erebus profile. OpenCode starts the installed CLI or connects to a configured server. A resumed native session omits turns already held by that runtime. A new provider session receives a bounded continuation seed instead of the full transcript.
+Codex starts an app-server with an isolated Erebus profile. OpenCode starts the installed CLI or connects to a configured server. A resumed native session omits turns already held by that runtime. When a fresh session needs an existing Erebus conversation, Erebus starts from the latest recorded context compaction: an adapter that supports native history import materializes the compaction summary plus the messages after it (OpenCode imports a native compaction message); providers without that primitive receive the same summary and tail as a bounded continuation seed. Without a recorded compaction, the fresh session receives the full transcript or the bounded tail as a fallback.
 
 Erebus keeps the durable thread, workspace, checkpoints, and normalized event stream outside either provider. This lets the user change provider for a later request without replacing the thread.
 

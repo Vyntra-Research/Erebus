@@ -10,7 +10,7 @@ Each prompt reaches the provider with a local send timestamp: weekday, date, tim
 
 ## Editing a message
 
-Hover a user message and choose **Edit message**. Saving creates a fork of the conversation at that point and sends the edited message in the new thread; the original thread stays unchanged. The fork copies the visible conversation and work history, not the provider session or checkpoints.
+Hover a user message and choose **Edit message**. Saving creates a fork of the conversation at that point and sends the edited message in the new thread; the original thread stays unchanged. The fork copies the complete conversation before the edited message and the recent work history, not the provider session or checkpoints. Its first request rebuilds the provider context from the last recorded context compaction, falling back to the copied transcript when none exists.
 
 ## Commands and skills
 

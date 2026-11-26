@@ -159,6 +159,15 @@ function importCommand(
               turnId,
               createdAt: now,
             },
+            {
+              id: EventId.make("activity-compaction"),
+              tone: "info" as const,
+              kind: "context-compaction",
+              summary: "Context compacted",
+              compactionSummary: "Earlier portable context.",
+              turnId: null,
+              createdAt: now,
+            },
           ],
           turns: [
             {
@@ -980,6 +989,14 @@ it.layer(NodeServices.layer)("thread sync import decider", (it) => {
       expect(forkEvent.payload.thread.messages).toHaveLength(2);
       expect(forkEvent.payload.thread.messages[0]?.id).not.toBe(userMessageId);
       expect(forkEvent.payload.thread.session).toBeNull();
+      expect(forkEvent.payload.thread.activities).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "context-compaction",
+            payload: { status: "completed", summary: "Earlier portable context." },
+          }),
+        ]),
+      );
 
       const projected = yield* projectEvent(readModel, {
         ...forkEvent,
