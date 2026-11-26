@@ -118,6 +118,30 @@ const attachToPage = async (
   return { targetId: target.targetId, sessionId: attached.sessionId };
 };
 
+export function previewSessionCookieToCdpCookie(
+  cookie: PreviewBrowserSession["cookies"][number],
+): Record<string, unknown> {
+  const host = cookie.domain.replace(/^\./, "");
+  const path = cookie.path.startsWith("/") ? cookie.path : `/${cookie.path}`;
+  // The extension export marks a host-only cookie by omitting the leading
+  // dot. A CDP cookie with an explicit domain becomes a domain cookie, and
+  // Chromium rejects `__Host-` cookies that carry a Domain attribute. Use the
+  // URL form for host-only cookies so the prefix stays valid.
+  const scope = cookie.domain.startsWith(".")
+    ? { domain: cookie.domain }
+    : { url: `${cookie.secure === false ? "http" : "https"}://${host}${path}` };
+  return {
+    name: cookie.name,
+    value: cookie.value,
+    ...scope,
+    path,
+    secure: cookie.secure ?? false,
+    httpOnly: cookie.httpOnly ?? false,
+    ...(cookie.expires === undefined ? {} : { expires: cookie.expires }),
+    ...(cookie.sameSite === undefined ? {} : { sameSite: cookie.sameSite }),
+  };
+}
+
 export async function importSessionIntoDesktopBrowser(
   cdpPort: number,
   session: PreviewBrowserSession,
@@ -138,16 +162,7 @@ export async function importSessionIntoDesktopBrowser(
         {
           cookies: session.cookies
             .filter((cookie) => cookie.domain.length > 0)
-            .map((cookie) => ({
-              name: cookie.name,
-              value: cookie.value,
-              domain: cookie.domain,
-              path: cookie.path,
-              secure: cookie.secure ?? false,
-              httpOnly: cookie.httpOnly ?? false,
-              ...(cookie.expires === undefined ? {} : { expires: cookie.expires }),
-              ...(cookie.sameSite === undefined ? {} : { sameSite: cookie.sameSite }),
-            })),
+            .map(previewSessionCookieToCdpCookie),
         },
         sessionId,
       );
