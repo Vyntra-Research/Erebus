@@ -1,7 +1,10 @@
 import { assert, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
 
-import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
+import {
+  EREBUS_RESEARCH_BASE_CONTRACT,
+  EREBUS_RESEARCH_BASE_CONTRACT_VERSION,
+} from "./researchBaseContract.ts";
 import {
   buildResearchEvaluatorModelSelection,
   JUDGE_POLICY,
@@ -19,15 +22,21 @@ import {
 } from "./researchPrincipalInstructions.ts";
 
 it("keeps the durable heuristics in principal and Judge roles", () => {
+  assert.equal(EREBUS_RESEARCH_BASE_CONTRACT_VERSION, 10);
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Post-AI Blind-Spot Heuristics/);
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /A limit on one producer/);
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Reopen a conclusion/);
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Connect complementary evidence/);
   assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Promotion gate/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /Impact and ROI/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /A Judge acceptance is a validity verdict/);
+  assert.match(EREBUS_RESEARCH_BASE_CONTRACT, /phishing/);
   assert.include(EREBUS_PRINCIPAL_INSTRUCTIONS, EREBUS_RESEARCH_BASE_CONTRACT);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /Argos is the default durable memory/);
   assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /Finding promotion gate/);
+  assert.match(EREBUS_PRINCIPAL_INSTRUCTIONS, /impact ceiling and why the program pays/);
   assert.include(JUDGE_POLICY, EREBUS_RESEARCH_BASE_CONTRACT);
+  assert.match(JUDGE_POLICY, /Practical impact means a target-owned boundary crossing/);
 });
 
 it("keeps Judge independent, artifact-bounded, and campaign-free", () => {
@@ -43,7 +52,7 @@ it("keeps Judge independent, artifact-bounded, and campaign-free", () => {
 });
 
 it("records the campaign-free policy revision and pinned evaluator", () => {
-  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 25);
+  assert.equal(EREBUS_PRINCIPAL_POLICY_VERSION, 26);
   assert.include(
     RESEARCH_INTERNAL_POLICY.principalInstructions,
     EREBUS_PRINCIPAL_INSTRUCTIONS.trim(),
@@ -52,8 +61,8 @@ it("records the campaign-free policy revision and pinned evaluator", () => {
     RESEARCH_INTERNAL_POLICY.principalInstructions,
     /`mcp_fallback`[\s\S]*instead of native `research\.\*`/,
   );
-  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 26);
-  assert.equal(RESEARCH_INTERNAL_POLICY.version, 26);
+  assert.equal(RESEARCH_SUPERVISOR_POLICY_VERSION, 27);
+  assert.equal(RESEARCH_INTERNAL_POLICY.version, 27);
   assert.equal(RESEARCH_JUDGE_REVIEW_BUDGET_SECONDS, 600);
   assert.equal(RESEARCH_JUDGE_OUTPUT_RESERVE_SECONDS, 60);
   assert.match(RESEARCH_INTERNAL_POLICY.digest, /^sha256:[a-f0-9]{64}$/);

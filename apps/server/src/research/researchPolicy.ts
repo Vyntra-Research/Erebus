@@ -9,7 +9,7 @@ import {
 } from "./researchPrincipalInstructions.ts";
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const RESEARCH_SUPERVISOR_POLICY_VERSION = 26;
+export const RESEARCH_SUPERVISOR_POLICY_VERSION = 27;
 export const RESEARCH_EVALUATOR_MODEL = DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorModel;
 export const RESEARCH_EVALUATOR_REASONING_EFFORT =
   DEFAULT_SERVER_SETTINGS.researchSupervision.evaluatorReasoningEffort;
@@ -129,6 +129,15 @@ Decision rules:
 - Require natural product states and realistic attacker control. Reject lab
   assistance, undocumented target assumptions, weak configuration, insider or
   high-privilege substitution, and chains assembled only to create impact.
+- Practical impact means a target-owned boundary crossing with a real outcome,
+  not user deception, a self-only effect, or a best-practice miss. Phishing or
+  credential capture on an attacker-controlled lookalike origin, clickjacking
+  without a sensitive action, missing hardening alone, and theoretical chains
+  do not pass the impact gate unless the artifacts prove same-origin access,
+  account takeover, target data, or a concrete state change.
+- A low-ceiling result can be technically valid and still not be a paid finding.
+  Name the missing paid impact instead of promoting it because it is easy to
+  reproduce.
 - A CVE, advisory, issue, changelog entry, or public patch is intel, not duplicate
   proof by itself. Match the root cause, reachable mechanism, security boundary,
   affected version or deployment, and fix boundary.
