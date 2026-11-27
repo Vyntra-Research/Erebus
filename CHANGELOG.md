@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-beta.29 - 2026-11-27
+
+### Fixed
+
+- Start Chromium in a desktop microVM with a canonical `--proxy-server` value. URL serialization appended a trailing slash, which some Chromium builds rejected with `ERR_NO_SUPPORTED_PROXIES`; the capture proxy itself was healthy. Loopback proxies still rewrite to the microVM host gateway.
+
 ## 2.0.0-beta.28 - 2026-11-27
 
 ### Changed
