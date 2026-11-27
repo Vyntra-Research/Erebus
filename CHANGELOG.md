@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-beta.28 - 2026-11-27
+
+### Changed
+
+- Strengthen the research operating order and research contract with an impact/ROI gate. Agents must name the paid impact and boundary before probing or submitting; self-only effects, phishing or credential capture on attacker-controlled origins, clickjacking without a sensitive action, missing hardening, and theoretical chains are candidates or negatives, not findings.
+- A Judge acceptance is a validity verdict, not a bounty verdict. The Judge now rejects low-ceiling practical impact even when the evidence is technically valid, and co-agents return those candidates with the missing paid impact named instead of polishing them.
+
 ## 2.0.0-beta.27 - 2026-11-26
 
 ### Added
