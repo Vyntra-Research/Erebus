@@ -287,7 +287,7 @@ def browser_start(payload):
         "--window-size=1280,800",
     ]
     if isinstance(proxy_url, str) and proxy_url.strip():
-        args.append(f"--proxy-server={proxy_url.strip()}")
+        args.append(f"--proxy-server={proxy_url.strip().rstrip('/')}")
         args.append("--ignore-certificate-errors")
     url = str(payload.get("url", "about:blank")).strip() or "about:blank"
     args.append(url)

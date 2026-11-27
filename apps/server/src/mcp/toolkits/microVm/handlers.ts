@@ -17,6 +17,7 @@ import {
   type MicroVmExecInput,
   type MicroVmJobInput,
 } from "./tools.ts";
+import { normalizeMicroVmProxyUrl } from "./proxyUrl.ts";
 
 const probeDesktop = (
   viewerUrl: string,
@@ -235,24 +236,7 @@ const handlers = {
     const runtime = yield* MicroVmRuntime.make(config.stateDir);
     yield* runtime.ensureDesktop(input.name);
     const proxyUrl =
-      input.proxyUrl === undefined
-        ? undefined
-        : (() => {
-            try {
-              const url = new URL(input.proxyUrl);
-              if (
-                url.hostname === "127.0.0.1" ||
-                url.hostname === "localhost" ||
-                url.hostname === "[::1]" ||
-                url.hostname === "::1"
-              ) {
-                url.hostname = "host.microsandbox.internal";
-              }
-              return url.toString();
-            } catch {
-              return input.proxyUrl;
-            }
-          })();
+      input.proxyUrl === undefined ? undefined : normalizeMicroVmProxyUrl(input.proxyUrl);
     const result = yield* runtime.desktopBrowserStart(input.name, {
       ...(input.url === undefined ? {} : { url: input.url }),
       ...(proxyUrl === undefined ? {} : { proxyUrl }),
