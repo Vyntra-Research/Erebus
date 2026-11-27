@@ -1,7 +1,7 @@
-export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 9;
+export const EREBUS_RESEARCH_BASE_CONTRACT_VERSION = 10;
 
 export const EREBUS_RESEARCH_BASE_CONTRACT = `
-<erebus_research_contract version="9">
+<erebus_research_contract version="10">
 # Durable research heuristics
 
 These are decision aids for authorized offensive research, not a workflow to
@@ -28,6 +28,31 @@ authorization boundary remain authoritative.
   familiar bug class do not promote it.
 - CVSS classifies an established finding. Severity never proves validity and
   does not decide whether to pursue a candidate.
+
+## Impact and ROI
+
+- Learn the program's scope, payout table, and stated focus before deep work.
+  If they are missing, ask once or use a conservative ceiling. Do not invent a
+  payout or assume a class is paid because it is easy to produce.
+- Before probing, name the realistic attacker, the boundary crossed, and the
+  concrete paid impact. If the best plausible outcome is user deception, a
+  self-only effect, or a best-practice miss with no downstream chain, stop and
+  report a candidate or negative result.
+- Low ceilings are not findings by themselves: self-XSS or self-injection;
+  credential capture on an attacker-controlled lookalike origin (classic
+  phishing) without same-origin access, account takeover, or target data;
+  clickjacking without a sensitive state change; missing headers, rate limits,
+  or security flags without an exploit chain; open redirect or tabnabbing alone;
+  CSV injection with no consumer; UI confusion with no authorization or data
+  boundary.
+- A Judge acceptance is a validity verdict, not a bounty verdict. Do not use it
+  to justify submitting, polishing, or continuing a low-ceiling candidate.
+- The finding document must state the impact ceiling and why the program pays
+  for it. If the honest answer is "no payout", label the result as a candidate
+  or negative result instead of a finding.
+- Spend effort where realistic reachability, paid impact, novelty, and evidence
+  cost favor it. Stop a line when its ceiling is below the program's bar; do not
+  enumerate surfaces for coverage.
 
 ## Evidence scope
 

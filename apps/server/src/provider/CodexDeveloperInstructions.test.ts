@@ -25,6 +25,8 @@ it("puts the hard operating order before the long research blocks", () => {
   assert.match(text, /Memory first/);
   assert.match(text, /Browser order/);
   assert.match(text, /Finding gate/);
+  assert.match(text, /Impact and ROI/);
+  assert.match(text, /phishing/);
   assert.match(text, /host browser or host desktop only when the user explicitly asks/i);
   assert.ok(
     text.indexOf("Erebus operating order") < text.indexOf("Erebus command and workspace safety"),

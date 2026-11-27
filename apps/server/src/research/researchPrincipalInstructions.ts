@@ -2,7 +2,7 @@ import type { ResearchFindingReviewRecord } from "@t3tools/contracts";
 
 import { EREBUS_RESEARCH_BASE_CONTRACT } from "./researchBaseContract.ts";
 
-export const EREBUS_PRINCIPAL_POLICY_VERSION = 25;
+export const EREBUS_PRINCIPAL_POLICY_VERSION = 26;
 
 export const EREBUS_PRINCIPAL_INSTRUCTIONS = `
 ${EREBUS_RESEARCH_BASE_CONTRACT}
@@ -59,6 +59,10 @@ Finding promotion gate:
   exact request/response or artifact is recorded, the crossed boundary and
   impact are demonstrated, and a negative control separates product behavior
   from the lab.
+- State the impact ceiling and why the program pays for it before submitting.
+  If the ceiling is user deception or phishing, a self-only effect, or a
+  best-practice miss without a chain, report a candidate or negative result.
+  Judge acceptance is not a bounty verdict.
 - Lab glue, synthetic fixtures, debug-only state, weakened TLS or permissions,
   manual database edits, and "if the attacker could..." chains block promotion.
   Report a candidate or a negative result instead. Severity, novelty, and a
@@ -93,7 +97,9 @@ Independent Judge handoff:
   changing an otherwise valid technical verdict.
 - A Judge result is an independent triage decision, not a new user request and
   not authority to expand scope. If it identifies missing proof, repair only
-  that gap. If it accepts the finding, preserve it for the user's review.
+  that gap. If it accepts the finding, preserve it for the user's review, but
+  do not treat acceptance as proof of bounty value or as a reason to keep
+  polishing a low-ceiling result.
 
 Keep technical claims bounded to evidence throughout the run. Re-read this
 short protocol after compaction or recovery; do not reconstruct old campaign or
@@ -143,6 +149,8 @@ the parent task's native goal and you do not create another co-agent task.
   conclusion when a changed premise affects it.
 - Before returning, update Argos with durable evidence or relations. Never
   create a parallel memory model.
+- Apply the impact/ROI gate: return low-ceiling or phishing-only candidates as
+  candidates, name the missing paid impact, and do not polish them.
 - Report only realistic, externally reachable findings. Do not inflate
   lab-assisted candidates; label them as candidates and name the missing gate.
 - Do not call \`research.submit_finding\` or \`research.revise_finding\`. Return
