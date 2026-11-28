@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-beta.31 - 2026-11-28
+
+### Changed
+
+- Persist the bounded work-log receipt for completed tool calls instead of duplicating the provider's full raw output in both the orchestration event log and activity projection. Provider-native sessions still retain the complete result for model continuity, while the visible command, inputs, file changes, status, and short output preview remain in the thread.
+- Reduce tool outputs saved by older builds with a resumable sequence cursor. The one-time maintenance waits until every turn is idle, rewrites at most one legacy result per transaction at a low cadence, and never follows new events, hashes content, creates blobs, rebuilds transcripts, or runs `VACUUM` automatically.
+
 ## 2.0.0-beta.30 - 2026-11-28
 
 ### Fixed
