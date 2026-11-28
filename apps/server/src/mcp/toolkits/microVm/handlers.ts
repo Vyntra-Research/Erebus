@@ -8,8 +8,12 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as MicroVmRuntime from "../../../microVm/MicroVmRuntime.ts";
 import * as PreviewManager from "../../../preview/Manager.ts";
-import { FILL_PREVIEW_VIEWPORT, MicroVmError } from "@t3tools/contracts";
-import type { PreviewAutomationStatus, PreviewBrowserSession } from "@t3tools/contracts";
+import { FILL_PREVIEW_VIEWPORT, MicroVmError, ThreadId } from "@t3tools/contracts";
+import type {
+  PreviewAutomationStatus,
+  PreviewBrowserSession,
+  PreviewSessionSnapshot,
+} from "@t3tools/contracts";
 import {
   MicroVmToolkit,
   type MicroVmCopyInput,
@@ -44,6 +48,39 @@ const probeDesktop = (
     request.once("error", () => finish({ ready: false, statusCode: null }));
   });
 
+const previewSessionUrl = (session: PreviewSessionSnapshot): string | null =>
+  session.navStatus._tag === "Idle" ? null : session.navStatus.url;
+
+const desktopPreviewThreadIds = (
+  invocationThreadId: ThreadId,
+  ownerThreadId: string | null,
+): ReadonlySet<ThreadId> =>
+  new Set(
+    ownerThreadId === null
+      ? [invocationThreadId]
+      : [invocationThreadId, ThreadId.make(ownerThreadId)],
+  );
+
+const closeDesktopPreviewSessions = Effect.fn("MicroVmToolkit.closeDesktopPreviewSessions")(
+  function* (viewerUrl: string, threadIds: ReadonlySet<ThreadId>) {
+    const previewManager = yield* Effect.serviceOption(PreviewManager.PreviewManager);
+    if (Option.isNone(previewManager)) return;
+
+    yield* Effect.forEach(
+      threadIds,
+      Effect.fn("MicroVmToolkit.closeDesktopPreviewSessionsForThread")(function* (threadId) {
+        const listed = yield* previewManager.value.list({ threadId });
+        yield* Effect.forEach(
+          listed.sessions.filter((session) => previewSessionUrl(session) === viewerUrl),
+          (session) => previewManager.value.close({ threadId, tabId: session.tabId }),
+          { discard: true },
+        );
+      }),
+      { discard: true },
+    );
+  },
+);
+
 const handlers = {
   microvm_list: Effect.fn("MicroVmToolkit.list")(function* () {
     yield* McpInvocationContext.McpInvocationContext;
@@ -61,10 +98,19 @@ const handlers = {
     });
   }),
   microvm_control: Effect.fn("MicroVmToolkit.control")(function* (input) {
-    yield* McpInvocationContext.McpInvocationContext;
+    const invocation = yield* McpInvocationContext.McpInvocationContext;
     const config = yield* ServerConfig.ServerConfig;
     const runtime = yield* MicroVmRuntime.make(config.stateDir);
-    return yield* runtime.control(input);
+    const existing =
+      input.action === "stop" || input.action === "kill" ? yield* runtime.get(input.name) : null;
+    const result = yield* runtime.control(input);
+    if (existing?.desktop) {
+      yield* closeDesktopPreviewSessions(
+        existing.desktop.viewerUrl,
+        desktopPreviewThreadIds(invocation.threadId, existing.threadId),
+      ).pipe(Effect.ignore);
+    }
+    return result;
   }),
   microvm_modify: Effect.fn("MicroVmToolkit.modify")(function* (input) {
     yield* McpInvocationContext.McpInvocationContext;
@@ -146,10 +192,41 @@ const handlers = {
     const previewManager = yield* Effect.serviceOption(PreviewManager.PreviewManager);
     if (Option.isSome(previewManager)) {
       const opened = yield* Effect.result(
-        previewManager.value.open({
-          threadId: invocation.threadId,
-          url: desktop.viewerUrl,
-          viewport: FILL_PREVIEW_VIEWPORT,
+        Effect.gen(function* () {
+          const listed = yield* previewManager.value.list({ threadId: invocation.threadId });
+          const matching = listed.sessions.filter(
+            (session) => previewSessionUrl(session) === desktop.viewerUrl,
+          );
+          const reusable = matching.at(-1);
+
+          yield* Effect.forEach(
+            reusable ? matching.slice(0, -1) : matching,
+            (session) =>
+              previewManager.value.close({
+                threadId: invocation.threadId,
+                tabId: session.tabId,
+              }),
+            { discard: true },
+          );
+
+          if (!reusable) {
+            return yield* previewManager.value.open({
+              threadId: invocation.threadId,
+              url: desktop.viewerUrl,
+              viewport: FILL_PREVIEW_VIEWPORT,
+            });
+          }
+
+          yield* previewManager.value.navigate({
+            threadId: invocation.threadId,
+            tabId: reusable.tabId,
+            url: desktop.viewerUrl,
+          });
+          return yield* previewManager.value.resize({
+            threadId: invocation.threadId,
+            tabId: reusable.tabId,
+            viewport: FILL_PREVIEW_VIEWPORT,
+          });
         }),
       );
       if (opened._tag === "Success") {
@@ -204,7 +281,7 @@ const handlers = {
           url: desktop.viewerUrl,
           open: true,
           show: true,
-          reuseExistingTab: false,
+          reuseExistingTab: true,
         },
       })
       .pipe(
@@ -258,10 +335,17 @@ const handlers = {
     return { ok: true };
   }),
   microvm_remove: Effect.fn("MicroVmToolkit.remove")(function* (input) {
-    yield* McpInvocationContext.McpInvocationContext;
+    const invocation = yield* McpInvocationContext.McpInvocationContext;
     const config = yield* ServerConfig.ServerConfig;
     const runtime = yield* MicroVmRuntime.make(config.stateDir);
+    const existing = yield* runtime.get(input.name);
     yield* runtime.remove(input);
+    if (existing.desktop) {
+      yield* closeDesktopPreviewSessions(
+        existing.desktop.viewerUrl,
+        desktopPreviewThreadIds(invocation.threadId, existing.threadId),
+      ).pipe(Effect.ignore);
+    }
     return { removed: true };
   }),
 } satisfies Parameters<typeof MicroVmToolkit.toLayer>[0];

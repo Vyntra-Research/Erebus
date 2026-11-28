@@ -44,6 +44,7 @@ import {
 import { resolveBrowserRecordingStopTarget } from "~/browser/browserRecordingScope";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { browserDefaultOpenViewport, resolveBrowserDefaults } from "~/browser/browserDefaults";
+import { acquireBrowserAutomationActivity } from "~/browser/browserAutomationActivityStore";
 import { runBrowserViewportMutation } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { isElectron } from "~/env";
@@ -514,6 +515,16 @@ function PreviewAutomationHost(props: {
         threadId: request.threadId,
       };
       let tabId = request.tabId ?? null;
+      const automationActivity: {
+        runtimeTabId: string | null;
+        release: (() => void) | null;
+      } = { runtimeTabId: null, release: null };
+      const activateAutomationTab = (runtimeTabId: string) => {
+        if (automationActivity.runtimeTabId === runtimeTabId) return;
+        automationActivity.release?.();
+        automationActivity.runtimeTabId = runtimeTabId;
+        automationActivity.release = acquireBrowserAutomationActivity(runtimeTabId);
+      };
       try {
         const externalTarget = parseExtensionAutomationTabId(tabId);
         const openInput =
@@ -611,6 +622,9 @@ function PreviewAutomationHost(props: {
           state = readThreadPreviewState(threadRef);
         }
         tabId = request.tabId ?? state.snapshot?.tabId ?? null;
+        if (tabId) {
+          activateAutomationTab(previewRuntimeTabId(threadRef, state.serverEpoch, tabId));
+        }
         const unavailableTarget = {
           requestId: request.requestId,
           operation: request.operation,
@@ -627,6 +641,7 @@ function PreviewAutomationHost(props: {
           }
           const readyState = readThreadPreviewState(threadRef);
           const runtimeTabId = previewRuntimeTabId(threadRef, readyState.serverEpoch, readyTabId);
+          activateAutomationTab(runtimeTabId);
           await waitForDesktopOverlay(
             threadRef,
             request.requestId,
@@ -859,6 +874,7 @@ function PreviewAutomationHost(props: {
               readThreadPreviewState(threadRef).serverEpoch,
               activeTabId,
             );
+            activateAutomationTab(activeRuntimeTabId);
             if (activeSnapshot) {
               const defaultViewport = previewAutomationDefaultViewport(
                 reusedExistingTab,
@@ -1174,6 +1190,8 @@ function PreviewAutomationHost(props: {
           tabId,
           cause,
         });
+      } finally {
+        automationActivity.release?.();
       }
     },
     [

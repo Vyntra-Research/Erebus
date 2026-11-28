@@ -13,18 +13,19 @@ export interface HostedBrowserWebviewWrapperStyle {
   readonly zIndex: number;
   readonly pointerEvents: "auto" | "none";
   readonly borderRadius?: number;
-  readonly visibility?: "visible";
+  readonly visibility?: "hidden" | "visible";
 }
 
 export const HIDDEN_BROWSER_WEBVIEW_OFFSET = -100_000;
 
 export function resolveHostedBrowserWebviewWrapperStyle(input: {
   readonly active: boolean;
+  readonly automationActive: boolean;
   readonly cornerRadius?: number;
   readonly rect: BrowserSurfaceRect | null;
   readonly hiddenSize: HostedBrowserWebviewSize;
 }): HostedBrowserWebviewWrapperStyle {
-  const { active, cornerRadius = 0, hiddenSize, rect } = input;
+  const { active, automationActive, cornerRadius = 0, hiddenSize, rect } = input;
   if (active && rect) {
     return {
       left: rect.x,
@@ -44,9 +45,9 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
     height: hiddenSize.height,
     zIndex: -1,
     pointerEvents: "none",
-    // Keep the guest CSS-visible even while physically offscreen. Electron
-    // webviews can keep metadata/status alive under `visibility:hidden` while
-    // CDP Runtime/Input commands stall, which breaks offscreen automation.
-    visibility: "visible",
+    // Hidden guests keep their DOM/webContents state, but stop continuously
+    // feeding Chromium's compositor. Automation temporarily makes the target
+    // paintable offscreen because CDP Runtime/Input can stall while hidden.
+    visibility: automationActive ? "visible" : "hidden",
   };
 }
