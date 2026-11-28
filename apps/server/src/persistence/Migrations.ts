@@ -71,6 +71,7 @@ import Migration0055 from "./Migrations/055_DeletedThreadRetention.ts";
 import Migration0056 from "./Migrations/056_StandaloneCoagents.ts";
 import Migration0057 from "./Migrations/057_StandaloneFindingReviews.ts";
 import Migration0058 from "./Migrations/058_OpenCodeAssistantMessageDeduplication.ts";
+import Migration0059 from "./Migrations/059_ToolOutputRetention.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -141,6 +142,7 @@ export const migrationEntries = [
   [56, "StandaloneCoagents", Migration0056],
   [57, "StandaloneFindingReviews", Migration0057],
   [58, "OpenCodeAssistantMessageDeduplication", Migration0058],
+  [59, "ToolOutputRetention", Migration0059],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

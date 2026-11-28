@@ -76,6 +76,13 @@ Because persistence and projection share a transaction, the read model cannot du
 the event log. On dispatch failure the engine rereads persisted events past the starting sequence and
 reconciles.
 
+Provider-native sessions own complete tool results for model continuity. Erebus converts tool
+activities to the bounded, client-visible receipt in [`ActivityPayloadProjection.ts`][activity-payload]
+before appending the event, so terminal output is not duplicated indefinitely in the event store and
+activity projection. [`ToolOutputRetention.ts`][tool-output-retention] applies the same conversion to
+preexisting rows with a durable sequence cursor. It pauses while any turn is active and rewrites at
+most one legacy result per transaction.
+
 Command and event names live in [`orchestration.ts`][contracts]. Some commands are client
 dispatchable (`thread.create`, `thread.turn.start`, `thread.approval.respond`); others are internal
 and produced only by server-side reactors (`thread.message.assistant.delta`,
@@ -159,3 +166,5 @@ already dispatch.
 [cmd]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
 [checkpoint]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts
 [receipts]: ../../apps/server/src/orchestration/Layers/RuntimeReceiptBus.ts
+[activity-payload]: ../../apps/server/src/orchestration/ActivityPayloadProjection.ts
+[tool-output-retention]: ../../apps/server/src/orchestration/ToolOutputRetention.ts
