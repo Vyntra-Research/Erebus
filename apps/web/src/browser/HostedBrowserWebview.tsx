@@ -12,6 +12,7 @@ import {
   resolveBrowserProfileId,
   useBrowserProfileSelectionStore,
 } from "./browserProfileSelectionStore";
+import { useBrowserAutomationActivityStore } from "./browserAutomationActivityStore";
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
 import {
   browserViewportSettingKey,
@@ -76,6 +77,9 @@ export function HostedBrowserWebview(props: {
         visible: current?.visible ?? false,
       };
     }),
+  );
+  const automationActive = useBrowserAutomationActivityStore(
+    (state) => (state.referencesByTabId[runtimeTabId] ?? 0) > 0,
   );
   usePreviewBridge({ threadRef, tabId, runtimeTabId });
 
@@ -250,6 +254,7 @@ export function HostedBrowserWebview(props: {
 
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({
     active,
+    automationActive,
     cornerRadius: presentation.cornerRadius,
     rect: lastRect,
     hiddenSize,

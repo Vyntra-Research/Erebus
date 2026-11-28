@@ -8,6 +8,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   buildMicroVmModifyOptions,
   materializeWindowlessWindowsExecutable,
+  microVmDesktopViewerUrl,
   resolveMicrosandboxBinaryPaths,
 } from "./MicroVmRuntime.ts";
 
@@ -30,6 +31,14 @@ const crashedVm = {
   updatedAt: null,
   storageBytes: null,
 };
+
+describe("microVmDesktopViewerUrl", () => {
+  it("pins noVNC to the websockify endpoint", () => {
+    expect(microVmDesktopViewerUrl(6080)).toBe(
+      "http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=scale&path=websockify",
+    );
+  });
+});
 
 describe("buildMicroVmModifyOptions", () => {
   it("omits unchanged resources and changes only the requested CPU", () => {

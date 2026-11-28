@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.0-beta.30 - 2026-11-28
+
+### Fixed
+
+- Suspend offscreen Electron preview WebViews until they are presented or targeted by browser automation. Hidden tabs keep their browser state but no longer continuously feed Chromium's compositor and saturate the desktop UI thread.
+- Reuse the existing preview tab when a desktop microVM is opened repeatedly, remove duplicates already attached to that thread, and close its noVNC previews when the VM is stopped, killed, or removed.
+- Pin noVNC viewers to the `websockify` endpoint and repair stale desktop launcher state before relaunching an existing VM. `microvm_desktop restart` now performs a second, non-best-effort desktop launch after the guest returns.
+
 ## 2.0.0-beta.29 - 2026-11-27
 
 ### Fixed
