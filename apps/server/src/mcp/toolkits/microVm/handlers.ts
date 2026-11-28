@@ -167,7 +167,8 @@ const handlers = {
       });
     }
     if (input.action === "restart") {
-      info = yield* runtime.control({ name: input.name, action: "restart" });
+      yield* runtime.control({ name: input.name, action: "restart" });
+      info = yield* runtime.ensureDesktop(input.name);
     } else {
       info = yield* runtime.ensureDesktop(input.name);
     }

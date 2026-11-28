@@ -37,6 +37,53 @@ const DEFAULT_DESKTOP_WIDTH = 1440;
 const DEFAULT_DESKTOP_HEIGHT = 900;
 const DEFAULT_DESKTOP_IMAGE = "debian:bookworm-slim";
 
+export const microVmDesktopViewerUrl = (hostPort: number): string =>
+  `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale&path=websockify`;
+
+const DESKTOP_RECOVERY_SCRIPT = `
+pid_file=/run/erebus-desktop.pid
+[ -f "$pid_file" ] || exit 0
+pid="$(cat "$pid_file" 2>/dev/null || true)"
+case "$pid" in
+  ''|*[!0-9]*) rm -f "$pid_file"; exit 0 ;;
+esac
+if ! kill -0 "$pid" 2>/dev/null; then
+  rm -f "$pid_file"
+  exit 0
+fi
+command_line="$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+case "$command_line" in
+  *erebus-desktop*) exit 0 ;;
+  *websockify*) ;;
+  *) rm -f "$pid_file"; exit 0 ;;
+esac
+[ -x /usr/bin/python3 ] || exit 0
+if python3 - <<'PY'
+import socket
+
+for port in (5901, ${DESKTOP_GUEST_PORT}):
+    with socket.create_connection(("127.0.0.1", port), timeout=0.75):
+        pass
+PY
+then
+  exit 0
+fi
+kill "$pid" 2>/dev/null || true
+x_pid="$(tr -cd '0-9' < /tmp/.X1-lock 2>/dev/null || true)"
+case "$x_pid" in
+  ''|*[!0-9]*) ;;
+  *)
+    if kill -0 "$x_pid" 2>/dev/null; then
+      x_command_line="$(tr '\\0' ' ' < "/proc/$x_pid/cmdline" 2>/dev/null || true)"
+      case "$x_command_line" in
+        *Xtigervnc*) kill "$x_pid" 2>/dev/null || true ;;
+      esac
+    fi
+    ;;
+esac
+rm -f "$pid_file" /tmp/.X1-lock /tmp/.X11-unix/X1
+`;
+
 /**
  * Sandbox handles that keep a local VM resident. Microsandbox's explicit
  * detached mode is broken on the Windows preview (the background boot exits
@@ -195,7 +242,7 @@ const parseDesktopLabel = (value: string | undefined): DesktopLabelState | null 
       height,
       ...(typeof agentPort === "number" ? { agentPort } : {}),
       ...(typeof browserCdpPort === "number" ? { browserCdpPort } : {}),
-      viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
+      viewerUrl: microVmDesktopViewerUrl(hostPort),
     },
     agentToken: typeof record.agentToken === "string" ? record.agentToken : null,
   };
@@ -817,6 +864,9 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
   // operations never call detach(); the registry keeps the handle resident for
   // the server's lifetime.
   const kickDesktop = async (sandbox: Microsandbox.Sandbox): Promise<void> => {
+    await sandbox.execWith("sh", (builder) =>
+      builder.args(["-lc", DESKTOP_RECOVERY_SCRIPT]).timeout(10_000).stdinNull(),
+    );
     await sandbox.execDetached("sh", ["-lc", "exec erebus-desktop"]);
   };
 
@@ -903,7 +953,7 @@ export const make = Effect.fn("MicroVmRuntime.make")(function* (stateDir: string
           height,
           agentPort,
           browserCdpPort,
-          viewerUrl: `http://127.0.0.1:${hostPort}/vnc.html?autoconnect=1&resize=scale`,
+          viewerUrl: microVmDesktopViewerUrl(hostPort),
         };
         agentToken = NodeCrypto.randomUUID();
       } else {
